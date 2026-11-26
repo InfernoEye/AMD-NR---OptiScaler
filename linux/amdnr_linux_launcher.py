@@ -237,6 +237,8 @@ def install(archive: Path, executable: Path, alias: str) -> str:
             if backup.exists():
                 shutil.rmtree(backup)
             raise
+    if alias.lower().endswith(".asi"):
+        return "ASI plugins require a compatible ASI loader in the game prefix (no Wine DLL override)."
     override = alias.rsplit(".", 1)[0].lower()
     return f'WINEDLLOVERRIDES="{override}=n,b" %command%'
 
