@@ -1,0 +1,74 @@
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import unittest
+import zipfile
+
+
+MODULE = Path(__file__).resolve().parents[1] / "amdnr_linux_launcher.py"
+spec = importlib.util.spec_from_file_location("amdnr_linux_launcher", MODULE)
+launcher = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(launcher)
+
+
+class LauncherTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.game = self.root / "Game With Spaces"
+        self.game.mkdir()
+        self.exe = self.game / "Game.exe"
+        self.exe.write_bytes(b"fake game")
+        self.archive = self.root / "release.zip"
+        with zipfile.ZipFile(self.archive, "w") as archive:
+            archive.writestr("release/OptiScaler.dll", b"new proxy")
+            archive.writestr("release/OptiScaler.ini", b"configuration")
+            archive.writestr("release/setup_windows.bat", b"not installed")
+
+    def test_install_uninstall_restores_existing_files(self):
+        proxy = self.game / "dxgi.dll"
+        proxy.write_bytes(b"previous game dll")
+        options = launcher.install(self.archive, self.exe, "dxgi.dll")
+        self.assertIn('WINEDLLOVERRIDES="dxgi=n,b"', options)
+        self.assertEqual(proxy.read_bytes(), b"new proxy")
+        self.assertTrue((self.game / launcher.STATE_NAME).exists())
+        self.assertFalse((self.game / "setup_windows.bat").exists())
+        self.assertEqual(
+            (self.game / "AMDNR_backup/linux-launcher/dxgi.dll").read_bytes(),
+            b"previous game dll"
+        )
+        count, warnings = launcher.uninstall(self.exe)
+        self.assertEqual((count, warnings), (2, []))
+        self.assertEqual(proxy.read_bytes(), b"previous game dll")
+        self.assertFalse((self.game / "OptiScaler.ini").exists())
+
+    def test_modified_files_are_kept(self):
+        launcher.install(self.archive, self.exe, "dxgi.dll")
+        (self.game / "dxgi.dll").write_bytes(b"user changed this")
+        _, warnings = launcher.uninstall(self.exe)
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual((self.game / "dxgi.dll").read_bytes(), b"user changed this")
+        state = json.loads((self.game / launcher.STATE_NAME).read_text())
+        self.assertEqual(len(state["files"]), 1)
+
+    def test_reinstall_is_refused(self):
+        launcher.install(self.archive, self.exe, "dxgi.dll")
+        with self.assertRaisesRegex(ValueError, "already recorded"):
+            launcher.install(self.archive, self.exe, "dxgi.dll")
+
+    def test_archive_path_traversal_is_rejected(self):
+        with zipfile.ZipFile(self.archive, "w") as archive:
+            archive.writestr("../outside/OptiScaler.dll", b"bad")
+        with self.assertRaisesRegex(ValueError, "Unsafe"):
+            launcher.install(self.archive, self.exe, "dxgi.dll")
+        self.assertFalse((self.root / "outside").exists())
+
+    def test_missing_game_executable_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Windows"):
+            launcher.install(self.archive, self.game / "missing.exe", "dxgi.dll")
+
+
+if __name__ == "__main__":
+    unittest.main()
