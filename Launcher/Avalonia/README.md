@@ -8,13 +8,13 @@
 dotnet run --project Launcher/Avalonia/Amdnr.Avalonia.csproj
 ```
 
-Install the **.NET 10 SDK** and **Python 3.10+** first. Check with `dotnet --list-sdks`. The project targets `net10.0`, so an older SDK cannot compile it; a newer SDK may work if it supports targeting .NET 10. Run `dotnet --list-runtimes` to verify that `Microsoft.NETCore.App 10.x` is installed for framework-dependent launching. `dotnet run` automatically selects an appropriate installed SDK; no `global.json` pins a specific patch. The Avalonia UI uses the Linux Python installer as its backend. Run from the repository root, or set `AMDNR_AVALONIA_BACKEND` to an absolute path pointing to `amdnr_linux_launcher.py`.
+Install the **.NET 10 SDK** and **Python 3.10+** first. Check with `dotnet --list-sdks`. The project targets `net10.0`, so an older SDK cannot compile it; a newer SDK may work if it supports targeting .NET 10. Run `dotnet --list-runtimes` to verify that `Microsoft.NETCore.App 10.x` is installed for framework-dependent launching. `dotnet run` automatically selects an appropriate installed SDK; no `global.json` pins a specific patch. The Avalonia UI uses the Linux Python installer as its backend. Run from the repository root, or set `AMDNR_AVALONIA_BACKEND` to an absolute path pointing to `amdnr_launcher.py`.
 
 The Avalonia desktop provides a searchable Steam game library with cached artwork, selected-game details, executable selection, installation-record status, installation/uninstallation with backup restore, Wine DLL override guidance, Doctor preflight checks, and settings.
 
 **Steam cover artwork:** the refresh scan checks Steam's custom `userdata/*/config/grid` covers, standard, nested and content-hash Steam caches, then official Steam CDN/store image metadata when needed. Downloaded images are kept under `${XDG_CACHE_HOME:-~/.cache}/amdnr/steam-artwork`. Set `AMDNR_NO_ARTWORK_DOWNLOAD=1` to disable network artwork fetches. Missing art can be assigned per game using **Change Cover Art** on the game's detail screen; these JPEG/PNG overrides are stored under `${XDG_DATA_HOME:-~/.local/share}/amdnr/artwork` without touching Steam files. Refresh always returns to the game library. Not every Steam title has an official cover. When none is found, the UI generates a readable title-based placeholder rather than a blank or single-letter tile; the artwork report continues to count these as missing real images. The install status is specific to the executable selected and the Linux launcher's own install records, not all third-party AMDNR installs. The Python/Tk implementation below remains as a fallback CLI and UI.
 
-**Parity status:** This is the foundation of an independent native implementation, **not yet a 1:1 visual or functional match** for the Windows WPF launcher. Missing pieces include pixel-perfect styling and branded assets, the full Windows release/build picker and automatic downloads, equivalent diagnostic reporting, full store integrations and persistence, and Windows-only features. The original source-available WPF launcher has restrictive reuse terms; this implementation is written independently.
+**Parity status:** This is the foundation of an independent native implementation, **not yet a 1:1 visual or functional match** for the Windows WPF launcher. Missing pieces include pixel-perfect styling and branded assets, full Windows-equivalent build variants and model/runtime configuration, equivalent diagnostic reporting, full store integrations and persistence, and Windows-only features. The original source-available WPF launcher has restrictive reuse terms; this implementation is written independently.
 
 ---
 # Native Linux launcher (experimental)
@@ -29,6 +29,21 @@ Requirements: Linux, Python **3.10+**, and `python3-tk` for the GUI (on Debian/U
 
 The manager can detect standard Steam libraries (including Flatpak Steam), show installed games, select a game's Windows executable, install files from a **locally downloaded, trusted AMDNR release ZIP**, back up files it replaces, and uninstall while restoring backups. It does **not** download arbitrary runtimes, bypass anti-cheat, or guarantee that the Windows neural runtime will run under Proton.
 
+
+## Browse and download upstream builds
+
+The **Install** page now has a **Load Builds** button that lists versioned, complete AMDNR ZIP release assets from the upstream GitHub repository (`3zwr1/AMD-NR---OptiScaler`). Select the version and choose **Download Selected ZIP**. Downloading is explicitly user initiated and does not install DLLs into any game.
+
+The release downloader checks the upstream `SHA256SUMS.txt` manifest, verifies the ZIP checksum and file size, and caches validated packages under `${XDG_CACHE_HOME:-~/.cache}/amdnr/releases/<tag>/`. Downloads with missing checksums, invalid archives, or unexpected names are refused. The existing **Browse** option remains available for releases acquired separately.
+
+CLI equivalents:
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --releases-json
+python3 Launcher/Avalonia/amdnr_launcher.py --download-release TAG --release-asset AMDNR-vVERSION.zip
+```
+
+The version and asset name come from the release catalog; they are not game-name-specific. Only complete upstream AMDNR release ZIPs are supported by this workflow. Optional model packs and Windows executables are not offered as installable packages. **Downloading and installing the Windows DLL files does not establish Proton or neural-runtime compatibility.**
 
 ## Diagnose missing game artwork
 
