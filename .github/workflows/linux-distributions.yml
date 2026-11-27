@@ -3,8 +3,14 @@ name: Linux distributable packages
 on:
   workflow_dispatch:
   push:
+    branches:
+      - feature/native-linux-launcher
     tags:
       - 'linux-v*'
+    paths:
+      - 'Launcher/Avalonia/**'
+      - 'packaging/**'
+      - '.github/workflows/linux-distributions.yml'
 
 permissions:
   contents: write
