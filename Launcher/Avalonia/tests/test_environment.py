@@ -24,6 +24,45 @@ class EnvironmentTests(unittest.TestCase):
         self.exe.write_bytes(b"test")
         self.config = self.root / "config"
 
+    def _fake_proc(self, pid, *argv, comm):
+        proc = self.root / "proc" / str(pid)
+        proc.mkdir(parents=True)
+        (proc / "cmdline").write_bytes(b"\x00".join(x.encode() for x in argv) + b"\x00")
+        (proc / "comm").write_text(comm + "\n")
+        return proc
+
+    def test_running_game_check_ignores_launcher_arguments_and_win64_directory(self):
+        game = self.game / "Binaries" / "Win64"
+        game.mkdir(parents=True)
+        exe = game / "Subnautica2-Win64-Test.exe"
+        exe.write_bytes(b"test")
+        proc_root = self.root / "proc"
+        self._fake_proc(100, "/usr/bin/python3", "amdnr_launcher.py",
+                        "--bridge-install", "--exe", str(exe), comm="python3")
+        self._fake_proc(101, "/usr/bin/AMDNR-Launcher", "--exe", str(exe),
+                        comm="AMDNR-Launcher")
+        self._fake_proc(102, "bash", "-c", f"wine \\"{exe}\\"",
+                        comm="bash")
+        self.assertFalse(environment.game_running(exe, proc_root=proc_root)["running"])
+
+    def test_running_game_check_detects_real_wine_game(self):
+        exe = self.game / "Subnautica2-Win64-Test.exe"
+        exe.write_bytes(b"test")
+        proc_root = self.root / "proc"
+        self._fake_proc(200, "/usr/bin/wine64", str(exe), comm="wine64")
+        report = environment.game_running(exe, proc_root=proc_root)
+        self.assertTrue(report["running"])
+        self.assertEqual(report["pids"], [200])
+
+    def test_running_game_check_detects_truncated_wine_process_name(self):
+        exe = self.game / "Subnautica2-Win64-Test.exe"
+        exe.write_bytes(b"test")
+        proc_root = self.root / "proc"
+        self._fake_proc(201, "Z:\\\\Games\\\\Subnautica2-Win64-Test.exe",
+                        comm=exe.name[:15])
+        report = environment.game_running(exe, proc_root=proc_root)
+        self.assertTrue(report["running"])
+
     def test_profile_is_per_game_and_rejects_bad_options(self):
         other = self.root / "Another Game"
         other.mkdir()
