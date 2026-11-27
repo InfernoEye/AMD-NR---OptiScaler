@@ -503,6 +503,72 @@ class LauncherTests(unittest.TestCase):
             self.assertTrue(target.is_symlink())
             self.assertIn(asset, launcher._component_records(self.exe))
 
+    def test_mochi_component_preview_can_replace_unmanaged_files_with_backup(self):
+        tag, asset = "AlphaTest", "AMDNR-Mochi-0.0.9-component.zip"
+        archive = self.root / tag / asset
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive, "w") as file:
+            file.writestr("dlssnr-amd/model.bin", b"official model")
+        existing = self.game / "dlssnr-amd/model.bin"
+        existing.parent.mkdir()
+        existing.write_bytes(b"old local model")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertEqual(preview["conflicts"], ["dlssnr-amd/model.bin"])
+            self.assertEqual(preview["replaceable_count"], 1)
+            self.assertEqual(preview["managed_conflicts"], [])
+            self.assertFalse(preview["installable"])
+            installed = launcher.install_component(self.exe, tag, asset, replace_conflicts=True)
+            self.assertEqual(existing.read_bytes(), b"official model")
+            self.assertIn(asset, launcher._component_records(self.exe))
+
+    def test_mochi_preview_blocks_bridge_owned_file_replacement(self):
+        tag, asset = "AlphaTest", "AMDNR-Mochi-0.0.9-component.zip"
+        archive = self.root / tag / asset
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive, "w") as file:
+            file.writestr("dlssnr-amd/model.bin", b"official model")
+        existing = self.game / "dlssnr-amd/model.bin"
+        existing.parent.mkdir()
+        existing.write_bytes(b"bridge model")
+        (self.game / ".amdnr-linux-install.json").write_text(json.dumps({
+            "version": 1, "launcher": {"proxy_name": "winmm.dll"},
+            "installed": ["dlssnr-amd/model.bin"],
+            "files": [{"path": "dlssnr-amd/model.bin",
+                        "sha256": launcher.hashlib.sha256(b"bridge model").hexdigest(),
+                        "existed": False}]
+        }))
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertEqual(preview["managed_conflicts"], ["dlssnr-amd/model.bin"])
+            self.assertEqual(preview["replaceable_count"], 0)
+            with self.assertRaisesRegex(ValueError, "overwrite"):
+                launcher.install_component(self.exe, tag, asset, replace_conflicts=True)
+            self.assertEqual(existing.read_bytes(), b"bridge model")
+
+    def test_mochi_preview_blocks_other_component_owned_file_replacement(self):
+        tag, asset = "AlphaTest", "AMDNR-Mochi-0.0.9-component.zip"
+        archive = self.root / tag / asset
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive, "w") as file:
+            file.writestr("model.bin", b"mochi")
+        existing = self.game / "model.bin"
+        existing.write_bytes(b"other module")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
+            launcher._save_component_records(self.exe, {
+                "AMDNR-Other.zip": {"tag": "AlphaTest",
+                                    "files": {"model.bin": launcher._digest(existing)},
+                                    "replaced": {}}})
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertEqual(preview["managed_conflicts"], ["model.bin"])
+            self.assertEqual(preview["replaceable_count"], 0)
+
     def test_large_file_count_archive_is_installable_within_limit(self):
         tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
         archive = self.root / asset
