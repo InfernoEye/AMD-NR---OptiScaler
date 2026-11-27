@@ -336,9 +336,21 @@ public sealed class MainWindow : Window
                     if (_currentSection != "Installed") return;
                     builds.ItemsSource = visible;
                     builds.SelectedIndex = visible.Count > 0 ? 0 : -1;
-                    compareText.Text = visible.Count == 0 ? "No releases available." :
-                        $"Latest listed build: {visible[0].Tag} / {visible[0].Asset}. " +
-                        "Check each recorded archive name below before deciding to update.";
+                    if (visible.Count == 0)
+                    {
+                        compareText.Text = "No releases available.";
+                    }
+                    else
+                    {
+                        var latest = visible[0];
+                        var matching = installed.Count(game =>
+                            string.Equals(Path.GetFileName(game.SourceArchive ?? ""),
+                                latest.Asset, StringComparison.OrdinalIgnoreCase));
+                        compareText.Text = $"Latest listed package: {latest.Tag} / {latest.Asset}. " +
+                            $"{matching} of {installed.Count} indexed installation records " +
+                            "match this archive name. Other records may be older, custom " +
+                            "or unknown; no automatic upgrade is performed.";
+                    }
                     _status.Text = $"Loaded {visible.Count} published releases.";
                 }
                 catch (Exception ex) { _status.Text = "Version lookup failed: " + ex.Message; }
@@ -372,6 +384,12 @@ public sealed class MainWindow : Window
                 finally { _busy = false; fetch.IsEnabled = true; }
             };
             releaseTools.Children.Add(fetch);
+            var manageVersions = Button("OPEN INSTALL & MANAGE");
+            manageVersions.Click += (_, _) => ShowInstall();
+            releaseTools.Children.Add(manageVersions);
+            releaseTools.Children.Add(Text("For a recorded installation, use Verify first. " +
+                "The installer requires an explicit uninstall/restore before a new package; " +
+                "there is no automatic update or rollback.", 12, MutedBrush));
             results.Children.Add(Panel(releaseTools));
             if (installed.Count == 0)
             {
