@@ -2722,9 +2722,40 @@ def main() -> int:
     parser.add_argument("--recover-transaction", action="store_true", help="Restore crash-recovery snapshot with strict hash checks")
     parser.add_argument("--try-next-proxy", action="store_true", help="Switch clean managed proxy to next unoccupied DLL alias")
     parser.add_argument("--uninstall", action="store_true", help="Uninstall and restore backups")
+    parser.add_argument("--bridge-status-json", action="store_true",
+                        help="Read-only community ROCm bridge compatibility and conflict status")
+    parser.add_argument("--bridge-prepare", type=Path, metavar="COMPILER",
+                        help="Download pinned GPL community source and prepare bridge using your own shader compiler")
+    parser.add_argument("--bridge-install", action="store_true",
+                        help="Install separately managed bridge beside --exe, with explicit approval")
+    parser.add_argument("--approve-bridge-install", action="store_true",
+                        help="Explicit consent to install the community bridge in the selected game folder")
+    parser.add_argument("--bridge-remove", action="store_true",
+                        help="Use community manager to restore an installed bridge with consent")
+    parser.add_argument("--approve-bridge-remove", action="store_true",
+                        help="Explicit consent to remove the separately managed community bridge")
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
+    if args.bridge_status_json or args.bridge_prepare is not None or args.bridge_install or args.bridge_remove:
+        try:
+            import community_bridge
+            if args.bridge_status_json:
+                result = community_bridge.status(args.exe)
+            elif args.bridge_prepare is not None:
+                result = community_bridge.prepare(args.bridge_prepare)
+            else:
+                if args.exe is None:
+                    parser.error("--bridge-install/--bridge-remove require --exe")
+                if args.bridge_install:
+                    result = community_bridge.install(args.exe, args.approve_bridge_install)
+                else:
+                    result = community_bridge.remove(args.exe, args.approve_bridge_remove)
+            print(json.dumps(result, ensure_ascii=False))
+        except (OSError, ValueError, TypeError, KeyError, TimeoutError,
+                RuntimeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     if args.custom_games_json or args.add_custom_game or args.rename_custom_game or args.remove_custom_game:
         try:
             if args.custom_games_json:
