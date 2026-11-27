@@ -980,6 +980,90 @@ class LauncherTests(unittest.TestCase):
             # Checksum is consulted for each call; archive itself downloaded only once.
             self.assertEqual(mocked.call_count, 3)
 
+    def test_historical_daniel_runtime_uses_official_asset_digest_when_manifest_omits_it(self):
+        import hashlib
+        import io
+        memory = io.BytesIO()
+        with zipfile.ZipFile(memory, "w") as archive:
+            archive.writestr("dlssnr_amd_pass1.dll", b"test")
+        payload = memory.getvalue()
+        digest = hashlib.sha256(payload).hexdigest()
+        metadata = {"tag_name": "Alpha0.3.5.5R4", "assets": [
+            {"name": "SHA256SUMS.txt"},
+            {"name": "v0.6.0-Runtime.zip", "size": len(payload),
+             "digest": "sha256:" + digest},
+        ]}
+
+        class Response:
+            def __init__(self, value):
+                self.stream = io.BytesIO(value)
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                pass
+            def read(self, size=-1):
+                return self.stream.read(size)
+
+        def fetch(request, timeout=0):
+            if request.full_url.endswith("SHA256SUMS.txt"):
+                return Response(b"a" * 64 + b"  AMDNR-v0.3.5.5R4.zip\\n")
+            return Response(payload)
+
+        with (patch.dict(launcher.os.environ, {"XDG_CACHE_HOME": str(self.root / "cache")}),
+              patch.object(launcher, "_github_json", return_value=metadata),
+              patch.object(launcher.urllib.request, "urlopen", side_effect=fetch)):
+            result = launcher.download_release("Alpha0.3.5.5R4", "v0.6.0-Runtime.zip")
+            self.assertEqual(result.read_bytes(), payload)
+
+    def test_daniel_runtime_asset_digest_mismatch_is_rejected(self):
+        import hashlib
+        import io
+        memory = io.BytesIO()
+        with zipfile.ZipFile(memory, "w") as archive:
+            archive.writestr("dlssnr_amd_pass1.dll", b"test")
+        payload = memory.getvalue()
+        metadata = {"tag_name": "Alpha0.3.5.5R4", "assets": [
+            {"name": "SHA256SUMS.txt"},
+            {"name": "v0.6.0-Runtime.zip", "size": len(payload),
+             "digest": "sha256:" + "0" * 64},
+        ]}
+        class Response:
+            def __init__(self, value):
+                self.stream = io.BytesIO(value)
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                pass
+            def read(self, size=-1):
+                return self.stream.read(size)
+        def fetch(request, timeout=0):
+            return Response(b"no matching ZIP hash\\n" if
+                            request.full_url.endswith("SHA256SUMS.txt") else payload)
+        with (patch.dict(launcher.os.environ, {"XDG_CACHE_HOME": str(self.root / "cache")}),
+              patch.object(launcher, "_github_json", return_value=metadata),
+              patch.object(launcher.urllib.request, "urlopen", side_effect=fetch)):
+            with self.assertRaisesRegex(ValueError, "failed SHA-256"):
+                launcher.download_release("Alpha0.3.5.5R4", "v0.6.0-Runtime.zip")
+
+    def test_manifest_and_asset_digest_disagreement_is_rejected(self):
+        import io
+        metadata = {"tag_name": "Alpha0.3.5.5R4", "assets": [
+            {"name": "SHA256SUMS.txt"},
+            {"name": "v0.6.0-Runtime.zip", "size": 20,
+             "digest": "sha256:" + "0" * 64},
+        ]}
+        class Response:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                pass
+            def read(self, size=-1):
+                return ("a" * 64 + "  v0.6.0-Runtime.zip\\n").encode()
+        with (patch.object(launcher, "_github_json", return_value=metadata),
+              patch.object(launcher.urllib.request, "urlopen", return_value=Response())):
+            with self.assertRaisesRegex(ValueError, "conflicts"):
+                launcher.download_release("Alpha0.3.5.5R4", "v0.6.0-Runtime.zip")
+
     def test_download_rejects_bad_checksum(self):
         import io
         metadata = {"tag_name": "Alpha1", "assets": [
