@@ -244,6 +244,20 @@ def status(exe: Path | None = None, runtime: str = "lmxxf") -> dict:
         report["migration_snapshot"] = str(pending) if pending else None
         report["exe"] = str(exe)
         report["community_installed"] = (exe.parent / "amdnr-linux/run.sh").is_file()
+        report["installed_runtime"] = None
+        components = exe.parent / "amdnr-linux/components.json"
+        if report["community_installed"] and components.is_file() and not components.is_symlink():
+            try:
+                config = json.loads(components.read_text(encoding="utf-8"))
+                neural = config.get("neural_runtime")
+                if neural == "lmxxf":
+                    report["installed_runtime"] = "lmxxf"
+                elif neural == "daniel" and isinstance(config.get("daniel"), dict):
+                    version = config["daniel"].get("version")
+                    if version in DANIEL_VERSIONS:
+                        report["installed_runtime"] = version
+            except (OSError, ValueError, UnicodeError):
+                pass
         if not exe.is_file():
             report["conflicts"] = ["Selected Windows executable is missing."]
         else:
