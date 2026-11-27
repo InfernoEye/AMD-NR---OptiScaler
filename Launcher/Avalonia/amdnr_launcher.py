@@ -663,6 +663,58 @@ def uninstall(executable: Path) -> tuple[int, list[str]]:
     return restored, warnings
 
 
+def doctor_report(executable: Path | None, archive: Path | None) -> dict[str, object]:
+    """Read-only checks; never modify a game or claim Proton GPU compatibility."""
+    checks: list[dict[str, object]] = []
+    def add_check(name: str, ok: bool, detail: str) -> None:
+        checks.append({"name": name, "ok": ok, "detail": detail})
+
+    add_check("Linux", sys.platform.startswith("linux"),
+              "Native Linux launcher (not a Windows GPU runtime test)")
+    libraries = steam_libraries()
+    add_check("Steam libraries", bool(libraries), f"{len(libraries)} Steam libraries found")
+    add_check("Game executable", executable is not None and executable.is_file()
+              and executable.suffix.lower() == ".exe",
+              "Windows game executable selected" if executable and executable.is_file()
+              else "Select a valid Windows .exe")
+    add_check("AMDNR release ZIP", archive is not None and archive.is_file()
+              and zipfile.is_zipfile(archive),
+              "Valid ZIP archive selected" if archive and archive.is_file()
+              and zipfile.is_zipfile(archive) else "Select a valid release ZIP")
+    if executable and executable.is_file():
+        root = executable.resolve().parent
+        state_path = root / STATE_NAME
+        if not state_path.exists():
+            add_check("Installation record", False,
+                      "No installation managed by this Linux launcher was found beside the EXE")
+        else:
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                records = state.get("files", [])
+                if state.get("format") != 1 or not isinstance(records, list):
+                    raise ValueError("Invalid installation format")
+                valid = 0
+                problems = 0
+                for item in records:
+                    relative = item.get("path", "") if isinstance(item, dict) else ""
+                    expected = item.get("sha256", "") if isinstance(item, dict) else ""
+                    if not _safe_member(relative):
+                        problems += 1
+                        continue
+                    target = root / relative
+                    if not target.is_file() or target.is_symlink() or _digest(target) != expected:
+                        problems += 1
+                    else:
+                        valid += 1
+                add_check("Installed AMDNR files", problems == 0,
+                          f"{valid} recorded files verified; {problems} missing or modified")
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                add_check("Installation record", False, f"Could not validate record: {exc}")
+    return {"checks": checks,
+            "note": "Diagnostics check only the Linux file installation and local Steam setup. "
+                    "They do not certify GPU support, anti-cheat compatibility or Proton rendering."}
+
+
 def gui() -> None:
     try:
         import tkinter as tk
@@ -741,6 +793,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="List detected Steam games")
     parser.add_argument("--releases-json", action="store_true", help="Show upstream AMDNR release packages as JSON")
+    parser.add_argument("--doctor-json", action="store_true", help="Read-only launcher and installation diagnostics")
     parser.add_argument("--download-release", metavar="TAG", help="Download and verify selected AMDNR release")
     parser.add_argument("--release-asset", metavar="ZIP", help="Archive filename for --download-release")
     parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
@@ -748,12 +801,15 @@ def main() -> int:
     parser.add_argument("--download-artwork", action="store_true", help="Fetch missing cover art from Steam CDN")
     parser.add_argument("--set-artwork", type=Path, metavar="IMAGE", help="Set cover image (PNG/JPG) for a game")
     parser.add_argument("--game-folder", type=Path, help="Game directory for --set-artwork")
+    parser.add_argument("--archive", type=Path, metavar="ZIP", help="Archive path for --doctor-json")
     parser.add_argument("--install", type=Path, metavar="ZIP", help="Install an AMDNR release ZIP")
     parser.add_argument("--uninstall", action="store_true", help="Uninstall and restore backups")
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
-    if args.releases_json or args.download_release:
+    if args.doctor_json:
+        print(json.dumps(doctor_report(args.exe, args.archive), ensure_ascii=False))
+    elif args.releases_json or args.download_release:
         try:
             if args.releases_json:
                 print(json.dumps(release_catalog(), ensure_ascii=False))
