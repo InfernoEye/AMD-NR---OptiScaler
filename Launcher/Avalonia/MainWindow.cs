@@ -2053,7 +2053,7 @@ public sealed class MainWindow : Window
                 // Native lmxxf is bundled by the bridge and Daniel is the
                 // single runtime choice above. Avoid duplicate runtime archives.
                 var supported = entries.Where(x =>
-                    !IsDanielRuntime(x.Asset) &&
+                    !x.Asset.EndsWith("-Runtime.zip", StringComparison.OrdinalIgnoreCase) &&
                     !x.Asset.Contains("lmxxf", StringComparison.OrdinalIgnoreCase) &&
                     !x.Asset.Contains("neuralhub", StringComparison.OrdinalIgnoreCase) &&
                     !x.Prerelease)
