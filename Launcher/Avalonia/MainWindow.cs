@@ -2740,6 +2740,20 @@ public sealed class MainWindow : Window
         var hostInfo = Text("Checking GPU, Steam library and local compiler candidates…",
             13, MutedBrush);
         inspection.Children.Add(hostInfo);
+        var distroInfo = Text("Checking installed system libraries (no system changes)…", 12, MutedBrush);
+        inspection.Children.Add(distroInfo);
+        var systemInstallPreview = Text("", 12, MutedBrush);
+        inspection.Children.Add(systemInstallPreview);
+        var copySystemCommand = Button("COPY DISTRO INSTALL COMMAND");
+        copySystemCommand.IsVisible = false;
+        inspection.Children.Add(copySystemCommand);
+        string suggestedSystemCommand = "";
+        copySystemCommand.Click += async (_, _) =>
+        {
+            if (!string.IsNullOrWhiteSpace(suggestedSystemCommand))
+                await CopyToClipboardAsync(suggestedSystemCommand,
+                    "Optional distro package command copied. Not executed.");
+        };
         var packageState = Text("Checking bridge package and installation…", 13, MutedBrush);
         inspection.Children.Add(packageState);
         var problems = Text("", 13, AccentBrush);
@@ -2755,7 +2769,9 @@ public sealed class MainWindow : Window
         preparation.Children.Add(Text(
             "Compiler candidates are searched automatically in this Steam library. " +
             "A matching x64 PE header is not proof of Microsoft origin: review the chosen " +
-            "file and use only a copy from a game you own.",
+            "file and use only a copy from a game you own. " +
+            "The bridge will reuse exact SHA-256 verified distro package archives from your " +
+            "local cache when available; otherwise it retries official Ubuntu mirrors.",
             13, MutedBrush));
         var compilerChoices = new ComboBox
         {
@@ -2940,6 +2956,22 @@ public sealed class MainWindow : Window
                 var candidates = root.GetProperty("compiler_candidates").EnumerateArray()
                     .Select(x => x.GetProperty("path").GetString() ?? "")
                     .Where(x => x.Length > 0).ToArray();
+                var libs = root.GetProperty("host_libraries");
+                var missingSystem = libs.GetProperty("missing_system_libraries").EnumerateArray()
+                    .Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToArray();
+                var distribution = libs.GetProperty("distro").GetString() ?? "Linux";
+                suggestedSystemCommand = libs.GetProperty("install_command_preview").GetString() ?? "";
+                distroInfo.Text = missingSystem.Length == 0
+                    ? $"System libraries on {distribution}: libelf and libnuma found. " +
+                      "The bridge still needs its separately pinned private ROCm runtime."
+                    : $"System libraries missing on {distribution}: " +
+                      string.Join(", ", missingSystem) +
+                      ". You may install them using your distro's package manager, with your approval.";
+                systemInstallPreview.Text = missingSystem.Length > 0 && suggestedSystemCommand.Length > 0
+                    ? "Optional manual system command (not executed): " + suggestedSystemCommand
+                    : "";
+                copySystemCommand.IsVisible = missingSystem.Length > 0 &&
+                    suggestedSystemCommand.Length > 0;
                 hostInfo.Text = $"AMD GPU: {(amd ? "detected" : "not detected")} · " +
                     $"/dev/kfd: {(kfd ? "present" : "missing")} · " +
                     $"GPU render node: {(render ? "present" : "missing")}\n" +
