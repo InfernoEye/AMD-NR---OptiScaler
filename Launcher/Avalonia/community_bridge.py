@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
@@ -22,15 +23,87 @@ import tarfile
 import tempfile
 import urllib.request
 
-VERSION = "0.3.7"
+# Only releases reviewed against the setup/manage interface may be executed.
+# To approve a future release, review the release diff, verify the downloaded
+# source archive hash independently, and add its version/digest here.
+SUPPORTED_RELEASES = {
+    "0.3.7": "7e4ddb01a352a824bbf6009cfd8a1c0728267679e4a170d33fc8e01f91b84423",
+}
+VERSION = max(SUPPORTED_RELEASES, key=lambda version: tuple(map(int, version.split("."))))
 ARCHIVE = f"AMDNR-Linux-v{VERSION}.tar.gz"
 URL = f"https://github.com/hassanm0301/AMDNR-Linux/releases/download/linux-v{VERSION}/{ARCHIVE}"
-SHA256 = "7e4ddb01a352a824bbf6009cfd8a1c0728267679e4a170d33fc8e01f91b84423"
+SHA256 = SUPPORTED_RELEASES[VERSION]
+RELEASES_API = "https://api.github.com/repos/hassanm0301/AMDNR-Linux/releases?per_page=30"
+RELEASE_TAG = re.compile(r"^linux-v(\\d+)\\.(\\d+)\\.(\\d+)$")
 PROJECT = "https://github.com/hassanm0301/AMDNR-Linux"
 SOURCE_ROOT = f"AMDNR-Linux-v{VERSION}"
 MAX_ARCHIVE_BYTES = 90 * 1024 * 1024
 MAX_UNPACKED_BYTES = 450 * 1024 * 1024
 OWN_RECORD = ".amdnr-linux-install.json"  # used by both installers, with incompatible formats
+
+
+def check_releases(*, opener=None) -> dict:
+    """Read-only update discovery. Discovery never authorizes third-party code.
+
+    Only SHA-256-reviewed releases in SUPPORTED_RELEASES may be prepared.
+    Network errors are surfaced to the caller; no update is silently selected.
+    """
+    opener = opener or urllib.request.urlopen
+    request = urllib.request.Request(
+        RELEASES_API,
+        headers={"Accept": "application/vnd.github+json",
+                 "User-Agent": "AMDNR-Avalonia-bridge-release-check"},
+    )
+    with opener(request, timeout=15) as response:
+        if not response.geturl().startswith("https://"):
+            raise ValueError("Release lookup redirected to an insecure URL.")
+        payload = response.read(256 * 1024 + 1)
+        if len(payload) > 256 * 1024:
+            raise ValueError("GitHub release listing exceeds size limit.")
+    items = json.loads(payload)
+    if not isinstance(items, list):
+        raise ValueError("GitHub release listing has an unexpected format.")
+    releases = []
+    seen = set()
+    for entry in items:
+        if not isinstance(entry, dict) or entry.get("draft") or entry.get("prerelease"):
+            continue
+        tag = entry.get("tag_name")
+        if not isinstance(tag, str) or not RELEASE_TAG.fullmatch(tag) or tag in seen:
+            continue
+        seen.add(tag)
+        version = tag.removeprefix("linux-v")
+        filename = f"AMDNR-Linux-v{version}.tar.gz"
+        assets = entry.get("assets", [])
+        has_source = isinstance(assets, list) and any(
+            isinstance(asset, dict) and asset.get("name") == filename
+            for asset in assets
+        )
+        if not has_source:
+            continue
+        approved = version in SUPPORTED_RELEASES
+        releases.append({
+            "version": version,
+            "tag": tag,
+            "approved": approved,
+            "compatibility": "reviewed" if approved else "requires_review",
+            "download_allowed": approved,
+            "published_at": entry.get("published_at"),
+        })
+    releases.sort(key=lambda item: tuple(map(int, item["version"].split("."))), reverse=True)
+    latest = releases[0]["version"] if releases else None
+    return {
+        "provider": "hassanm0301/AMDNR-Linux",
+        "installed_adapter_version": VERSION,
+        "approved_versions": sorted(SUPPORTED_RELEASES, key=lambda v: tuple(map(int, v.split("."))), reverse=True),
+        "latest_upstream_version": latest,
+        "newer_upstream_available": bool(latest and
+            tuple(map(int, latest.split("."))) > tuple(map(int, VERSION.split(".")))),
+        "releases": releases,
+        "updated_automatically": False,
+        "notice": "New upstream versions require archive checksum and setup/manage API review before preparation. "
+                  "Discovering a release does not establish GPU, Proton or game compatibility.",
+    }
 
 
 def cache_dir() -> Path:
@@ -96,6 +169,9 @@ def status(exe: Path | None = None) -> dict:
         "provider": "hassanm0301/AMDNR-Linux",
         "source": PROJECT,
         "version": VERSION,
+        "approved_versions": sorted(SUPPORTED_RELEASES),
+        "release_approval": "reviewed_sha256_pin",
+        "updates_checked_online": False,
         "license": "GPL-3.0-or-later; LGPL vkd3d; upstream third-party notices",
         "archive_sha256": SHA256,
         "release_verified": archive.is_file() and not archive.is_symlink()
