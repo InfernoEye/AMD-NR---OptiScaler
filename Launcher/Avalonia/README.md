@@ -488,3 +488,22 @@ Windows-specific GPU/driver APIs. Until a compatible Linux bridge and
 verified end-to-end installation process exist, the launcher deliberately
 does not offer a fake "Install 0.8.0" success. The separate Daniel panel
 continues to list the official upstream version but explains this blocker.
+
+### Version-driven Daniel setup (Linux)
+
+The **Daniel Neural Runtimes** version list now loads automatically on opening
+Extensions. **Set Up Selected Daniel** determines the installation procedure
+from the chosen official package rather than having a hard-coded 0.6.0 button.
+For supported pass-DLL archives it downloads, verifies the published SHA-256,
+previews file differences and installs immediately when destinations are safe.
+If a user-owned file differs, it offers the existing explicit backup-and-replace
+step; it never silently overwrites or removes a different installed runtime.
+The separate "Install Daniel" and "Auto Set Up Daniel 0.6.0" buttons are removed.
+
+The 0.8.0 NeuralHub path is *not* falsely reported as installed: it requires
+Windows AMD GPU services not currently provided by Proton's bridge. Its
+upstream package is not compatible with the legacy pass-DLL installer.
+Complete end-to-end 0.8.0 support therefore requires a genuinely working
+Linux HIP/D3D12 bridge and real GPU validation, not just copying ZIP files.
+The launcher reports this blocker for the selected version without changing
+the game's files. Runtime availability is distinct from file installation.
