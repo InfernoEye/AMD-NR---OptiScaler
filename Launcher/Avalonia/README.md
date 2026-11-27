@@ -385,3 +385,23 @@ The runtime diagnostic screen distinguishes files copied successfully from
 a runtime detected by AMDNR. `MochizukiNrRuntime.dll` being present does not
 prove that the current OptiScaler binary recognizes or initializes Mochi;
 in-game detection and Proton compatibility require independent testing.
+
+### Preparing Mochi's local neural model under Linux
+
+Official Mochi component archives include the runtime, shaders and ACO records
+but **not** NVIDIA's neural model. In **Game → Manage Extensions**, use
+**Prepare Mochi Model (Local NVIDIA DLL)** and select your own
+`nvngx_dlssnr.dll` version **310.9.16** or **310.8.0**, or a ZIP containing
+that DLL. The bundled MIT-licensed `model-tools` scripts originate from
+`Overclockers/DLSSNR-AMD` (see `model-tools/LICENSE`).
+
+Model preparation reads the DLL locally without loading it, checks the
+source SHA-256 against the supported versions, verifies every extracted model
+weight against the tool's known checksum lists, and then installs
+`dlssnr-amd/dlssnr.bin` (and `dlssnr-small.bin` for 310.9.16).
+The launcher does **not** distribute NVIDIA DLLs or extracted model weights.
+Existing model files are never replaced automatically. Extraction needs
+`bash`, `python3` and adequate scratch disk space. Restart your game after
+preparing the model. In-game Mochi availability still depends on GPU,
+graphics API, the installed AMDNR build and Proton behavior.
+
