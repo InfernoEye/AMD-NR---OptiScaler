@@ -936,7 +936,8 @@ def prepare_mochi_model(executable: Path, source: Path) -> dict[str, object]:
             proc = subprocess.run(
                 ["bash", str(extractor), str(source.resolve()), str(staging)],
                 capture_output=True, text=True, timeout=600, check=False,
-                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+                     "TMPDIR": str(staging)})
         except subprocess.TimeoutExpired as exc:
             raise ValueError("Local Mochi model extraction timed out") from exc
         except FileNotFoundError as exc:
