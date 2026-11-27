@@ -101,7 +101,9 @@ def _ensure_not_running(executable: Path) -> None:
         from linux_environment import game_running
         report = game_running(executable)
         if report.get("running"):
-            raise ValueError("Game appears to be running; quit it before changing AMDNR files")
+            pids = report.get("pids", [])
+            detail = ", ".join(str(pid) for pid in pids[:8]) if isinstance(pids, list) else "unknown"
+            raise ValueError("Game process detected (PID " + detail + "). Close it before modifying game files.")
     except ImportError:
         # Standalone backend imports can lack Linux-only diagnostics; this is
         # an advisory safety check rather than a GPU compatibility guarantee.
