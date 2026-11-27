@@ -213,8 +213,10 @@ def preparer_python() -> str:
 
 def prepare(compiler: Path) -> dict:
     interpreter = preparer_python()
-    if not compiler.is_file() or compiler.is_symlink() or compiler.name.lower() != "d3dcompiler_47.dll":
-        raise ValueError("Choose your own native x64 Microsoft d3dcompiler_47.dll.")
+    from bridge_discovery import compiler_is_candidate
+    if not compiler_is_candidate(compiler):
+        raise ValueError("The chosen d3dcompiler_47.dll is not a regular x64 PE file. "
+                         "Choose a native x64 compiler from software you own.")
     if prepared_path().exists():
         raise ValueError("Community package already exists. Review it instead of overwriting.")
     archive = fetch_verified()
