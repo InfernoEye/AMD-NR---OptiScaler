@@ -345,11 +345,15 @@ public sealed class MainWindow : Window
             try
             {
                 await _backend.AddCustomGameAsync(folder, nameBox.Text ?? "");
+                string preferenceWarning = "";
                 if (chosenExe.Length > 0)
-                    await _backend.RememberExecutableAsync(folder, chosenExe);
+                {
+                    try { await _backend.RememberExecutableAsync(folder, chosenExe); }
+                    catch (Exception ex) { preferenceWarning = " Executable preference was not saved: " + ex.Message; }
+                }
                 await ReloadGamesAsync();
                 ShowLibrary();
-                _status.Text = "Custom game saved to your library.";
+                _status.Text = "Custom game saved to your library." + preferenceWarning;
             }
             catch (Exception ex) { _status.Text = "Could not add game: " + ex.Message; }
             finally { _busy = false; save.IsEnabled = true; }
