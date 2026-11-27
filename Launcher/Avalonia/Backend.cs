@@ -233,8 +233,14 @@ public sealed class Backend
         foreach (var component in root.GetProperty("components").EnumerateArray())
         {
             report.AppendLine("Installed record: " + component.GetProperty("asset").GetString());
+            report.AppendLine("Cached ZIP available: " +
+                (component.GetProperty("cached_archive_present").GetBoolean() ? "yes" : "no"));
+            report.AppendLine("Runtime-like files inside official ZIP:");
+            foreach (var path in component.GetProperty("archive_candidates").EnumerateArray())
+                report.AppendLine("  ZIP: " + path.GetString());
+            report.AppendLine("Runtime-like files installed/managed:");
             foreach (var path in component.GetProperty("runtime_paths").EnumerateArray())
-                report.AppendLine("  - " + path.GetString());
+                report.AppendLine("  FILE: " + path.GetString());
         }
         report.AppendLine("File presence does not guarantee Proton runtime compatibility.");
         return report.ToString();
