@@ -2652,6 +2652,8 @@ def main() -> int:
                         help="Read-only bounded discovery of GPU/Proton and local x64 compiler candidates")
     parser.add_argument("--bridge-status-json", action="store_true",
                         help="Read-only community ROCm bridge compatibility and conflict status")
+    parser.add_argument("--bridge-check-updates-json", action="store_true",
+                        help="Check upstream bridge releases; unknown versions require manual review")
     parser.add_argument("--bridge-prepare", type=Path, metavar="COMPILER",
                         help="Download pinned GPL community source and prepare bridge using your own shader compiler")
     parser.add_argument("--bridge-install", action="store_true",
@@ -2665,7 +2667,7 @@ def main() -> int:
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
-    if args.bridge_discover_json or args.bridge_status_json or args.bridge_prepare is not None or args.bridge_install or args.bridge_remove:
+    if args.bridge_discover_json or args.bridge_status_json or args.bridge_check_updates_json or args.bridge_prepare is not None or args.bridge_install or args.bridge_remove:
         try:
             import community_bridge
             if args.bridge_discover_json:
@@ -2675,6 +2677,8 @@ def main() -> int:
                 result = bridge_discovery.discover(args.exe)
             elif args.bridge_status_json:
                 result = community_bridge.status(args.exe)
+            elif args.bridge_check_updates_json:
+                result = community_bridge.check_releases()
             elif args.bridge_prepare is not None:
                 result = community_bridge.prepare(args.bridge_prepare)
             else:
