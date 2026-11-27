@@ -37,6 +37,7 @@ public sealed class MainWindow : Window
     private string _exeScanReason = "";
     private string? _steamPreferredExe;
     private string? _steamLaunchReason;
+    private IReadOnlyList<string> _steamMissingWindows = Array.Empty<string>();
     private bool _exeScanPartial;
     private bool _showAlternativeExecutables;
     private readonly Dictionary<string, Button> _navigation = new();
@@ -560,6 +561,7 @@ public sealed class MainWindow : Window
         _exeScanReason = "";
         _steamPreferredExe = null;
         _steamLaunchReason = null;
+        _steamMissingWindows = Array.Empty<string>();
         _exeScanPartial = false;
         _showAlternativeExecutables = false;
         ShowGameDetails();
@@ -582,6 +584,7 @@ public sealed class MainWindow : Window
             _exeScanReason = scan.Reason;
             _steamPreferredExe = scan.SteamPreferred;
             _steamLaunchReason = scan.SteamReason;
+            _steamMissingWindows = scan.SteamMissingWindows;
             _exeScanPartial = scan.Partial;
             var saved = await _backend.SavedExecutableAsync(game.Folder);
             if (_selectedGame?.Folder != game.Folder) return;
@@ -604,7 +607,12 @@ public sealed class MainWindow : Window
                         : "Several possible executables found. Select the correct one.";
             ShowGameDetails();
         }
-        catch (Exception ex) { _status.Text = "Executable scan failed: " + ex.Message; }
+        catch (Exception ex)
+        {
+            _exeScanReason = "scan_error";
+            _status.Text = "Executable scan failed: " + ex.Message;
+            if (_selectedGame?.Folder == game.Folder) ShowGameDetails();
+        }
         finally { _busy = false; }
     }
 
@@ -644,10 +652,15 @@ public sealed class MainWindow : Window
         var hero = new Grid { ColumnDefinitions = new ColumnDefinitions("205,*"), ColumnSpacing = 20 };
         hero.Children.Add(GameArtwork(game, 190));
         var summary = new StackPanel { Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
-        summary.Children.Add(Text(game.Custom ? "CUSTOM GAME  /  LOCAL" : "STEAM  /  PROTON", 12, AccentBrush, FontWeight.SemiBold));
+        var nativeOnly = _exeScanReason == "native_linux_files" && _exe is null;
+        summary.Children.Add(Text(game.Custom ? "CUSTOM GAME  /  LOCAL" :
+            nativeOnly ? "STEAM  /  NATIVE LINUX" : "STEAM  /  PROTON",
+            12, AccentBrush, FontWeight.SemiBold));
         summary.Children.Add(Text(game.Name, 31, ForegroundBrush, FontWeight.Bold));
         bool installed = HasInstallRecord();
         summary.Children.Add(Text(installed ? "●  AMDNR installation recorded" :
+            nativeOnly ? "●  Native Linux build installed · no Windows DLL target" :
+            _exe is null ? "○  No Windows executable selected" :
             "○  No AMDNR installation recorded for selected executable", 13,
             installed ? AccentBrush : MutedBrush));
         summary.Children.Add(Text(game.Folder, 12, MutedBrush));
@@ -728,21 +741,31 @@ public sealed class MainWindow : Window
         }
         else
         {
-            detail.Children.Add(Text(_busy ? "Scanning game folder for Windows executables…"
+            detail.Children.Add(Text(_exeScanReason.Length == 0 ? "Scanning game folder for Windows executables…"
                 : _exeScanReason == "native_linux_files"
                     ? "This installation appears to be a native Linux game. No Windows .exe was found. " +
                       "AMDNR's Windows DLL cannot be installed into a native Linux executable."
+                    : _exeScanReason == "scan_error"
+                        ? "Executable scan failed. Check the header for details, then try Rescan."
                     : _exeScanPartial
                         ? "No Windows EXE found. The scan was incomplete; browse manually or check permissions."
                         : "No Windows executable detected. This may be a Linux-native build or a game " +
                           "with files located outside the scanned folder.", 14, MutedBrush));
             if (_nativeExecutables.Count > 0)
-                detail.Children.Add(Text("Linux executable examples: " +
-                    string.Join(", ", _nativeExecutables.Take(3)), 12, MutedBrush));
+                detail.Children.Add(Text("Installed Linux executables: " +
+                    string.Join(", ", _nativeExecutables.Take(3)), 13, ForegroundBrush));
+            if (_steamMissingWindows.Count > 0)
+                detail.Children.Add(Text("Steam lists a Windows launch target, but it is not installed: " +
+                    string.Join(", ", _steamMissingWindows.Take(3)), 13, MutedBrush));
+            else if (_steamLaunchReason == "metadata_missing" ||
+                     _steamLaunchReason == "cache_unavailable")
+                detail.Children.Add(Text("Steam launch metadata unavailable; filesystem scan used.",
+                    12, MutedBrush));
         }
 
-        detail.Children.Add(Text("Likely Windows game executables are selected automatically. " +
-            "Your manual choice is remembered per game. Check the path before installing.", 12, MutedBrush));
+        if (!nativeOnly)
+            detail.Children.Add(Text("Likely Windows game executables are selected automatically. " +
+                "Your manual choice is remembered per game. Check the path before installing.", 12, MutedBrush));
 
         var exeActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         var alternatives = _exeCandidates.Where(e => e.Path != chosen &&
