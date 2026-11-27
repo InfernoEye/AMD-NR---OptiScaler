@@ -22,6 +22,7 @@ public sealed class Backend
         var candidates = new[]
         {
             overridePath,
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "amdnr_launcher.py")),
             Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../amdnr_launcher.py")),
             Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "Launcher/Avalonia/amdnr_launcher.py")),
             Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "amdnr_launcher.py")),
