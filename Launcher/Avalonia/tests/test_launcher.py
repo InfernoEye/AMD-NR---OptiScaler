@@ -1201,6 +1201,38 @@ class LauncherTests(unittest.TestCase):
             result = launcher.download_release("Alpha0.3.5.5R4", "v0.6.0-Runtime.zip")
             self.assertEqual(result.read_bytes(), payload)
 
+    def test_older_daniel_release_without_manifest_uses_verified_github_digest(self):
+        import hashlib
+        import io
+        memory = io.BytesIO()
+        with zipfile.ZipFile(memory, "w") as archive:
+            archive.writestr("dlssnr_amd_pass1.dll", b"fixture")
+        payload = memory.getvalue()
+        digest = hashlib.sha256(payload).hexdigest()
+        metadata = {"tag_name": "Alpha0.3.1", "assets": [{
+            "name": "v0.3.1-Runtime.zip", "size": len(payload),
+            "digest": "sha256:" + digest,
+        }]}
+        class Response:
+            def __init__(self):
+                self.stream = io.BytesIO(payload)
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                pass
+            def read(self, size=-1):
+                return self.stream.read(size)
+        def download(request, timeout=0):
+            self.assertIn("v0.3.1-Runtime.zip", request.full_url)
+            self.assertNotIn("SHA256SUMS.txt", request.full_url)
+            return Response()
+        with (patch.dict(launcher.os.environ, {"XDG_CACHE_HOME": str(self.root / "cache")}),
+              patch.object(launcher, "_github_json", return_value=metadata),
+              patch.object(launcher.urllib.request, "urlopen", side_effect=download) as fetched):
+            output = launcher.download_release("Alpha0.3.1", "v0.3.1-Runtime.zip")
+        self.assertEqual(output.read_bytes(), payload)
+        self.assertEqual(fetched.call_count, 1)
+
     def test_daniel_runtime_asset_digest_mismatch_is_rejected(self):
         import hashlib
         import io
