@@ -28,7 +28,12 @@ jobs:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@v6
       - name: Download self-contained CPython 3.12
-        run: uv python install 3.12 --install-dir dist/managed-python
+        run: |
+          export UV_PYTHON_INSTALL_DIR="$PWD/dist/managed-python"
+          uv python install 3.12
+          uv python find 3.12 --python-preference only-managed > dist/managed-python-executable.txt
+          echo "Bundling: $(cat dist/managed-python-executable.txt)"
+          test -x "$(cat dist/managed-python-executable.txt)"
       - name: Test independent Linux backend
         run: python3 -m unittest discover -s Launcher/Avalonia/tests -p 'test_*.py'
       - name: Stamp tagged launcher version
@@ -43,7 +48,7 @@ jobs:
           --configuration Release --runtime linux-x64 --self-contained true
           -p:PublishSingleFile=true -o dist/publish
       - name: Create portable AppDir
-        run: bash packaging/linux/build-appdir.sh dist/publish dist/AMDNR-Linux.AppDir dist/managed-python
+        run: bash packaging/linux/build-appdir.sh dist/publish dist/AMDNR-Linux.AppDir "$(cat dist/managed-python-executable.txt)"
       - name: Smoke test portable backend
         run: |
           APPDIR="$PWD/dist/AMDNR-Linux.AppDir" \
