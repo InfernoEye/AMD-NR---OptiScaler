@@ -377,6 +377,29 @@ public sealed class MainWindow : Window
         doctor.Click += (_, _) => ShowDoctor();
         actions.Children.Add(doctor);
         summary.Children.Add(actions);
+        var coverButton = Button("CHANGE COVER ART");
+        coverButton.Click += async (_, _) =>
+        {
+            var image = await PickFileAsync("Select game artwork (JPG / PNG)",
+                new FilePickerFileType("Images")
+                {
+                    Patterns = new[] { "*.jpg", "*.jpeg", "*.png" },
+                });
+            if (image is null || _backend is null) return;
+            _status.Text = "Saving custom artwork…";
+            try
+            {
+                var (exit, message) = await _backend.RunAsync(new[]
+                {
+                    "--set-artwork", image, "--game-folder", game.Folder,
+                });
+                if (exit != 0) { _status.Text = message; return; }
+                _status.Text = "Cover saved. Refresh the library to display it.";
+                await RefreshGamesAsync();
+            }
+            catch (Exception ex) { _status.Text = "Cover update failed: " + ex.Message; }
+        };
+        summary.Children.Add(coverButton);
         Grid.SetColumn(summary, 1);
         hero.Children.Add(summary);
         _content.Children.Add(Panel(hero, new Thickness(22)));
