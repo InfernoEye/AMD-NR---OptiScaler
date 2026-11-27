@@ -915,6 +915,8 @@ def installed_components(executable: Path) -> list:
 
 
 def remove_component(executable: Path, asset: str, *, backup_modified: bool = False) -> dict:
+    from launcher_maintenance import _ensure_not_running
+    _ensure_not_running(executable)
     records = _component_records(executable)
     if asset not in records:
         raise ValueError("Component not managed")
