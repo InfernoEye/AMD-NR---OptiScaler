@@ -84,6 +84,39 @@ python3 Launcher/Avalonia/amdnr_launcher.py --remove-custom-game "/path/to/game"
 
 The registry only stores the game's display name and local installation folder. Game installation files are never modified when adding, editing, or forgetting the entry.
 
+## Differential library updates and remembered executables
+
+Normal startup and **Refresh** now use a persistent game index stored at
+`${XDG_STATE_HOME:-~/.local/state}/amdnr/library-index.json`.
+Instead of crawling every game for executables, the launcher reads installed
+Steam `appmanifest_*.acf` records and the saved custom-game registry, then
+reconciles this index:
+
+- Keep unchanged installed entries and their last known Windows `.exe`.
+- Check that remembered `.exe` and cover-art files still exist; drop stale
+  executable references without changing game files.
+- Add newly installed Steam games and custom entries, and remove Steam entries
+  whose installations/manifests have disappeared.
+- Retain custom entries on temporarily disconnected drives. Explicit user
+  executable preferences remain separate from this index.
+- Opening a game with a valid indexed `.exe` reuses it immediately; the game's
+  **Rescan** action can rebuild its candidates. The Library's
+  **Rescan Library** performs the deeper all-games executable scan and updates
+  both the audit snapshot and executable index.
+
+The index is saved atomically with owner-only permissions. Normal Refresh does
+**not** perform a full executable scan or replace the saved audit with newly
+computed readiness results. Previously saved readiness can be out of date until
+you explicitly rescan.
+
+```bash
+# Fast manifest reconciliation; also persists the index
+python3 Launcher/Avalonia/amdnr_launcher.py --library-differential-json
+
+# Full executable audit, only when requested
+python3 Launcher/Avalonia/amdnr_launcher.py --library-audit-json
+```
+
 ## Library readiness audit
 
 On the **Library** page, select **Analyze Library** to perform an on-demand
