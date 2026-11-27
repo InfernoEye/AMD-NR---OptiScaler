@@ -752,6 +752,45 @@ public sealed class MainWindow : Window
         _installationStatus = Text("", 14, ForegroundBrush);
         installStatus.Children.Add(_installationStatus);
         section.Children.Add(Panel(installStatus, new Thickness(14)));
+        var inspect = Button("VERIFY INSTALLED FILES");
+        var inspection = new StackPanel { Spacing = 6 };
+        inspect.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null || string.IsNullOrWhiteSpace(_exe) || !File.Exists(_exe))
+                return;
+            _busy = true;
+            inspect.IsEnabled = false;
+            _status.Text = "Verifying installed files and backups…";
+            try
+            {
+                var report = await _backend.InstallationAsync(_exe);
+                inspection.Children.Clear();
+                if (!report.Installed)
+                    inspection.Children.Add(Text("No installation record exists for this executable.", 13, MutedBrush));
+                else if (report.Status == "invalid_record")
+                    inspection.Children.Add(Text("Installation record needs attention: " + report.Error,
+                        13, ForegroundBrush));
+                else
+                {
+                    inspection.Children.Add(Text(report.Status == "healthy"
+                        ? "✓  Installation files verified" : "!  Installation needs attention",
+                        15, report.Status == "healthy" ? AccentBrush : ForegroundBrush,
+                        FontWeight.SemiBold));
+                    inspection.Children.Add(Text(
+                        $"Verified: {report.Verified}/{report.Files}  ·  Missing: {report.Missing}" +
+                        $"  ·  Modified: {report.Modified}  ·  Missing backups: {report.BackupsMissing}",
+                        13, MutedBrush));
+                    inspection.Children.Add(Text("Proxy DLL: " + (report.Alias ?? "unknown"), 13));
+                    inspection.Children.Add(Text("Installed from: " +
+                        (report.SourceArchive ?? "Unknown (older install record)"), 13, MutedBrush));
+                }
+                _status.Text = "Installation inventory checked. No files were modified.";
+            }
+            catch (Exception ex) { _status.Text = "Installation verification failed: " + ex.Message; }
+            finally { _busy = false; inspect.IsEnabled = true; RefreshInstallStatus(); }
+        };
+        section.Children.Add(inspect);
+        section.Children.Add(inspection);
         RefreshInstallStatus();
 
         section.Children.Add(Text("PROXY DLL NAME", 11, MutedBrush, FontWeight.Bold));
