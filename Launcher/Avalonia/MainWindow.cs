@@ -1322,7 +1322,7 @@ public sealed class MainWindow : Window
                 ColumnDefinitions = new ColumnDefinitions("*,Auto"),
                 Children =
                 {
-                    Text("●  AMDNR LINUX", 10, AccentBrush, FontWeight.Bold),
+                    Text("AMDNR  /  LINUX LIBRARY", 10, AccentBrush, FontWeight.Bold),
                 },
             },
         };
