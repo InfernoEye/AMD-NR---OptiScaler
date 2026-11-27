@@ -2010,10 +2010,20 @@ public sealed class MainWindow : Window
                     (result.ExtractedBytes / (1024.0 * 1024 * 1024)).ToString("F2") +
                     " GiB extracted: " + string.Join(", ", result.Files.Take(12)) +
                     (result.Files.Count > 12 ? "…" : ""), 12, MutedBrush));
+                if (result.SafetyLimitExceeded)
+                {
+                    previewDetails.Children.Add(Text(
+                        "SAFETY BLOCK: Archive exceeds 12 GiB total or 8 GiB per file. " +
+                        "Preview only; installation disabled.", 13, AccentBrush, FontWeight.Bold));
+                    foreach (var file in result.LargestFiles)
+                        previewDetails.Children.Add(Text(file.Name + " — " +
+                            (file.Bytes / (1024.0 * 1024 * 1024)).ToString("F2") +
+                            " GiB unpacked", 12, MutedBrush));
+                }
                 if (result.Conflicts.Count > 0)
                     previewDetails.Children.Add(Text("Existing files block installation: " +
                         string.Join(", ", result.Conflicts.Take(8)), 12, MutedBrush));
-                else
+                else if (result.Installable)
                 {
                     previewedTag = chosen.Tag;
                     previewedAsset = chosen.Asset;
@@ -2021,7 +2031,9 @@ public sealed class MainWindow : Window
                 }
                 _status.Text = result.Installable
                     ? "Component verified. Review the file list and select Install."
-                    : "Component install blocked by existing files.";
+                    : result.SafetyLimitExceeded
+                        ? "Archive size exceeds extraction limits; inspect the largest files below."
+                        : "Component install blocked by existing files.";
             }
             catch (Exception ex) { _status.Text = "Component preview failed: " + ex.Message; }
             finally { _busy = false; previewComponent.IsEnabled = true; }
