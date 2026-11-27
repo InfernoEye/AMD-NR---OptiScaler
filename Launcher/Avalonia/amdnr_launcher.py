@@ -941,8 +941,11 @@ def remove_component(executable: Path, asset: str, *, backup_modified: bool = Fa
         preserved = []
         for name in sorted(set(match["modified"])):
             dest = _component_target(root, name)
-            if dest.is_symlink() or not dest.is_file():
-                raise ValueError("Modified managed file missing or unsafe: " + name)
+            if dest.is_symlink() or (dest.exists() and not dest.is_file()):
+                raise ValueError("Modified managed file is unsafe: " + name)
+            if not dest.exists():
+                preserved.append({"path": name, "missing": True})
+                continue
             target = _component_target(modified_snapshot, name)
             target.parent.mkdir(parents=True, exist_ok=True)
             before = _digest(dest)
@@ -980,7 +983,13 @@ def remove_component(executable: Path, asset: str, *, backup_modified: bool = Fa
         for temp, dest in staged:
             os.replace(temp, dest)
         for name in rec["files"]:
-            _component_target(root, name).unlink()
+            dest = _component_target(root, name)
+            if dest.is_symlink():
+                raise ValueError("Unsafe modified component symlink: " + name)
+            if backup_modified:
+                dest.unlink(missing_ok=True)
+            else:
+                dest.unlink()
         del records[asset]
         _save_component_records(executable, records)
     finally:
