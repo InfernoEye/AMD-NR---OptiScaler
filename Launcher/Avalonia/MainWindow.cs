@@ -1994,15 +1994,14 @@ public sealed class MainWindow : Window
         };
         panel.Children.Add(replaceApproval);
         panel.Children.Add(backupModifiedApproval);
-        var replaceAddonApproval = new CheckBox
-        {
-            Content = "Back up and replace existing unowned game files needed by selected add-ons. " +
-                      "Do not replace files owned by the Linux bridge or other installed add-ons.",
-            Foreground = ForegroundBrush, IsChecked = false, IsVisible = false,
-        };
-        panel.Children.Add(replaceAddonApproval);
         var addonConflicts = Text("", 12, MutedBrush);
         panel.Children.Add(addonConflicts);
+        // An explicit action replaces the old approve-checkbox-then-Apply flow.
+        // Clicking it approves only the previewed, replaceable unmanaged files.
+        var replaceAddonNow = Button("BACK UP & REPLACE FILES", true);
+        replaceAddonNow.IsVisible = false;
+        replaceAddonNow.IsEnabled = false;
+        panel.Children.Add(replaceAddonNow);
         var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
         var install = Button("INSTALL AMDNR", true);
         var uninstall = Button("UNINSTALL AMDNR");
@@ -2130,8 +2129,7 @@ public sealed class MainWindow : Window
                         messages.Add(release.Name + ": preview failed: " + ex.Message);
                     }
                 }
-                replaceAddonApproval.IsVisible = addonRequiresReplacement;
-                if (!addonRequiresReplacement) replaceAddonApproval.IsChecked = false;
+                replaceAddonNow.IsVisible = addonRequiresReplacement;
                 addonConflicts.Text = string.Join("\n", messages);
             }
             finally
@@ -2228,10 +2226,14 @@ public sealed class MainWindow : Window
             install.IsEnabled = !busy && !migrationPending &&
                 (bridgeInstalled ? addOnsSelected && !addonPreviewBusy &&
                     (!addonHasBlockedConflicts || removeFirst) &&
-                    (!addonRequiresReplacement || replaceAddonApproval.IsChecked == true) &&
+                    !addonRequiresReplacement &&
                     (!removalModified || backupModifiedApproval.IsChecked == true) :
                     (!conflicts || replaceApproval.IsChecked == true) &&
                     (ready || compilerApproval.IsChecked == true));
+            replaceAddonNow.IsEnabled = !busy && bridgeInstalled && !migrationPending &&
+                !addonPreviewBusy && addonRequiresReplacement &&
+                (!addonHasBlockedConflicts || removeFirst) &&
+                (!removalModified || backupModifiedApproval.IsChecked == true);
             uninstall.IsEnabled = !busy && bridgeInstalled;
             forceUninstall.IsEnabled = !busy && bridgeInstalled && confirmForce.IsChecked == true;
             refresh.IsEnabled = !busy;
@@ -2357,7 +2359,7 @@ public sealed class MainWindow : Window
             }
         }
 
-        async Task RunInstall()
+        async Task RunInstall(bool approveReplacement = false)
         {
             if (busy || migrationPending) return;
             if (bridgeInstalled && !selectedAddons.Any(x =>
@@ -2365,7 +2367,7 @@ public sealed class MainWindow : Window
             bool removeFirst = selectedAddons.Any(x =>
                 x.Option.IsChecked != true && installedAddons.ContainsKey(x.Release.Asset));
             if (addonPreviewBusy || (addonHasBlockedConflicts && !removeFirst) ||
-                (addonRequiresReplacement && replaceAddonApproval.IsChecked != true))
+                (addonRequiresReplacement && !approveReplacement))
             {
                 feedback.Text = "Review add-on file conflicts and approve safe backups first.";
                 return;
@@ -2450,7 +2452,7 @@ public sealed class MainWindow : Window
                             continue;
                         }
                         var replacement = preview.ConflictCount > 0;
-                        if (replacement && replaceAddonApproval.IsChecked != true)
+                        if (replacement && !approveReplacement)
                         {
                             skipped.Add(release.Name + ": existing files need backup approval: " +
                                 string.Join(", ", preview.Conflicts.Take(5)));
@@ -2487,6 +2489,7 @@ public sealed class MainWindow : Window
         }
 
         install.Click += async (_, _) => await RunInstall();
+        replaceAddonNow.Click += async (_, _) => await RunInstall(approveReplacement: true);
         uninstall.Click += async (_, _) =>
         {
             if (busy || !bridgeInstalled) return;
@@ -2593,7 +2596,6 @@ public sealed class MainWindow : Window
         compilerApproval.IsCheckedChanged += (_, _) => Buttons();
         replaceApproval.IsCheckedChanged += (_, _) => Buttons();
         backupModifiedApproval.IsCheckedChanged += (_, _) => Buttons();
-        replaceAddonApproval.IsCheckedChanged += (_, _) => Buttons();
         refresh.Click += async (_, _) => { await Check(); await LoadOptionalAddons(); };
         reviewOptions.Click += async (_, _) => await PreviewSteam(current.Text ?? "");
         copy.Click += async (_, _) =>
