@@ -76,6 +76,24 @@ public sealed class Backend
         return games;
     }
 
+    public async Task<InstallationReport> InstallationAsync(string executable)
+    {
+        var (exit, output) = await RunAsync(new[] { "--installation-json", "--exe", executable });
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var record = document.RootElement;
+        string? ReadString(string name) =>
+            record.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.String
+                ? item.GetString() : null;
+        int ReadInt(string name) => record.TryGetProperty(name, out var item) &&
+            item.ValueKind == JsonValueKind.Number ? item.GetInt32() : 0;
+        return new InstallationReport(
+            record.GetProperty("installed").GetBoolean(), ReadString("status") ?? "unknown",
+            ReadString("alias"), ReadString("source_archive"), ReadString("source_sha256"),
+            ReadInt("files"), ReadInt("verified"), ReadInt("missing"), ReadInt("modified"),
+            ReadInt("backups_missing"), ReadString("error"));
+    }
+
     public async Task<string?> SavedExecutableAsync(string folder)
     {
         var (exit, output) = await RunAsync(new[] { "--saved-exe", folder });
@@ -130,6 +148,11 @@ public sealed class Backend
 }
 
 public sealed record GameEntry(string Name, string Folder, string? Artwork);
+
+public sealed record InstallationReport(bool Installed, string Status, string? Alias,
+    string? SourceArchive, string? SourceSha256, int Files, int Verified,
+    int Missing, int Modified, int BackupsMissing, string? Error);
+
 
 public sealed record ExecutableEntry(string Path, bool Recommended, bool Suspicious, bool AutoSelect)
 {
