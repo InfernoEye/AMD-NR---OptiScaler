@@ -81,6 +81,9 @@ class LauncherTests(unittest.TestCase):
         with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
             initial = launcher.runtime_diagnostics(self.exe)
             self.assertFalse(initial["mochi_runtime_present"])
+            self.assertFalse(initial["mochi_model_present"])
+            self.assertFalse(initial["mochi_shader_dir_present"])
+            self.assertFalse(initial["mochi_legacy_asi_required"])
             self.assertFalse(initial["daniel_pass_present"])
             self.assertFalse(initial["daniel_weights_present"])
             self.assertEqual(initial["folder"], str(self.game))
@@ -90,6 +93,16 @@ class LauncherTests(unittest.TestCase):
             (self.game / "dlssnr_on_amd_weights.bin").write_bytes(b"mock weights")
             after = launcher.runtime_diagnostics(self.exe)
             self.assertTrue(after["mochi_runtime_present"])
+            self.assertFalse(after["mochi_model_present"])
+            model = self.game / "dlssnr-amd/dlssnr.bin"
+            model.parent.mkdir()
+            model.write_bytes(b"locally derived model")
+            (self.game / "dlssnr-amd/shaders").mkdir()
+            (self.game / "dlssnr-amd/aco").mkdir()
+            after = launcher.runtime_diagnostics(self.exe)
+            self.assertTrue(after["mochi_model_present"])
+            self.assertTrue(after["mochi_shader_dir_present"])
+            self.assertTrue(after["mochi_aco_dir_present"])
             self.assertTrue(after["daniel_pass_present"])
             self.assertTrue(after["daniel_weights_present"])
             self.assertEqual((self.game / "MochizukiNrRuntime.dll").read_bytes(),
