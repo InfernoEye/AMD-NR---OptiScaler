@@ -456,6 +456,42 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(json.loads((snapshot / "manifest.json").read_text())["status"],
                          "restored")
 
+    def test_steam_bridge_preview_uses_archived_managed_aliases(self):
+        exe = self.exe()
+        game = self.root / "steamapps/common/TestGame"
+        record = exe.parent / ".amdnr-linux-install.json"
+        record.write_text(json.dumps({
+            "format": 1, "alias": "dxgi.dll", "files": [
+                {"path": "dxgi.dll", "sha256": "0" * 64, "backed_up": False}
+            ]
+        }))
+        snapshot = Path(migration.snapshot_existing(exe)["snapshot"])
+        migration.mark_installed(snapshot)
+        options = 'WINEDLLOVERRIDES="dxgi=n,b;version=n,b" gamemoderun %command% -novid'
+        outcome = bridge.steam_launch_preview(exe, steam_report={
+            "status": "found", "existing": options
+        })
+        self.assertIn("dxgi.dll", outcome["managed_aliases"])
+        self.assertEqual(outcome["steam_status"], "found")
+        self.assertIn("Old managed DLL override: dxgi=n,b", outcome["removed"])
+        self.assertIn('WINEDLLOVERRIDES="version=n,b"', outcome["preview"])
+        self.assertIn('gamemoderun "', outcome["preview"])
+        self.assertTrue(outcome["wrapper"].endswith("amdnr-linux/run.sh"))
+        self.assertFalse(outcome["steam_modified"])
+
+    def test_steam_bridge_preview_requests_manual_options_when_unavailable(self):
+        exe = self.exe()
+        unavailable = bridge.steam_launch_preview(exe, steam_report={
+            "status": "multiple_profiles", "existing": None
+        })
+        self.assertIsNone(unavailable["preview"])
+        self.assertEqual(unavailable["steam_status"], "multiple_profiles")
+        entered = bridge.steam_launch_preview(
+            exe, steam_report={"status": "multiple_profiles", "existing": None},
+            manual_options='MANGOHUD=1 %command%')
+        self.assertEqual(entered["steam_status"], "manual")
+        self.assertIn('MANGOHUD=1 "', entered["preview"])
+
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
         self.assertEqual(bridge.VERSION, "0.3.7")
