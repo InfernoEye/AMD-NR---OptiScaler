@@ -504,6 +504,8 @@ def install(exe: Path, approved: bool, runtime: str = "lmxxf", *, replace_existi
         raise ValueError("Files changed since preview. Reopen compatibility checks.")
     snapshot = None
     if replace_existing:
+        from launcher_maintenance import _ensure_not_running
+        _ensure_not_running(exe)
         from bridge_migration import snapshot_existing
         snapshot = snapshot_existing(exe).get("snapshot")
     command = [sys.executable, str(manager), "install", str(prepared_path(runtime)),
