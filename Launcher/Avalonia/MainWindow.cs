@@ -6,7 +6,6 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
-using Avalonia.Threading;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -35,7 +34,6 @@ public sealed class MainWindow : Window
     private GameEntry? _selectedGame;
     private IReadOnlyList<ExecutableEntry> _exeCandidates = Array.Empty<ExecutableEntry>();
     private bool _showAlternativeExecutables;
-    private bool _onGameDetails;
     private readonly Dictionary<string, Button> _navigation = new();
     private Backend? _backend;
     private List<GameEntry> _games = new();
@@ -61,7 +59,9 @@ public sealed class MainWindow : Window
         Width = 1120;
         Height = 750;
         MinWidth = 900;
-        MinHeight = 610;
+        MinHeight = 480;
+        // Never change window bounds in response to content changes.
+        SizeToContent = SizeToContent.Manual;
         Background = BackgroundBrush;
         FontFamily = new FontFamily("Inter, Noto Sans, sans-serif");
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -72,13 +72,17 @@ public sealed class MainWindow : Window
         var main = new Grid { RowDefinitions = new RowDefinitions("90,*") };
         Grid.SetColumn(main, 1);
         main.Children.Add(BuildHeader());
+        // The trailing spacer is real scroll content, not ScrollViewer padding.
+        // It guarantees the final controls can scroll well above the window edge.
+        var scrollBody = new StackPanel { Spacing = 0 };
+        scrollBody.Children.Add(_content);
+        scrollBody.Children.Add(new Border { Height = 140, IsHitTestVisible = false });
         _pageScroller = new ScrollViewer
         {
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Content = _content,
-            // A small end inset allows the last action to scroll fully into view.
-            Padding = new Thickness(28, 10, 28, 26),
+            Content = scrollBody,
+            Padding = new Thickness(28, 10, 28, 12),
         };
         Grid.SetRow(_pageScroller, 1);
         main.Children.Add(_pageScroller);
@@ -207,51 +211,15 @@ public sealed class MainWindow : Window
         return header;
     }
 
-    private void AdjustWindowForContent(bool gameDetails, bool resetScroll = true)
-    {
-        if (WindowState != WindowState.Normal) return;
-        // Fit game details within the usable screen where possible, and scroll
-        // normally if content exceeds the desktop height.
-        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
-        if (screen is not null)
-        {
-            var limit = screen.WorkingArea.Height / screen.Scaling - 24;
-            MaxHeight = Math.Max(MinHeight, limit);
-        }
-        if (gameDetails)
-        {
-            // SizeToContent is reset by some X11 window managers. Apply an
-            // explicit measured height as a fallback after the layout updates.
-            SizeToContent = SizeToContent.Height;
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (!_onGameDetails || _selectedGame is null ||
-                    WindowState != WindowState.Normal) return;
-                _content.Measure(new Size(Math.Max(500, Bounds.Width - 290),
-                    double.PositiveInfinity));
-                // Header is the only fixed chrome. Status cannot obscure the page.
-                var desired = _content.DesiredSize.Height + 90 + 10 + 26;
-                SizeToContent = SizeToContent.Manual;
-                Height = Math.Clamp(desired, MinHeight, MaxHeight);
-            }, DispatcherPriority.Loaded);
-        }
-        else
-        {
-            SizeToContent = SizeToContent.Manual;
-            Height = Math.Min(750, MaxHeight);
-        }
-        if (resetScroll)
-            _pageScroller.Offset = new Vector(0, 0);
-    }
-
     private void Clear(string section)
     {
         _content.Children.Clear();
-        _onGameDetails = false;
         _currentSection = section;
         _breadcrumb.Text = "AMDNR  /  " + section;
         Highlight(section);
-        AdjustWindowForContent(false);
+        // Navigation returns to the beginning of the new page; user-sized
+        // window dimensions are intentionally unchanged.
+        _pageScroller.Offset = new Vector(0, 0);
     }
 
     private void ShowLibrary()
@@ -488,7 +456,6 @@ public sealed class MainWindow : Window
         if (_selectedGame is not { } game) { ShowLibrary(); return; }
         Clear("Library");
         _breadcrumb.Text = "AMDNR  /  Library  /  " + game.Name;
-        _onGameDetails = true;
 
         var back = Button("←  ALL GAMES");
         back.Click += (_, _) => ShowLibrary();
@@ -685,7 +652,6 @@ public sealed class MainWindow : Window
                         foreach (var name in trackedFiles)
                             fileList.Children.Add(Text("•  " + name, 12, MutedBrush));
                     }
-                    AdjustWindowForContent(true, resetScroll: false);
                 };
                 controls.Children.Add(showFiles);
             }
@@ -696,7 +662,6 @@ public sealed class MainWindow : Window
             recordPanel.Children.Add(fileScroller);
             _content.Children.Add(Panel(recordPanel));
         }
-        AdjustWindowForContent(true);
     }
 
 
