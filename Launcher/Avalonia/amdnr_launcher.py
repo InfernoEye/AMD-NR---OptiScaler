@@ -529,6 +529,12 @@ def _save_component_records(executable: Path, records: dict) -> None:
         temp.unlink(missing_ok=True)
 
 
+# Model/runtime components can expand far beyond their compressed ZIP size.
+# Keep bounded extraction and enforce available storage at installation time.
+MAX_COMPONENT_UNPACKED = 12 * 1024 ** 3
+MAX_COMPONENT_FILE = 8 * 1024 ** 3
+
+
 def _component_entries(archive: Path) -> list:
     with zipfile.ZipFile(archive) as source:
         entries, seen, size = [], set(), 0
@@ -543,9 +549,13 @@ def _component_entries(archive: Path) -> list:
             mode = (entry.external_attr >> 16) & 0o170000
             if mode not in (0, 0o100000):
                 raise ValueError("Archive contains links or special files")
+            if (entry.file_size > MAX_COMPONENT_FILE or
+                    entry.file_size < 0 or entry.compress_size < 0 or
+                    entry.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)):
+                raise ValueError("Unsupported or oversized component file")
             size += entry.file_size
-            if len(entries) >= 500 or size > 1024 * 1024 * 1024:
-                raise ValueError("Component archive too large")
+            if len(entries) >= 500 or size > MAX_COMPONENT_UNPACKED:
+                raise ValueError("Component exceeds 12 GiB extracted size limit")
             if name.casefold() in seen:
                 raise ValueError("Duplicate archive path")
             seen.add(name.casefold())
@@ -590,6 +600,7 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
         except ValueError:
             conflicts.append(entry.filename)
     return {"tag": tag, "asset": asset, "files": [e.filename for e in entries],
+            "extracted_bytes": sum(e.file_size for e in entries),
             "conflicts": conflicts, "installable": not conflicts}
 
 
@@ -602,6 +613,11 @@ def install_component(executable: Path, tag: str, asset: str) -> dict:
         raise ValueError("Component already managed")
     root = executable.resolve().parent
     archive = _release_cache_dir() / tag / asset
+    # Leave additional headroom for filesystem metadata and other game changes.
+    required = sum(e.file_size for e in _component_entries(archive))
+    free = shutil.disk_usage(root).free
+    if free < required + max(128 * 1024 ** 2, required // 20):
+        raise ValueError("Insufficient free disk space for extracted component")
     added, hashes = [], {}
     try:
         with zipfile.ZipFile(archive) as source:
