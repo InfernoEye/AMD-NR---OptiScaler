@@ -228,6 +228,12 @@ def prepare(compiler: Path) -> dict:
     manifest = json.loads((src / "RELEASE-MANIFEST.json").read_text())
     if manifest.get("release") != "linux-v" + VERSION:
         raise ValueError("Community release manifest identifies a different release.")
+    # Upstream pins Ubuntu .deb files by SHA-256 but its primary archive
+    # URLs sometimes return 404. First reuse exact pinned packages from the
+    # distro's package archive cache; otherwise try Ubuntu mirrors with the
+    # original SHA-256. No installed system .so is substituted.
+    from bridge_deps import reuse_or_fetch_pinned_ubuntu_packages
+    dependency_actions = reuse_or_fetch_pinned_ubuntu_packages(cache_dir() / "upstream-cache")
     command = [interpreter, str(src / "linux/setup.py"), "prepare",
                "--compiler", str(compiler.resolve()),
                "--output", str(prepared_path()),
@@ -242,7 +248,8 @@ def prepare(compiler: Path) -> dict:
     if not status()["prepared"]:
         raise ValueError("Community setup completed without the expected staged package.")
     return {"prepared": True, "package": str(prepared_path()),
-            "provider": PROJECT, "output": finished.stdout[-1500:]}
+            "provider": PROJECT, "dependency_actions": dependency_actions,
+            "output": finished.stdout[-1500:]}
 
 
 def install(exe: Path, approved: bool) -> dict:
