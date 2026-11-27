@@ -47,7 +47,7 @@ The version and asset name come from the release catalog; they are not game-name
 
 ## Selecting a game executable
 
-Select a Steam game from the library, then choose **Find Game Executables** to list candidate Windows executables. The suggestions rank common game-binary locations (such as `Binaries/Win64`) and mark common installer/anti-cheat filenames as suspicious. This is only a heuristic: **choose the actual game EXE before installing**. The launcher no longer silently picks the first EXE.
+Select a Steam game from the library. Avalonia now scans its Windows executables and displays the best heuristic suggestion immediately. Choose **Use This Executable** to confirm it, or use **Change Executable** to see alternatives. Developer tools, editors, setup programs, and anti-cheat binaries receive lower rankings. You can also browse manually or rescan. **No executable is approved for installation until explicitly confirmed.** A suggestion is never proof that the file is the correct game binary.
 
 The CLI supports the same scan:
 
