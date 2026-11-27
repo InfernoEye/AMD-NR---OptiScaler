@@ -256,6 +256,22 @@ public sealed class Backend
         return entries;
     }
 
+    public async Task<SteamUserOptions> SteamUserOptionsAsync(
+        string folder, string alias, CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(
+            new[] { "--steam-user-options-json", folder, "--alias", alias }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
+        string? ReadString(string name) =>
+            root.TryGetProperty(name, out var item) &&
+            item.ValueKind == JsonValueKind.String ? item.GetString() : null;
+        return new SteamUserOptions(ReadString("status") ?? "unavailable",
+            ReadString("existing"), ReadString("preview"),
+            ReadString("compose_status"));
+    }
+
     public async Task<IReadOnlyList<ExecutableEntry>> ExecutablesAsync(
         string gameFolder, CancellationToken token = default)
         => (await ScanExecutablesAsync(gameFolder, token)).Candidates;
@@ -279,6 +295,9 @@ public sealed class Backend
     }
 
 }
+
+public sealed record SteamUserOptions(string Status, string? Existing,
+    string? Preview, string? ComposeStatus);
 
 public sealed record GameEntry(string Name, string Folder, string? Artwork, bool Custom = false);
 
