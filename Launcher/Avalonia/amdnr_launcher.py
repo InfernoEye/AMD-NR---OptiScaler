@@ -845,7 +845,13 @@ def remove_component(executable: Path, asset: str) -> dict:
     finally:
         for temp, _ in staged:
             temp.unlink(missing_ok=True)
-    # Backups retained after removal for additional manual recovery.
+    # Once every original is restored and registry update succeeds, clean stale backups
+    # so future explicit reinstalls of the same version are possible.
+    if backup_dir.is_dir() and not backup_dir.is_symlink():
+        try:
+            shutil.rmtree(backup_dir)
+        except OSError:
+            pass
     return {"status": "removed", "asset": asset,
             "files": len(rec["files"]), "restored": len(rec.get("replaced", {}))}
 
