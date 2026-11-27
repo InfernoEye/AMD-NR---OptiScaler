@@ -97,7 +97,7 @@ python3 Launcher/Avalonia/amdnr_launcher.py --steam-launch-json "/path/to/steama
 python3 Launcher/Avalonia/amdnr_launcher.py --exe-scan-json "/path/to/steamapps/common/Game"
 ```
 
-The first command reports cached launch metadata and whether Steam has a **present Windows executable** for the installation; the second shows how the combined Steam-plus-filesystem scanner would select an EXE. For example, Steam may declare a Windows `game/bin/win64/cs2.exe` and Linux `game/cs2.sh`, but a Linux-native installation may only contain the latter. In that case the Windows executable is **not** installed and cannot be selected as an AMDNR DLL target. Filesystem scans and cached launch definitions cannot prove runtime compatibility or bypass anti-cheat restrictions.
+The first command reports cached launch metadata and whether Steam has a **present Windows executable** for the installation; the second shows how the combined Steam-plus-filesystem scanner would select an EXE. The Steam report also lists `metadata_sections`, `launch_entries`, `windows_declared`, `windows_missing`, `windows_invalid`, and `linux_declared` so you can distinguish a missing launch section from Windows paths that are declared but not installed. For example, Steam may declare a Windows `game/bin/win64/cs2.exe` and Linux `game/cs2.sh`, but a Linux-native installation may only contain the latter. In that case the Windows executable is **not** installed and cannot be selected as an AMDNR DLL target. Filesystem scans and cached launch definitions cannot prove runtime compatibility or bypass anti-cheat restrictions.
 
 ## Windows executable discovery
 
