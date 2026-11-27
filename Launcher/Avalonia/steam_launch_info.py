@@ -231,7 +231,7 @@ def resolve_windows_launch(appinfo: dict | None, folder: Path) -> dict:
               "metadata_sections": [], "launch_entries": 0,
               "windows_declared": 0, "windows_missing": [],
               "windows_invalid": [], "linux_declared": [],
-              "windows_optional": 0}
+              "windows_optional": 0, "platform_neutral_declared": 0}
     if not isinstance(appinfo, dict):
         return result
     outer = appinfo.get("appinfo", appinfo)
@@ -271,8 +271,14 @@ def resolve_windows_launch(appinfo: dict | None, folder: Path) -> dict:
             linux += 1
             if len(result["linux_declared"]) < 12:
                 result["linux_declared"].append(relative)
-        if "windows" not in platform:
+        # Steamworks permits "All OSes" launch options: no oslist at all.
+        # Recognize a platform-neutral target only when its path is an .exe.
+        # Explicit Linux/macOS entries must never be treated as Windows.
+        neutral_windows = not platform.strip() and relative.lower().endswith(".exe")
+        if "windows" not in platform and not neutral_windows:
             continue
+        if neutral_windows:
+            result["platform_neutral_declared"] += 1
         result["windows_declared"] += 1
         if relative.startswith("/") or ":" in relative or "\x00" in relative or \
                 any(p in ("", ".", "..") for p in relative.split("/")):
