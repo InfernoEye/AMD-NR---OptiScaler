@@ -72,8 +72,8 @@ class EnvironmentTests(unittest.TestCase):
         self.assertIn("EasyAntiCheat", report["filenames"])
 
     def test_redacted_support_bundle_does_not_leak_secrets(self):
-        (self.game / "OptiScaler.log").write_text("password=super-secret\\nHello")
-        (self.game / "OptiScaler.ini").write_text("[Auth]\\ntoken=PRIVATE")
+        (self.game / "OptiScaler.log").write_text("password=super-secret\nHello")
+        (self.game / "OptiScaler.ini").write_text("[Auth]\ntoken=PRIVATE")
         with (patch.object(core, "steam_roots", return_value=[]),
               patch.object(environment, "gpu_probe", return_value=[]),
               patch.object(environment, "game_running", return_value={"running": False}),
@@ -81,14 +81,14 @@ class EnvironmentTests(unittest.TestCase):
             result = environment.support_bundle(self.exe, self.root / "reports")
         self.assertTrue(result["local_only"])
         with zipfile.ZipFile(result["file"]) as bundle:
-            content = "\\n".join(bundle.read(name).decode() for name in bundle.namelist())
+            content = "\n".join(bundle.read(name).decode() for name in bundle.namelist())
             self.assertNotIn("super-secret", content)
             self.assertNotIn("PRIVATE", content)
             self.assertIn("report.json", bundle.namelist())
 
     def test_performance_analysis_has_bounded_percentiles(self):
         csv_file = self.root / "performance.csv"
-        csv_file.write_text("frametime,other\\n10,a\\n20,b\\n30,c\\n40,d\\n")
+        csv_file.write_text("frametime,other\n10,a\n20,b\n30,c\n40,d\n")
         result = environment.analyze_mangohud_csv(csv_file)
         self.assertEqual(result["frames"], 4)
         self.assertEqual(result["average_ms"], 25)
