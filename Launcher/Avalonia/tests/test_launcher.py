@@ -1058,7 +1058,7 @@ class LauncherTests(unittest.TestCase):
             def __exit__(self, *_args):
                 pass
             def read(self, size=-1):
-                return ("a" * 64 + "  v0.6.0-Runtime.zip\\n").encode()
+                return ("a" * 64 + "  v0.6.0-Runtime.zip" + chr(10)).encode()
         with (patch.object(launcher, "_github_json", return_value=metadata),
               patch.object(launcher.urllib.request, "urlopen", return_value=Response())):
             with self.assertRaisesRegex(ValueError, "conflicts"):
