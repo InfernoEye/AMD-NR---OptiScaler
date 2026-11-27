@@ -2059,7 +2059,9 @@ public sealed class MainWindow : Window
             try
             {
                 var installed = await _backend.InstalledComponentsAsync(gameExe);
-                var catalog = await _backend.ComponentsAsync();
+                IReadOnlyList<ReleaseEntry> catalog;
+                try { catalog = await _backend.ComponentsAsync(); }
+                catch { catalog = Array.Empty<ReleaseEntry>(); }
                 var supported = catalog.Where(x =>
                     !x.Asset.EndsWith("-Runtime.zip", StringComparison.OrdinalIgnoreCase) &&
                     !x.Asset.Contains("lmxxf", StringComparison.OrdinalIgnoreCase) &&
@@ -2084,7 +2086,9 @@ public sealed class MainWindow : Window
                 selectedAddons.Clear();
                 extraAddonOptions.Children.Clear();
                 extraAddonOptions.Children.Add(addonCatalogueState);
-                addonCatalogueState.Text = "Check to install; uncheck to remove, then Apply Changes.";
+                addonCatalogueState.Text = catalog.Count == 0
+                    ? "Release catalog unavailable. Installed modules can still be unchecked and removed."
+                    : "Check to install; uncheck to remove, then Apply Changes.";
                 foreach (var release in supported)
                 {
                     var existing = installedAddons.ContainsKey(release.Asset);
