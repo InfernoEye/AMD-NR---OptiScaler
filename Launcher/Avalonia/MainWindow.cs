@@ -186,17 +186,26 @@ public sealed class MainWindow : Window
     private async Task ShowOnboardingAsync(bool replay = false)
     {
         if (!replay && File.Exists(_onboardingPath)) return;
-        var pages = new (string Heading, string Description)[]
-        {
-            ("Welcome to AMDNR Linux", "This independent Linux launcher helps you find games, inspect AMDNR packages and manage game files. Steam and Proton settings are not silently changed."),
-            ("Your game library", "Use Grid for artwork cards or List for compact rows. Search, select a game, and confirm the correct Windows executable. Steam, Heroic, Lutris and custom entries can be discovered."),
-            ("Install with control", "Review the package, checksums and proxy DLL before installing. The launcher backs up replaced files. Steam launch options remain a preview for you to copy only if needed."),
-            ("Repair and diagnostics", "Installed tracks recorded files, Doctor checks integrity, and Repair/Recovery handles interrupted operations. Verify the report before changing a game."),
-            ("Linux runtime limitations", "lmxxf has community reports of working under some Proton setups, but compatibility depends on your game and GPU. Daniel is experimental; 0.8.0 is not supported on Linux."),
-        };
+        var pages = UiLanguage.Current == "pl"
+            ? new (string Heading, string Description)[]
+            {
+                ("Witaj w AMDNR Linux", "Niezależny launcher Linux pomaga znaleźć gry, przeglądać pakiety AMDNR i zarządzać plikami. Ustawienia Steam i Protona nie są zmieniane po cichu."),
+                ("Twoja biblioteka gier", "Widok Siatka pokazuje okładki, a Lista — kompaktowe wiersze. Wybierz grę i potwierdź prawidłowy plik Windows .exe. Obsługiwane są Steam, Heroic, Lutris i gry dodane ręcznie."),
+                ("Instalacja pod Twoją kontrolą", "Sprawdź pakiet, sumy SHA-256 i nazwę DLL przed instalacją. Launcher tworzy kopie zapasowe. Opcje uruchamiania Steam pozostają propozycją do samodzielnego skopiowania."),
+                ("Naprawa i diagnostyka", "Zainstalowane pokazuje zapisane instalacje, Diagnostyka sprawdza pliki, a Naprawa i Odzyskiwanie obsługują przerwane operacje. Sprawdź raport przed zmianami."),
+                ("Ograniczenia środowiska Linux", "Działanie lmxxf pod Protonem zgłaszają użytkownicy, ale zależy od gry i GPU. Daniel pozostaje eksperymentalny; wersja 0.8.0 nie jest obsługiwana na Linuksie."),
+            }
+            : new (string Heading, string Description)[]
+            {
+                ("Welcome to AMDNR Linux", "This independent Linux launcher helps you find games, inspect AMDNR packages and manage game files. Steam and Proton settings are not silently changed."),
+                ("Your game library", "Use Grid for artwork cards or List for compact rows. Search, select a game, and confirm the correct Windows executable. Steam, Heroic, Lutris and custom entries can be discovered."),
+                ("Install with control", "Review the package, checksums and proxy DLL before installing. The launcher backs up replaced files. Steam launch options remain a preview for you to copy only if needed."),
+                ("Repair and diagnostics", "Installed tracks recorded files, Doctor checks integrity, and Repair/Recovery handles interrupted operations. Verify the report before changing a game."),
+                ("Linux runtime limitations", "lmxxf has community reports of working under some Proton setups, but compatibility depends on your game and GPU. Daniel is experimental; 0.8.0 is not supported on Linux."),
+            };
         var dialog = new Window
         {
-            Title = "AMDNR Linux · Getting started",
+            Title = "AMDNR Linux · " + UiLanguage.Translate("Getting started"),
             Width = 540, Height = 350,
             MinWidth = 390, MinHeight = 310,
             CanResize = false,
@@ -209,17 +218,19 @@ public sealed class MainWindow : Window
         var description = Text("", 15, ForegroundBrush);
         description.MinHeight = 118;
         var controls = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
-        var skip = Button("SKIP INTRODUCTION");
-        var back = Button("← BACK");
-        var next = Button("NEXT →", true);
+        var skip = Button(UiLanguage.Translate("Skip introduction").ToUpperInvariant());
+        var back = Button("← " + UiLanguage.Translate("Back").ToUpperInvariant());
+        var next = Button(UiLanguage.Translate("Next").ToUpperInvariant() + " →", true);
         var pageIndex = 0;
         void Render()
         {
-            step.Text = $"GETTING STARTED   {pageIndex + 1} / {pages.Length}";
+            step.Text = $"{UiLanguage.Translate("Getting started").ToUpperInvariant()}   {pageIndex + 1} / {pages.Length}";
             heading.Text = pages[pageIndex].Heading;
             description.Text = pages[pageIndex].Description;
             back.IsEnabled = pageIndex > 0;
-            next.Content = pageIndex == pages.Length - 1 ? "FINISH" : "NEXT →";
+            next.Content = pageIndex == pages.Length - 1
+                ? UiLanguage.Translate("Finish").ToUpperInvariant()
+                : UiLanguage.Translate("Next").ToUpperInvariant() + " →";
         }
         void MarkViewed()
         {
