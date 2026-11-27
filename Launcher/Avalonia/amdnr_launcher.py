@@ -690,6 +690,8 @@ def install(archive: Path, executable: Path, alias: str) -> str:
                 records.append({"path": relative, "sha256": _digest(target),
                                 "backed_up": previous})
             state_file.write_text(json.dumps({"format": 1, "alias": alias,
+                                             "source_archive": archive.name,
+                                             "source_sha256": _digest(archive),
                                              "files": records}, indent=2) + "\n",
                                   encoding="utf-8")
         except Exception:
@@ -749,6 +751,58 @@ def uninstall(executable: Path) -> tuple[int, list[str]]:
     return restored, warnings
 
 
+def installation_report(executable: Path) -> dict[str, object]:
+    """Read-only file and backup inventory. Compatible with older v1 records."""
+    if not executable.is_file() or executable.suffix.lower() != ".exe":
+        raise ValueError("Select an existing Windows game executable")
+    root = executable.resolve().parent
+    path = root / STATE_NAME
+    if not path.exists():
+        return {"installed": False, "status": "not_installed", "files": 0}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if state.get("format") != 1 or not isinstance(state.get("files"), list):
+            raise ValueError("Invalid installation format")
+        alias = state.get("alias")
+        if alias not in ALIASES:
+            raise ValueError("Unrecognized recorded DLL alias")
+        valid = missing = modified = backup_missing = 0
+        backup = root / BACKUP_NAME / "linux-launcher"
+        for item in state["files"]:
+            if not isinstance(item, dict):
+                raise ValueError("Invalid installation file record")
+            relative = item.get("path", "")
+            if not isinstance(relative, str) or not _safe_member(relative):
+                raise ValueError("Unsafe path in installation record")
+            target = root / relative
+            _check_destination(target, root)
+            if not target.is_file() or target.is_symlink():
+                missing += 1
+            elif _digest(target) != item.get("sha256"):
+                modified += 1
+            else:
+                valid += 1
+            if item.get("backed_up") is True:
+                previous = backup / relative
+                _check_destination(previous, backup)
+                if not previous.is_file() or previous.is_symlink():
+                    backup_missing += 1
+        source = state.get("source_archive")
+        digest = state.get("source_sha256")
+        return {
+            "installed": True,
+            "status": "healthy" if missing + modified + backup_missing == 0 else "needs_attention",
+            "alias": alias,
+            "files": len(state["files"]),
+            "verified": valid, "missing": missing, "modified": modified,
+            "backups_missing": backup_missing,
+            "source_archive": source if isinstance(source, str) else None,
+            "source_sha256": digest if isinstance(digest, str) else None,
+        }
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return {"installed": True, "status": "invalid_record", "error": str(exc)}
+
+
 def doctor_report(executable: Path | None, archive: Path | None) -> dict[str, object]:
     """Read-only checks; never modify a game or claim Proton GPU compatibility."""
     checks: list[dict[str, object]] = []
@@ -776,28 +830,17 @@ def doctor_report(executable: Path | None, archive: Path | None) -> dict[str, ob
                       "No installation managed by this Linux launcher was found beside the EXE",
                       pending=True)
         else:
-            try:
-                state = json.loads(state_path.read_text(encoding="utf-8"))
-                records = state.get("files", [])
-                if state.get("format") != 1 or not isinstance(records, list):
-                    raise ValueError("Invalid installation format")
-                valid = 0
-                problems = 0
-                for item in records:
-                    relative = item.get("path", "") if isinstance(item, dict) else ""
-                    expected = item.get("sha256", "") if isinstance(item, dict) else ""
-                    if not _safe_member(relative):
-                        problems += 1
-                        continue
-                    target = root / relative
-                    if not target.is_file() or target.is_symlink() or _digest(target) != expected:
-                        problems += 1
-                    else:
-                        valid += 1
+            report = installation_report(executable)
+            if report["status"] == "invalid_record":
+                add_check("Installation record", False, str(report["error"]))
+            else:
+                problems = report["missing"] + report["modified"]
                 add_check("Installed AMDNR files", problems == 0,
-                          f"{valid} recorded files verified; {problems} missing or modified")
-            except (OSError, ValueError, KeyError, TypeError) as exc:
-                add_check("Installation record", False, f"Could not validate record: {exc}")
+                          f'{report["verified"]} recorded files verified; '
+                          f'{problems} missing or modified')
+                if report["backups_missing"]:
+                    add_check("Installation backups", False,
+                              f'{report["backups_missing"]} original backups missing')
     return {"checks": checks,
             "note": "Diagnostics check only the Linux file installation and local Steam setup. "
                     "They do not certify GPU support, anti-cheat compatibility or Proton rendering."}
@@ -882,6 +925,7 @@ def main() -> int:
     parser.add_argument("--list", action="store_true", help="List detected Steam games")
     parser.add_argument("--releases-json", action="store_true", help="Show upstream AMDNR release packages as JSON")
     parser.add_argument("--doctor-json", action="store_true", help="Read-only launcher and installation diagnostics")
+    parser.add_argument("--installation-json", action="store_true", help="Inspect installed files, backups and archive origin")
     parser.add_argument("--exes-json", type=Path, metavar="GAME_DIR", help="Find game executable candidates")
     parser.add_argument("--saved-exe", type=Path, metavar="GAME_DIR", help="Get a remembered executable")
     parser.add_argument("--remember-exe", type=Path, metavar="GAME_DIR", help="Remember executable selected with --exe")
@@ -898,7 +942,15 @@ def main() -> int:
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
-    if args.remember_exe is not None:
+    if args.installation_json:
+        if args.exe is None:
+            parser.error("--installation-json requires --exe")
+        try:
+            print(json.dumps(installation_report(args.exe), ensure_ascii=False))
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.remember_exe is not None:
         if args.exe is None:
             parser.error("--remember-exe requires --exe")
         try:
