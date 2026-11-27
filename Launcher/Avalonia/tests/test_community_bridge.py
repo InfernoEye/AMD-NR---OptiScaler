@@ -474,7 +474,7 @@ class BridgeTests(unittest.TestCase):
         })
         self.assertIn("dxgi.dll", outcome["managed_aliases"])
         self.assertEqual(outcome["steam_status"], "found")
-        self.assertIn("Old managed DLL override: dxgi=n,b", outcome["removed"])
+        self.assertIn("Bridge-controlled DXGI override: dxgi=n,b", outcome["removed"])
         self.assertIn('WINEDLLOVERRIDES="version=n,b"', outcome["preview"])
         self.assertIn('gamemoderun "', outcome["preview"])
         self.assertTrue(outcome["wrapper"].endswith("amdnr-linux/run.sh"))
