@@ -25,7 +25,7 @@ if [ -n "${APPDIR:-}" ]; then BASE="$APPDIR"; else BASE="$(CDPATH='' cd -- "$(di
 exec "$BASE/usr/lib/amdnr-python/bin/python3" "$@"
 PYSH
 chmod +x "$OUTPUT/usr/bin/python3"
-"$OUTPUT/usr/bin/python3" -c 'import ssl, tkinter, zipfile, sqlite3; print("Bundled Python OK")'
+"$OUTPUT/usr/bin/python3" -c 'import ssl, zipfile, sqlite3; print("Bundled Python OK")'
 cp "$ROOT/Launcher/Avalonia/"*.py "$OUTPUT/usr/share/amdnr/"
 cp "$ROOT/Launcher/Avalonia/VERSION" "$OUTPUT/usr/share/amdnr/"
 cp -a "$ROOT/Launcher/Avalonia/model-tools" "$OUTPUT/usr/share/amdnr/"
