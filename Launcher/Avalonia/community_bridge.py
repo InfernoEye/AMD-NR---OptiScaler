@@ -238,6 +238,10 @@ def status(exe: Path | None = None, runtime: str = "lmxxf") -> dict:
         "steam_options_unchanged": True,
     }
     if exe is not None:
+        from bridge_migration import pending_snapshot
+        pending = pending_snapshot(exe)
+        report["migration_pending"] = pending is not None
+        report["migration_snapshot"] = str(pending) if pending else None
         report["exe"] = str(exe)
         report["community_installed"] = (exe.parent / "amdnr-linux/run.sh").is_file()
         if not exe.is_file():
@@ -529,6 +533,13 @@ def install(exe: Path, approved: bool, runtime: str = "lmxxf", *, replace_existi
                        "will modify the existing Proton prefix with journaled HIP/compiler files. "
                        "Preserve the community installation folder and backups.",
             "output": finished.stdout[-1600:]}
+
+
+def recover_migration(exe: Path, approved: bool) -> dict:
+    if not approved:
+        raise ValueError("Migration recovery requires explicit user approval.")
+    from bridge_migration import recover_pending
+    return recover_pending(exe)
 
 
 def remove(exe: Path, approved: bool) -> dict:
