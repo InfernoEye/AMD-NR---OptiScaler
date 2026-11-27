@@ -966,6 +966,55 @@ def index_library_executable(folder: Path, executable: Path) -> None:
     _write_library_index(list(index.values()))
 
 
+def installed_games_overview() -> list[dict[str, object]]:
+    """Lightweight installation-record inventory from the saved game index.
+
+    Checks only the indexed executable and its adjacent installation record.
+    No Steam discovery, recursion, file hashing, or modifications occur here.
+    """
+    overview: list[dict[str, object]] = []
+    for row in sorted(_read_library_index().values(),
+                      key=lambda item: str(item.get("name", "")).casefold()):
+        folder_string = row.get("folder")
+        if not isinstance(folder_string, str):
+            continue
+        folder = Path(folder_string)
+        exe = _valid_index_executable(folder, row.get("executable"))
+        if exe is None:
+            continue
+        record_path = Path(exe).parent / STATE_NAME
+        if not record_path.is_file():
+            continue
+        entry: dict[str, object] = {
+            "name": str(row.get("name", folder.name)),
+            "folder": str(folder),
+            "executable": exe,
+            "status": "invalid_record",
+            "alias": None,
+            "tracked_files": 0,
+            "source_archive": None,
+            "custom": bool(row.get("custom", False)),
+        }
+        try:
+            if record_path.is_symlink() or record_path.stat().st_size > 2 * 1024 * 1024:
+                raise ValueError("Invalid installation record file")
+            state = json.loads(record_path.read_text(encoding="utf-8"))
+            if not isinstance(state, dict) or state.get("format") != 1 or \
+                    not isinstance(state.get("files"), list) or \
+                    state.get("alias") not in ALIASES:
+                raise ValueError("Invalid installation record")
+            entry["status"] = "recorded"
+            entry["alias"] = state["alias"]
+            entry["tracked_files"] = len(state["files"])
+            source = state.get("source_archive")
+            if isinstance(source, str) and len(source) < 4096:
+                entry["source_archive"] = source
+        except (OSError, ValueError, TypeError, UnicodeError):
+            pass
+        overview.append(entry)
+    return overview
+
+
 def _library_audit_cache_path() -> Path:
     """Durable per-user snapshot; not stored inside a Steam library or game."""
     state_home = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
@@ -1465,6 +1514,7 @@ def main() -> int:
     parser.add_argument("--releases-json", action="store_true", help="Show upstream AMDNR release packages as JSON")
     parser.add_argument("--doctor-json", action="store_true", help="Read-only launcher and installation diagnostics")
     parser.add_argument("--installation-json", action="store_true", help="Inspect installed files, backups and archive origin")
+    parser.add_argument("--installed-games-json", action="store_true", help="Read cached installation records without scanning game files")
     parser.add_argument("--exes-json", type=Path, metavar="GAME_DIR", help="Find game executable candidates")
     parser.add_argument("--exe-scan-json", type=Path, metavar="GAME_DIR", help="Scan Windows executables and report Linux-native builds")
     parser.add_argument("--steam-launch-json", type=Path, metavar="GAME_DIR", help="Read cached Steam launch configuration for game")
@@ -1507,6 +1557,12 @@ def main() -> int:
             else:
                 remove_custom_game(args.remove_custom_game)
                 print("Custom game entry removed; game files were not changed")
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.installed_games_json:
+        try:
+            print(json.dumps(installed_games_overview(), ensure_ascii=False))
         except (OSError, ValueError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
