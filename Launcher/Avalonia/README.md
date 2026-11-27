@@ -1,5 +1,11 @@
 # Avalonia launcher
 
+> **Acknowledgements:** [AMDNR-Linux by hassanm0301 and contributors](https://github.com/hassanm0301/AMDNR-Linux)
+> has provided valuable public ROCm/HIP bridge research and Proton runtime findings.
+> We have not incorporated its code or binaries; future reuse must comply with its GPL-3.0
+> license and any applicable third-party notices. See
+> [third-party acknowledgements](THIRD_PARTY_ACKNOWLEDGEMENTS.md).
+>
 > **Scope:** This is the Linux/Proton edition of the AMDNR launcher,
 > not a general gaming utility. Follow the official Windows launcher's
 > install/repair/extension workflows wherever possible. See
