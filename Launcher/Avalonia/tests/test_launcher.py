@@ -187,6 +187,90 @@ class LauncherTests(unittest.TestCase):
         # hand-maintained mapping of game names.
         self.assertEqual(get.call_args.args[3], self.game)
 
+    def test_release_catalog_filters_to_checksum_backed_amdnr_zip(self):
+        releases = [
+            {"tag_name": "Alpha1", "name": "AMDNR Alpha 1", "draft": False,
+             "assets": [
+                 {"name": "SHA256SUMS.txt", "size": 128},
+                 {"name": "AMDNR-v1.zip", "size": 120},
+                 {"name": "AMDNR-Launcher.exe", "size": 900},
+             ]},
+            {"tag_name": "Alpha2", "assets": [
+                {"name": "AMDNR-v2.zip", "size": 120},
+            ]},
+        ]
+        with patch.object(launcher, "_github_json", return_value=releases):
+            catalog = launcher.release_catalog()
+        self.assertEqual(len(catalog), 1)
+        self.assertEqual(catalog[0]["tag"], "Alpha1")
+        self.assertEqual(catalog[0]["asset"], "AMDNR-v1.zip")
+
+    def test_download_release_verifies_sha256_and_caches(self):
+        import hashlib
+        import io
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr("OptiScaler.dll", b"test binary")
+        payload = stream.getvalue()
+        digest = hashlib.sha256(payload).hexdigest()
+        metadata = {"tag_name": "Alpha1", "assets": [
+            {"name": "SHA256SUMS.txt"}, {"name": "AMDNR-v1.zip", "size": len(payload)},
+        ]}
+
+        class Response:
+            status = 200
+
+            def __init__(self, value):
+                self.value = io.BytesIO(value)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+            def read(self, size=-1):
+                return self.value.read(size)
+
+        def fetch(request, timeout=0):
+            url = request.full_url
+            return Response((digest + "  AMDNR-v1.zip\n").encode() if
+                            url.endswith("SHA256SUMS.txt") else payload)
+
+        with patch.dict(launcher.os.environ, {"XDG_CACHE_HOME": str(self.root / "cache")}), \
+             patch.object(launcher, "_github_json", return_value=metadata), \
+             patch.object(launcher.urllib.request, "urlopen", side_effect=fetch) as mocked:
+            destination = launcher.download_release("Alpha1", "AMDNR-v1.zip")
+            self.assertEqual(destination.read_bytes(), payload)
+            launcher.download_release("Alpha1", "AMDNR-v1.zip")
+            # Checksum is consulted for each call; archive itself downloaded only once.
+            self.assertEqual(mocked.call_count, 3)
+
+    def test_download_rejects_bad_checksum(self):
+        import io
+        metadata = {"tag_name": "Alpha1", "assets": [
+            {"name": "SHA256SUMS.txt"}, {"name": "AMDNR-v1.zip", "size": 50},
+        ]}
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+            def read(self, size=-1):
+                return b"0" * 64 + b"  AMDNR-v1.zip\n" if size > 1000 else b"bad zip content"
+
+        with patch.dict(launcher.os.environ, {"XDG_CACHE_HOME": str(self.root / "cache")}), \
+             patch.object(launcher, "_github_json", return_value=metadata), \
+             patch.object(launcher.urllib.request, "urlopen", return_value=Response()):
+            with self.assertRaisesRegex(ValueError, "incomplete"):
+                launcher.download_release("Alpha1", "AMDNR-v1.zip")
+
+    def test_release_blocks_arbitrary_asset_names(self):
+        with self.assertRaisesRegex(ValueError, "Only AMDNR release ZIP"):
+            launcher._release_asset("Alpha1", "other-package.exe")
+
     def test_missing_game_executable_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Windows"):
             launcher.install(self.archive, self.game / "missing.exe", "dxgi.dll")
