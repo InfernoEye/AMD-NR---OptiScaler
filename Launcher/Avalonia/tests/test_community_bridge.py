@@ -64,6 +64,15 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse(result["automatic_changes"])
         self.assertFalse((self.root / "cache").exists())
 
+    def test_compiler_discovery_skips_proton_runtime_directories(self):
+        exe = self.exe()
+        common = self.root / "steamapps/common"
+        self.fake_compiler(common / "Proton 9.0 (Beta)" / "files/lib64/wine/x86_64-windows")
+        owned = self.fake_compiler(common / "OtherGame" / "bin")
+        found = discovery.find_compilers(exe, include_library=True)
+        self.assertIn(str(owned), [entry["path"] for entry in found])
+        self.assertFalse(any("Proton 9.0" in entry["path"] for entry in found))
+
     def test_compiler_discovery_rejects_non_native_and_symlink(self):
         exe = self.exe()
         game = self.root / "steamapps/common/TestGame"
