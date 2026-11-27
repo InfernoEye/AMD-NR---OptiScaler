@@ -127,6 +127,29 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("Reused verified", result[0])
         self.assertEqual((cached / name).read_bytes(), blob)
 
+    def test_archived_mirror_fallback_preserves_upstream_hash(self):
+        blob = b"pinned prerequisite package"
+        name = "libelf1_fake_amd64.deb"
+        expected = hashlib.sha256(blob).hexdigest()
+        requested = []
+
+        class Response(io.BytesIO):
+            def geturl(self):
+                return "https://mirrors.edge.kernel.org/ubuntu/pool/main/e/elfutils/" + name
+
+        def opener(url, timeout):
+            requested.append(url)
+            if "mirrors.edge.kernel.org" not in url:
+                raise __import__("urllib").error.HTTPError(url, 404, "Not Found", None, None)
+            return Response(blob)
+
+        with patch.object(deps, "UBUNTU_PACKAGES", ((name, expected, "e/elfutils"),)):
+            result = deps.reuse_or_fetch_pinned_ubuntu_packages(
+                self.root / "mirror-verified", self.root / "missing", opener=opener)
+        self.assertIn("SHA-256 verified", result[0])
+        self.assertTrue(any("mirrors.edge.kernel.org" in url for url in requested))
+        self.assertEqual((self.root / "mirror-verified" / name).read_bytes(), blob)
+
     def test_ubuntu_pin_mirror_recovery_checks_hash(self):
         blob = b"fake exact pinned Ubuntu package"
         name = "libelf1_fake_amd64.deb"
