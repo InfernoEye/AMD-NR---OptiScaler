@@ -67,6 +67,23 @@ python3 Launcher/Avalonia/amdnr_launcher.py --installation-json --exe "/path/to/
 
 This checks disk files but does not establish whether the game can initialize the Windows runtime under Proton. Missing original backups are reported rather than silently repaired or overwritten.
 
+## Persistent custom game installations
+
+Choose **Library → Add manually** to add a game installed outside Steam. Select its installation folder, enter an optional display name, and optionally browse to the Windows `.exe` to remember the executable immediately. Custom entries appear alongside Steam installations with a **CUSTOM GAME** label and use the same artwork, executable discovery, Doctor and installation workflow.
+
+Custom games are saved under `${XDG_CONFIG_HOME:-~/.config}/amdnr/custom-games.json` and survive closing/restarting the launcher, Steam refreshes, and temporarily disconnected game drives. The custom list does not depend on Steam manifests. Select a custom game's **Edit / Remove Custom Game** action to change its name or forget it with a second explicit confirmation. Removing the library entry **never deletes game files or uninstalls AMDNR**. Game folder paths are chosen during addition; remove and re-add an entry to move it to another folder.
+
+Equivalent command-line operations:
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --custom-games-json
+python3 Launcher/Avalonia/amdnr_launcher.py --add-custom-game "/path/to/game" --custom-name "My Game"
+python3 Launcher/Avalonia/amdnr_launcher.py --rename-custom-game "/path/to/game" --custom-name "New Name"
+python3 Launcher/Avalonia/amdnr_launcher.py --remove-custom-game "/path/to/game"
+```
+
+The registry only stores the game's display name and local installation folder. Game installation files are never modified when adding, editing, or forgetting the entry.
+
 ## Windows executable discovery
 
 A detected Steam library entry is not necessarily a Windows/Proton game. Native Linux releases may contain ELF executables or shell launchers but no `.exe`. The game screen now reports those cases explicitly and **does not** offer the native binary as an AMDNR DLL installation target.
