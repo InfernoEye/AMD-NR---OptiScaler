@@ -589,43 +589,46 @@ public sealed class MainWindow : Window
     private void ShowHelp()
     {
         Clear("Help");
+        bool polish = UiLanguage.Current == "pl";
         _content.Children.Add(Text(UiLanguage.Translate("Help") + " / FAQ",
             29, ForegroundBrush, FontWeight.Bold));
-        _content.Children.Add(Text("Practical guidance for AMDNR installation and Proton troubleshooting. " +
-            "This page does not install drivers or change Steam options.", 14, MutedBrush));
+        _content.Children.Add(Text(polish
+            ? "Porady dotyczące instalacji AMDNR i Protona. Ta strona nie instaluje sterowników ani nie zmienia opcji Steam."
+            : "Practical guidance for AMDNR installation and Proton troubleshooting. This page does not install drivers or change Steam options.",
+            14, MutedBrush));
 
-        void Question(string title, string answer)
+        void Question(string enTitle, string enAnswer, string plTitle, string plAnswer)
         {
             var stack = new StackPanel { Spacing = 8 };
-            stack.Children.Add(Text(title, 17, ForegroundBrush, FontWeight.SemiBold));
-            stack.Children.Add(Text(answer, 13, MutedBrush));
+            stack.Children.Add(Text(polish ? plTitle : enTitle, 17, ForegroundBrush, FontWeight.SemiBold));
+            stack.Children.Add(Text(polish ? plAnswer : enAnswer, 13, MutedBrush));
             _content.Children.Add(Panel(stack));
         }
 
         Question("How do I install AMDNR safely?",
-            "Select a game in Library, confirm its Windows executable, then use Install. " +
-            "Review the official release ZIP and proxy DLL; the launcher checks downloads and " +
-            "keeps backups. Existing Steam launch options remain under your control.");
+            "Select a game in Library, confirm its Windows executable and choose Install. Review the official release ZIP and proxy DLL; downloads are checked and backups saved. Steam launch options remain under your control.",
+            "Jak bezpiecznie zainstalować AMDNR?",
+            "Wybierz grę w Bibliotece, potwierdź plik Windows .exe i przejdź do Instalacji. Sprawdź oficjalny ZIP i bibliotekę proxy DLL. Launcher weryfikuje pobierane pliki i tworzy kopie zapasowe. Opcje Steam zmieniasz samodzielnie.");
         Question("Why does AMDNR not appear in my game?",
-            "Verify that the game uses its Windows build under Proton, confirm the active " +
-            "Windows executable and launcher-selected DLL alias, then copy the proposed " +
-            "WINEDLLOVERRIDES into Steam launch options if appropriate. Use Doctor for details.");
+            "Check the Windows build under Proton, the correct executable and proxy DLL alias. Copy the suggested WINEDLLOVERRIDES into Steam launch options only if appropriate. Doctor explains possible errors.",
+            "Dlaczego AMDNR nie pojawia się w grze?",
+            "Sprawdź wersję Windows uruchamianą przez Proton, prawidłowy plik .exe i nazwę proxy DLL. W razie potrzeby samodzielnie skopiuj proponowane WINEDLLOVERRIDES do opcji Steam. Diagnostyka pomoże znaleźć błąd.");
         Question("What about lmxxf and Daniel?",
-            "lmxxf has community reports of neural rendering on compatible AMD GPUs and " +
-            "Proton versions; results vary. Daniel 0.6.0 may install but is not independently " +
-            "game-validated here. Daniel 0.8.0 is not currently supported on Linux.");
+            "lmxxf has community reports of neural rendering on compatible AMD GPUs and Proton versions; results vary. Daniel 0.6.0 is not independently game-validated here. Daniel 0.8.0 is currently unsupported on Linux.",
+            "Co z lmxxf i Danielem?",
+            "Użytkownicy zgłaszają działanie lmxxf na zgodnych GPU AMD i wersjach Protona; wyniki są różne. Daniel 0.6.0 nie został tu niezależnie zweryfikowany w grze. Daniel 0.8.0 nie jest obecnie obsługiwany na Linuksie.");
         Question("How do I recover or remove an installation?",
-            "Use Installed or Doctor to check file integrity. Recovery/Repair protects " +
-            "previous files and refuses uncertain changes. Use managed uninstall to restore " +
-            "launcher backups. Do not remove recovery journals by hand.");
+            "Installed and Doctor check tracked files. Recovery/Repair protects earlier files and refuses uncertain changes. Managed uninstall restores backups. Do not remove recovery journals by hand.",
+            "Jak naprawić lub usunąć instalację?",
+            "Zainstalowane i Diagnostyka sprawdzają pliki. Naprawa i odzyskiwanie chronią wcześniejsze pliki oraz odmawiają niepewnych zmian. Bezpieczne odinstalowanie przywraca kopie zapasowe. Nie usuwaj ręcznie dzienników odzyskiwania.");
         Question("Why can't the AppImage start?",
-            "Run the downloaded AppImage as an executable. On systems without FUSE, try " +
-            "'--appimage-extract-and-run'. Linux graphical system libraries and GPU drivers " +
-            "are still required. The distributed AppImage includes .NET and Python.");
-        Question("What should I include in a bug report?",
-            "Provide distro, desktop session, GPU, Proton version, game, exact steps and " +
-            "the redacted Doctor support report. Check the report before sharing. " +
-            "Never post Steam authentication files or private game data.");
+            "Mark the AppImage executable. On systems without FUSE use --appimage-extract-and-run. Linux desktop libraries and GPU drivers are still required; .NET and Python are bundled.",
+            "Dlaczego AppImage nie uruchamia się?",
+            "Ustaw AppImage jako plik wykonywalny. Bez FUSE użyj --appimage-extract-and-run. Nadal potrzebne są biblioteki pulpitu Linux i sterowniki GPU; .NET i Python są dołączone.");
+        Question("What belongs in a bug report?",
+            "Include distro, desktop session, GPU, Proton version, game, steps and a redacted Doctor support report. Check it before sharing; never publish credentials or private game files.",
+            "Co zamieścić w zgłoszeniu błędu?",
+            "Podaj dystrybucję, środowisko graficzne, GPU, wersję Protona, grę, kroki odtworzenia i zanonimizowany raport Diagnostyki. Sprawdź raport przed wysłaniem. Nie publikuj haseł ani prywatnych plików.");
         var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
         var doctor = Button(UiLanguage.Translate("Doctor").ToUpperInvariant(), true);
         doctor.Click += (_, _) => ShowDoctor();
