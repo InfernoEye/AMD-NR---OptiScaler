@@ -1,5 +1,32 @@
 # Avalonia launcher
 
+> **Scope:** This is the Linux/Proton edition of the AMDNR launcher,
+> not a general gaming utility. Follow the official Windows launcher's
+> install/repair/extension workflows wherever possible. See
+> [Scope and Windows parity](SCOPE_AND_PARITY.md) for what is implemented,
+> blocked, and still needs in-game validation. The Windows launcher is untouched.
+>
+> **New user workflow:** Choose your game and its Windows executable, then
+> open **Install → Quick Install Latest Verified AMDNR**. The Linux launcher
+> selects an eligible official upstream ZIP and verifies its SHA-256 before
+> installation. For existing installs, use **Repair / Update / Recovery**;
+> originals are backed up and updates record recovery journals. For
+> broken proxy loading, use **Try Next Proxy** and copy the returned Steam
+> `WINEDLLOVERRIDES` preview if necessary. Neither Steam config nor
+> Proton compatibility selection is modified automatically.
+>
+> **Linux distribution builds:** self-contained AppImage and portable tarball
+> CI are defined in
+> [linux-distributions.yml](../../.github/workflows/linux-distributions.yml),
+> with an experimental Flatpak manifest under `packaging/flatpak`.
+> These use the independent Linux source and Python backend, not the
+> original Windows installer. Developers can still use `dotnet run`.
+>
+> **Linux-only troubleshooting:** the Compatibility page detects GPU/Proton
+> information and potential anti-cheat warnings without claiming the
+> Windows DLL will run. Doctor can create a locally stored, redacted
+> AMDNR support bundle; it is not a separate benchmarking tool.
+
 **Platform: Linux.** This is the independent Linux desktop launcher. The original Windows launcher remains under `Launcher/OpenSource/`.
 
 **Preferred native GUI:** Avalonia / .NET 10. From the repository root:
