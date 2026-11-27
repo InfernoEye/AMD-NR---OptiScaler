@@ -1,0 +1,108 @@
+name: Linux distributable packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'linux-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test independent Linux backend
+        run: python3 -m unittest discover -s Launcher/Avalonia/tests -p 'test_*.py'
+      - name: Publish self-contained Linux launcher
+        run: >-
+          dotnet publish Launcher/Avalonia/Amdnr.Avalonia.csproj
+          --configuration Release --runtime linux-x64 --self-contained true
+          -p:PublishSingleFile=true -o dist/publish
+      - name: Create portable AppDir
+        run: bash packaging/linux/build-appdir.sh dist/publish dist/AMDNR-Linux.AppDir
+      - name: Smoke test portable backend
+        run: |
+          AMDNR_AVALONIA_BACKEND="$PWD/dist/AMDNR-Linux.AppDir/usr/share/amdnr/amdnr_launcher.py" \
+            python3 dist/AMDNR-Linux.AppDir/usr/share/amdnr/amdnr_launcher.py --help
+      - name: Download SHA-256 pinned AppImageKit tool
+        run: |
+          mkdir -p dist/tools
+          curl --fail --location --retry 3 \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
+            --output dist/tools/appimagetool-x86_64.AppImage
+          # Tool release sha256 was verified against its public GitHub asset metadata.
+          echo 'e8c1169c4af66c3184d7ee110713d4be04befe671fa358e2c1591ee840553b03  dist/tools/appimagetool-x86_64.AppImage' | sha256sum --check
+          chmod +x dist/tools/appimagetool-x86_64.AppImage
+      - name: Build AppImage and portable tarball
+        run: |
+          ARCH=x86_64 dist/tools/appimagetool-x86_64.AppImage --appimage-extract-and-run \
+            dist/AMDNR-Linux.AppDir dist/AMDNR-Linux-x86_64.AppImage
+          tar -C dist -czf dist/AMDNR-Linux-x86_64.tar.gz AMDNR-Linux.AppDir
+          (cd dist && sha256sum AMDNR-Linux-x86_64.AppImage AMDNR-Linux-x86_64.tar.gz > SHA256SUMS.txt)
+      - name: Upload packages to workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: amdnr-linux-x86_64
+          path: |
+            dist/AMDNR-Linux-x86_64.AppImage
+            dist/AMDNR-Linux-x86_64.tar.gz
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Publish tagged Linux release
+        if: startsWith(github.ref, 'refs/tags/linux-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/AMDNR-Linux-x86_64.AppImage \
+            dist/AMDNR-Linux-x86_64.tar.gz \
+            dist/SHA256SUMS.txt \
+            --title "AMDNR Linux $GITHUB_REF_NAME" \
+            --notes "Independent Linux/Proton launcher; Windows AMDNR downloads are verified separately against upstream 3zwr1 releases." \
+            --verify-tag
+
+  flatpak:
+    if: github.event_name == 'workflow_dispatch'
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish self-contained Linux files
+        run: >-
+          dotnet publish Launcher/Avalonia/Amdnr.Avalonia.csproj
+          --configuration Release --runtime linux-x64 --self-contained true
+          -p:PublishSingleFile=true -o packaging/flatpak/publish
+      - name: Bundle backend in Flatpak source tree
+        run: |
+          mkdir -p packaging/flatpak/backend
+          cp Launcher/Avalonia/*.py packaging/flatpak/backend/
+          cp -a Launcher/Avalonia/model-tools packaging/flatpak/backend/
+      - name: Install Flatpak tooling and Freedesktop runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user flathub org.freedesktop.Sdk//25.08 org.freedesktop.Platform//25.08
+      - name: Build and export Flatpak
+        run: |
+          flatpak-builder --user --force-clean --repo=dist/flatpak-repo \
+            dist/flatpak-build packaging/flatpak/org.amdnr.LinuxLauncher.yml
+          flatpak build-bundle dist/flatpak-repo \
+            dist/AMDNR-Linux-x86_64.flatpak org.amdnr.LinuxLauncher
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amdnr-linux-flatpak-x86_64
+          path: dist/AMDNR-Linux-x86_64.flatpak
+          if-no-files-found: error
