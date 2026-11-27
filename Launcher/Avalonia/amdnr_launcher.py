@@ -777,6 +777,68 @@ def executable_scan(directory: Path) -> dict[str, object]:
             "reason": reason, "partial": partial, "steam_launch": steam}
 
 
+def _library_audit_cache_path() -> Path:
+    """Durable per-user snapshot; not stored inside a Steam library or game."""
+    state_home = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+    return state_home / "amdnr" / "library-audit.json"
+
+
+def cached_library_audit() -> list[dict[str, object]]:
+    """Read the last completed user-requested audit without scanning game files."""
+    path = _library_audit_cache_path()
+    if not path.exists():
+        return []
+    try:
+        if path.stat().st_size > 8 * 1024 * 1024:
+            raise ValueError("Audit snapshot exceeds size limit")
+        snapshot = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(snapshot, dict) or snapshot.get("format") != 1 or \
+                not isinstance(snapshot.get("entries"), list):
+            raise ValueError("Unsupported audit snapshot format")
+        rows = snapshot["entries"]
+        if len(rows) > 5000:
+            raise ValueError("Audit snapshot exceeds entry limit")
+        result = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            folder = row.get("folder")
+            if not isinstance(folder, str) or not Path(folder).is_absolute():
+                continue
+            if row.get("status") not in (
+                "windows_ready", "native_linux", "needs_selection",
+                "no_windows_exe", "missing_folder", "scan_incomplete", "scan_error",
+                "needs_attention",
+            ):
+                continue
+            # This is intentionally a saved snapshot, not a live check.
+            result.append(row)
+        return result
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError(f"Unable to read saved library audit: {exc}") from exc
+
+
+def _save_library_audit(rows: list[dict[str, object]]) -> None:
+    """Atomically replace the last complete snapshot after an explicit audit."""
+    path = _library_audit_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, prefix=".library-audit-",
+            suffix=".tmp", delete=False
+        ) as stream:
+            temp_name = stream.name
+            os.chmod(stream.name, 0o600)
+            json.dump({"format": 1, "entries": rows}, stream, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_name, path)
+    finally:
+        if temp_name is not None and os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
 def library_audit() -> list[dict[str, object]]:
     """Read-only executable readiness inventory for Steam and saved custom games.
 
@@ -1223,6 +1285,7 @@ def main() -> int:
     parser.add_argument("--release-asset", metavar="ZIP", help="Archive filename for --download-release")
     parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
     parser.add_argument("--library-audit-json", action="store_true", help="Read-only executable readiness inventory")
+    parser.add_argument("--library-audit-cache-json", action="store_true", help="Read saved audit without scanning games")
     parser.add_argument("--custom-games-json", action="store_true", help="List remembered custom game entries")
     parser.add_argument("--add-custom-game", type=Path, metavar="FOLDER", help="Add custom game directory")
     parser.add_argument("--rename-custom-game", type=Path, metavar="FOLDER", help="Rename custom game entry")
@@ -1318,8 +1381,20 @@ def main() -> int:
             return 1
     elif args.artwork_report:
         print(json.dumps(artwork_diagnostics(args.download_artwork), ensure_ascii=False, indent=2))
+    elif args.library_audit_cache_json:
+        try:
+            print(json.dumps(cached_library_audit(), ensure_ascii=False))
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     elif args.library_audit_json:
-        print(json.dumps(library_audit(), ensure_ascii=False))
+        try:
+            entries = library_audit()
+            _save_library_audit(entries)
+            print(json.dumps(entries, ensure_ascii=False))
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     elif args.list_json:
         print(json.dumps(steam_game_details(args.download_artwork), ensure_ascii=False))
     elif args.list:
