@@ -2153,7 +2153,8 @@ public sealed class MainWindow : Window
                     !x.Asset.Contains("lmxxf", StringComparison.OrdinalIgnoreCase) &&
                     !x.Asset.Contains("neuralhub", StringComparison.OrdinalIgnoreCase) &&
                     !x.Prerelease)
-                    .GroupBy(x => x.Asset, StringComparer.OrdinalIgnoreCase)
+                    .GroupBy(x => x.Asset.StartsWith("AMDNR-Mochi-", StringComparison.OrdinalIgnoreCase)
+                        ? "AMDNR-Mochi" : x.Asset, StringComparer.OrdinalIgnoreCase)
                     .Select(x => x.First()).Take(8).ToList();
                 // Include installed components even when no longer in the latest
                 // release catalog, so they can be unchecked and removed.
