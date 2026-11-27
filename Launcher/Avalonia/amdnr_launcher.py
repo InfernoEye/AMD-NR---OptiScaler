@@ -857,6 +857,7 @@ def differential_library() -> list[dict[str, object]]:
             new_steam.add(key)
         games.append({"name": name, "folder": key, "custom": False,
                       "artwork": old.get("artwork"),
+                      "artwork_checked": old.get("artwork_checked", False),
                       "executable": old.get("executable")})
         seen.add(key)
     for entry in custom:
@@ -866,13 +867,16 @@ def differential_library() -> list[dict[str, object]]:
         old = previous.get(folder, {})
         games.append({"name": str(entry["name"]), "folder": folder, "custom": True,
                       "artwork": entry.get("artwork") or old.get("artwork"),
+                      "artwork_checked": True,
                       "executable": old.get("executable")})
         seen.add(folder)
 
     # Resolve cover art only for newly installed Steam games or missing cached art.
     needs_art = {row["folder"] for row in games if not row["custom"] and
                  (row["folder"] in new_steam or
-                  not (isinstance(row["artwork"], str) and Path(row["artwork"]).is_file()))}
+                  (isinstance(row["artwork"], str) and
+                   not Path(row["artwork"]).is_file()) or
+                  not row["artwork_checked"])}
     if needs_art:
         art_by_folder = {row["folder"]: row["artwork"]
                          for row in steam_game_details(False)
@@ -880,8 +884,13 @@ def differential_library() -> list[dict[str, object]]:
         for row in games:
             if row["folder"] in needs_art:
                 row["artwork"] = art_by_folder.get(row["folder"])
+                row["artwork_checked"] = True
     for row in games:
         folder = Path(str(row["folder"]))
+        # An explicit user cover can change without a full Steam-artwork search.
+        manual_art = _manual_artwork(folder) if folder.is_dir() else None
+        if manual_art is not None:
+            row["artwork"] = str(manual_art)
         if isinstance(row["artwork"], str) and not Path(row["artwork"]).is_file():
             row["artwork"] = None
         # A remembered manual choice outranks cached automatic metadata.
