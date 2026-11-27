@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using System;
 using System.Collections.Generic;
@@ -286,6 +287,31 @@ public sealed class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         });
+        if (!string.IsNullOrEmpty(game.Artwork))
+        {
+            try
+            {
+                illustration.Children.Clear();
+                illustration.Children.Add(new Border
+                {
+                    CornerRadius = new CornerRadius(8),
+                    ClipToBounds = true,
+                    Child = new Image
+                    {
+                        Source = new Bitmap(game.Artwork),
+                        Stretch = Stretch.UniformToFill,
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        VerticalAlignment = VerticalAlignment.Stretch,
+                    },
+                });
+            }
+            catch (Exception ex) when (ex is IOException or ArgumentException or
+                                       UnauthorizedAccessException or NotSupportedException)
+            {
+                // Steam may remove a cached thumbnail while the launcher is open.
+                // Keep the readable placeholder instead of failing the library view.
+            }
+        }
         card.Children.Add(illustration);
         card.Children.Add(Text(game.Name, 18, ForegroundBrush, FontWeight.SemiBold));
         card.Children.Add(Text("STEAM  ·  WINDOWS / PROTON", 11, MutedBrush, FontWeight.SemiBold));
