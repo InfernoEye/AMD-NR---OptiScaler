@@ -77,6 +77,43 @@ class LauncherTests(unittest.TestCase):
             }])
             self.assertEqual(launcher.installed_games_overview(), [])
 
+    def test_mochi_model_preparation_only_installs_verified_local_outputs(self):
+        import subprocess
+        source = self.root / "nvngx_dlssnr.dll"
+        source.write_bytes(b"fixture local NVIDIA input")
+        def fake_extract(command, **kwargs):
+            staging = Path(command[3])
+            (staging / "dlssnr.bin").write_bytes(b"NRMODEL1" + b"x" * (1024 * 1024 + 16))
+            (staging / "dlssnr-small.bin").write_bytes(b"NRMODEL1" + b"y" * (1024 * 1024 + 16))
+            return subprocess.CompletedProcess(command, 0, stdout="verified fixture", stderr="")
+        with patch.object(launcher.subprocess, "run", side_effect=fake_extract):
+            result = launcher.prepare_mochi_model(self.exe, source)
+        self.assertEqual(result["status"], "prepared")
+        model_a = self.game / "dlssnr-amd/dlssnr.bin"
+        self.assertTrue(model_a.is_file())
+        self.assertTrue((self.game / "dlssnr-amd/dlssnr-small.bin").exists())
+        self.assertTrue(launcher.runtime_diagnostics(self.exe)["mochi_model_present"])
+        with patch.object(launcher.subprocess, "run") as ignored:
+            with self.assertRaisesRegex(ValueError, "already exists"):
+                launcher.prepare_mochi_model(self.exe, source)
+            ignored.assert_not_called()
+        self.assertEqual(model_a.read_bytes()[:8], b"NRMODEL1")
+
+    def test_mochi_model_preparation_rejects_bad_source_and_failed_extraction(self):
+        import subprocess
+        source = self.root / "nvngx_dlssnr.dll"
+        source.write_bytes(b"bad")
+        other = self.root / "wrong.dll"
+        other.write_bytes(b"bad")
+        with self.assertRaisesRegex(ValueError, "named nvngx_dlssnr.dll"):
+            launcher.prepare_mochi_model(self.exe, other)
+        with patch.object(launcher.subprocess, "run",
+                          return_value=subprocess.CompletedProcess(
+                              ["bash"], 1, stdout="", stderr="bad source SHA256")):
+            with self.assertRaisesRegex(ValueError, "bad source SHA256"):
+                launcher.prepare_mochi_model(self.exe, source)
+        self.assertFalse((self.game / "dlssnr-amd/dlssnr.bin").exists())
+
     def test_runtime_diagnostics_reads_missing_and_present_files_without_modification(self):
         with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
             initial = launcher.runtime_diagnostics(self.exe)
