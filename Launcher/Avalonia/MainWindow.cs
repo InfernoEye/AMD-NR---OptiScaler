@@ -2756,6 +2756,42 @@ public sealed class MainWindow : Window
         };
         var packageState = Text("Checking bridge package and installation…", 13, MutedBrush);
         inspection.Children.Add(packageState);
+        var releaseState = Text(
+            "Bridge release: approved SHA-256 pin. New upstream releases are not automatically trusted.",
+            12, MutedBrush);
+        inspection.Children.Add(releaseState);
+        var checkReleases = Button("CHECK UPSTREAM BRIDGE UPDATES");
+        inspection.Children.Add(checkReleases);
+        checkReleases.Click += async (_, _) =>
+        {
+            if (_backend is null) return;
+            checkReleases.IsEnabled = false;
+            releaseState.Text = "Checking published AMDNR-Linux releases (read-only)…";
+            try
+            {
+                var (exit, raw) = await _backend.RunAsync(
+                    new[] { "--bridge-check-updates-json" });
+                if (exit != 0) throw new InvalidOperationException(raw);
+                using var result = JsonDocument.Parse(raw);
+                var state = result.RootElement;
+                var pinned = state.GetProperty("installed_adapter_version").GetString() ?? "?";
+                var latest = state.GetProperty("latest_upstream_version").GetString();
+                bool newer = state.GetProperty("newer_upstream_available").GetBoolean();
+                releaseState.Text = "Verified launcher pin: " + pinned +
+                    " · Latest published upstream: " + (latest ?? "not found") +
+                    (newer ? "\nNew release requires checksum and compatibility review before use."
+                           : "\nNo newer published stable release found. " +
+                             "Proton and GPU compatibility still require actual testing.");
+            }
+            catch (Exception ex)
+            {
+                releaseState.Text = "Could not check upstream releases: " + ex.Message;
+            }
+            finally
+            {
+                checkReleases.IsEnabled = true;
+            }
+        };
         var problems = Text("", 13, AccentBrush);
         inspection.Children.Add(problems);
         var scan = Button("SCAN GAME AND LOCAL DEPENDENCIES", true);
