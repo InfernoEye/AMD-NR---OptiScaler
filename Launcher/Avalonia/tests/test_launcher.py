@@ -28,6 +28,24 @@ class LauncherTests(unittest.TestCase):
             archive.writestr("release/OptiScaler.ini", b"configuration")
             archive.writestr("release/setup_windows.bat", b"not installed")
 
+    def test_differential_library_remembers_missing_artwork(self):
+        # A game without a Steam cover must not trigger artwork discovery at
+        # every refresh after the first unsuccessful lookup.
+        state = self.root / "state"
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}), \
+             patch.object(launcher, "steam_games", return_value=[
+                 ("Game", self.game)
+             ]), patch.object(launcher, "custom_games", return_value=[]), \
+             patch.object(launcher, "_manual_artwork", return_value=None), \
+             patch.object(launcher, "steam_game_details", return_value=[
+                 {"name": "Game", "folder": str(self.game), "artwork": None}
+             ]) as artwork:
+            self.assertIsNone(launcher.differential_library()[0]["artwork"])
+            self.assertIsNone(launcher.differential_library()[0]["artwork"])
+            self.assertEqual(artwork.call_count, 1)
+            index = launcher._read_library_index()
+            self.assertTrue(index[str(self.game)]["artwork_checked"])
+
     def test_differential_library_add_remove_and_reuse_executables(self):
         first = self.root / "steamapps/common/First"
         second = self.root / "steamapps/common/Second"
