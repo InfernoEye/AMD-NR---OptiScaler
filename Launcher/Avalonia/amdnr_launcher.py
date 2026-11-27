@@ -753,6 +753,9 @@ def executable_scan(directory: Path) -> dict[str, object]:
     # Steam's installed app manifest maps a folder to AppID; appinfo can give
     # a real launch target. Keep all other scanner results as fallbacks.
     steam = steam_launch_for_directory(directory)
+    if steam.get("reason") == "not_a_game":
+        for entry in candidates:
+            entry["auto_select"] = False
     steam_choice = steam.get("selected")
     if isinstance(steam_choice, str):
         match = next((entry for entry in candidates if entry["path"] == steam_choice), None)
@@ -1146,6 +1149,7 @@ def main() -> int:
     parser.add_argument("--installation-json", action="store_true", help="Inspect installed files, backups and archive origin")
     parser.add_argument("--exes-json", type=Path, metavar="GAME_DIR", help="Find game executable candidates")
     parser.add_argument("--exe-scan-json", type=Path, metavar="GAME_DIR", help="Scan Windows executables and report Linux-native builds")
+    parser.add_argument("--steam-launch-json", type=Path, metavar="GAME_DIR", help="Read cached Steam launch configuration for game")
     parser.add_argument("--saved-exe", type=Path, metavar="GAME_DIR", help="Get a remembered executable")
     parser.add_argument("--remember-exe", type=Path, metavar="GAME_DIR", help="Remember executable selected with --exe")
     parser.add_argument("--download-release", metavar="TAG", help="Download and verify selected AMDNR release")
@@ -1201,6 +1205,8 @@ def main() -> int:
             return 1
     elif args.saved_exe is not None:
         print(saved_executable(args.saved_exe) or "")
+    elif args.steam_launch_json is not None:
+        print(json.dumps(steam_launch_for_directory(args.steam_launch_json), ensure_ascii=False))
     elif args.exe_scan_json is not None:
         print(json.dumps(executable_scan(args.exe_scan_json), ensure_ascii=False))
     elif args.exes_json is not None:
