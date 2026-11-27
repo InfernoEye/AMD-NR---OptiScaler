@@ -1260,7 +1260,10 @@ public sealed class MainWindow : Window
         choose.HorizontalContentAlignment = HorizontalAlignment.Center;
         choose.Click += (_, _) => SelectGame(game);
         stack.Children.Add(choose);
-        return Panel(stack, new Thickness(11));
+        var tile = Panel(stack, new Thickness(11));
+        tile.PointerEntered += (_, _) => tile.BorderBrush = AccentBrush;
+        tile.PointerExited += (_, _) => tile.BorderBrush = LineBrush;
+        return tile;
     }
 
     private Control BuildGameCard(GameEntry game)
@@ -1301,7 +1304,10 @@ public sealed class MainWindow : Window
         manage.Click += (_, _) => SelectGame(game);
         Grid.SetColumn(manage, 2);
         row.Children.Add(manage);
-        return Panel(row, new Thickness(15));
+        var card = Panel(row, new Thickness(15));
+        card.PointerEntered += (_, _) => card.BorderBrush = AccentBrush;
+        card.PointerExited += (_, _) => card.BorderBrush = LineBrush;
+        return card;
     }
 
     private Control GameArtwork(GameEntry game, double height, bool fill = false)
