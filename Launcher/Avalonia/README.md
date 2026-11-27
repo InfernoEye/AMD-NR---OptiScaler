@@ -84,6 +84,21 @@ python3 Launcher/Avalonia/amdnr_launcher.py --remove-custom-game "/path/to/game"
 
 The registry only stores the game's display name and local installation folder. Game installation files are never modified when adding, editing, or forgetting the entry.
 
+## Steam launch metadata (automatic Windows EXE selection)
+
+For **Steam-managed** installations, the launcher first matches the game directory to an installed `steamapps/appmanifest_<AppID>.acf`. It then reads the matching AppID from Steam's **local, read-only** `appcache/appinfo.vdf` (v40/v41) or modern `appcache/appinfo/appinfo_XX.vdf` shards (v42). This requires no Steam credentials, no network requests, no additional Python packages, and no Steam console commands.
+
+Steam's `config/launch` data can declare Windows and Linux launch targets. The launcher prefers **one existing, ordinary Windows target** over filename-based guessing. It does not automatically select missing Windows files, beta-only entries, DLC/workshop tools, Steam runtime/tool entries, or ambiguous primary targets. **Saved manual executable choices always take precedence**, including those for custom non-Steam installations. If Steam's cache is absent, unrecognized or incomplete, existing filesystem scanning and manual selection still work.
+
+To inspect a particular Steam installation:
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --steam-launch-json "/path/to/steamapps/common/Game"
+python3 Launcher/Avalonia/amdnr_launcher.py --exe-scan-json "/path/to/steamapps/common/Game"
+```
+
+The first command reports cached launch metadata and whether Steam has a **present Windows executable** for the installation; the second shows how the combined Steam-plus-filesystem scanner would select an EXE. For example, Steam may declare a Windows `game/bin/win64/cs2.exe` and Linux `game/cs2.sh`, but a Linux-native installation may only contain the latter. In that case the Windows executable is **not** installed and cannot be selected as an AMDNR DLL target. Filesystem scans and cached launch definitions cannot prove runtime compatibility or bypass anti-cheat restrictions.
+
 ## Windows executable discovery
 
 A detected Steam library entry is not necessarily a Windows/Proton game. Native Linux releases may contain ELF executables or shell launchers but no `.exe`. The game screen now reports those cases explicitly and **does not** offer the native binary as an AMDNR DLL installation target.
