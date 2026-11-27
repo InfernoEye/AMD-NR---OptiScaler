@@ -78,13 +78,49 @@ class LauncherTests(unittest.TestCase):
         cache = steam / "appcache/librarycache"
         cache.mkdir(parents=True)
         cover = cache / "123_library_600x900.jpg"
-        cover.write_bytes(b"fake cover")
+        cover.write_bytes(b"fake cover" * 10)
         with patch.object(launcher, "steam_games", return_value=[("Test", game)]), \
              patch.object(launcher, "steam_roots", return_value=[steam]):
             details = launcher.steam_game_details()
         self.assertEqual(len(details), 1)
         self.assertEqual(details[0]["name"], "Test")
         self.assertEqual(details[0]["artwork"], str(cover))
+
+    def test_steam_artwork_uses_nested_cache_layout(self):
+        steam = self.root / "Steam"
+        cache = steam / "appcache/librarycache/123"
+        cache.mkdir(parents=True)
+        cover = cache / "library_600x900.jpg"
+        cover.write_bytes(b"image" * 20)
+        self.assertEqual(launcher._steam_artwork("123", [steam]), str(cover))
+
+    def test_steam_artwork_rejects_non_numeric_app_id(self):
+        with patch.object(launcher.urllib.request, "urlopen") as request:
+            self.assertIsNone(launcher._steam_artwork("../test", [], True))
+            request.assert_not_called()
+
+    def test_steam_artwork_downloads_and_caches_missing_cover(self):
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _size):
+                return b"\xff\xd8\xff" + b"\x00" * 200
+
+        with patch.dict(launcher.os.environ, {
+            "XDG_CACHE_HOME": str(self.root / "cache"),
+            "AMDNR_NO_ARTWORK_DOWNLOAD": "0",
+        }), patch.object(launcher.urllib.request, "urlopen", return_value=FakeResponse()) as get:
+            found = launcher._steam_artwork("123", [], True)
+            self.assertEqual(Path(found).read_bytes()[:3], b"\xff\xd8\xff")
+            self.assertIn("/steam/apps/123/library_600x900.jpg", get.call_args.args[0].full_url)
+            self.assertEqual(launcher._steam_artwork("123", [], True), found)
+            get.assert_called_once()
 
     def test_missing_game_executable_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Windows"):
