@@ -468,3 +468,23 @@ NeuralHub-specific installer and does not permit the legacy installation
 path to overwrite game files. Earlier supported pass-DLL versions remain
 available under the Daniel section; compatibility under Proton is not
 guaranteed. The general component selector excludes Daniel packages.
+
+### Automatic Daniel setup on Proton
+
+Under **Game → Manage Extensions → Daniel Neural Runtimes**, choose
+**Auto Set Up Daniel 0.6.0** for a one-click upstream download, SHA-256
+verification, safe preview and installation of Daniel's legacy three-pass-DLL
+and weights package. If another Daniel package is managed, the launcher refuses
+an implicit switch; remove that version first to restore managed backups.
+Existing byte-identical files are preserved, and modified/unsafe destinations
+are never silently overwritten. A differing regular file requires the
+existing explicit backup-and-replace action. The button reports installation
+of runtime files, **not** proven neural frame processing under Proton.
+
+**Daniel 0.8.0 is a different NeuralHub architecture.** Merely extracting
+its runtime ZIP cannot make it work under Proton: the NeuralHub host needs a
+per-game `AMDNR-NeuralHub-080` directory, data-index/model preparation and
+Windows-specific GPU/driver APIs. Until a compatible Linux bridge and
+verified end-to-end installation process exist, the launcher deliberately
+does not offer a fake "Install 0.8.0" success. The separate Daniel panel
+continues to list the official upstream version but explains this blocker.
