@@ -777,6 +777,134 @@ def executable_scan(directory: Path) -> dict[str, object]:
             "reason": reason, "partial": partial, "steam_launch": steam}
 
 
+def _library_index_path() -> Path:
+    return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "amdnr" / "library-index.json"
+
+
+def _read_library_index() -> dict[str, dict[str, object]]:
+    path = _library_index_path()
+    if not path.is_file():
+        return {}
+    try:
+        if path.stat().st_size > 8 * 1024 * 1024:
+            raise ValueError("Library index exceeds size limit")
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict) or state.get("format") != 1 or \
+                not isinstance(state.get("games"), list):
+            raise ValueError("Invalid library index")
+        entries = {}
+        for item in state["games"][:5000]:
+            if isinstance(item, dict) and isinstance(item.get("folder"), str) and \
+                    Path(item["folder"]).is_absolute():
+                entries[item["folder"]] = item
+        return entries
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError(f"Unable to read saved library index: {exc}") from exc
+
+
+def _write_library_index(entries: list[dict[str, object]]) -> None:
+    path = _library_index_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, prefix=".library-index-",
+            suffix=".tmp", delete=False
+        ) as stream:
+            temporary = stream.name
+            os.chmod(temporary, 0o600)
+            json.dump({"format": 1, "games": entries}, stream, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _valid_index_executable(folder: Path, value: object) -> str | None:
+    """Only trust an existing .exe strictly inside the intended game directory."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        exe = Path(value)
+        if not exe.is_absolute() or not exe.is_file() or exe.is_symlink() or \
+                exe.suffix.casefold() != ".exe" or \
+                not exe.resolve().is_relative_to(folder.resolve()):
+            return None
+        return str(exe.resolve())
+    except (OSError, ValueError):
+        return None
+
+
+def differential_library() -> list[dict[str, object]]:
+    """Quick manifest + file-existence reconciliation; never crawl game binaries.
+
+    Steam manifest discovery is necessary to find installs/uninstalls. Existing
+    entries retain last known artwork and EXE; only new entries resolve artwork.
+    Missing custom mounts remain saved; deleted Steam manifests remove entries.
+    """
+    previous = _read_library_index()
+    steam = steam_games()
+    custom = custom_games()
+    games: list[dict[str, object]] = []
+    seen: set[str] = set()
+    new_steam: set[str] = set()
+    for name, folder in steam:
+        key = str(folder)
+        old = previous.get(key, {})
+        if key not in previous:
+            new_steam.add(key)
+        games.append({"name": name, "folder": key, "custom": False,
+                      "artwork": old.get("artwork"),
+                      "executable": old.get("executable")})
+        seen.add(key)
+    for entry in custom:
+        folder = str(entry["folder"])
+        if folder in seen:
+            continue
+        old = previous.get(folder, {})
+        games.append({"name": str(entry["name"]), "folder": folder, "custom": True,
+                      "artwork": entry.get("artwork") or old.get("artwork"),
+                      "executable": old.get("executable")})
+        seen.add(folder)
+
+    # Resolve cover art only for newly installed Steam games or missing cached art.
+    needs_art = {row["folder"] for row in games if not row["custom"] and
+                 (row["folder"] in new_steam or
+                  not (isinstance(row["artwork"], str) and Path(row["artwork"]).is_file()))}
+    if needs_art:
+        art_by_folder = {row["folder"]: row["artwork"]
+                         for row in steam_game_details(False)
+                         if row["folder"] in needs_art}
+        for row in games:
+            if row["folder"] in needs_art:
+                row["artwork"] = art_by_folder.get(row["folder"])
+    for row in games:
+        folder = Path(str(row["folder"]))
+        if isinstance(row["artwork"], str) and not Path(row["artwork"]).is_file():
+            row["artwork"] = None
+        # A remembered manual choice outranks cached automatic metadata.
+        row["executable"] = (saved_executable(folder) or
+                             _valid_index_executable(folder, row["executable"]))
+    games.sort(key=lambda row: str(row["name"]).casefold())
+    _write_library_index(games)
+    return games
+
+
+def index_library_executable(folder: Path, executable: Path) -> None:
+    """Update an already-indexed game's EXE when it is successfully selected."""
+    valid = _valid_index_executable(folder, str(executable))
+    if valid is None:
+        raise ValueError("Executable must exist within the selected game folder")
+    index = _read_library_index()
+    key = str(folder.resolve())
+    if key not in index:
+        return  # A removed or unknown game must not be reinserted.
+    index[key]["executable"] = valid
+    _write_library_index(list(index.values()))
+
+
 def _library_audit_cache_path() -> Path:
     """Durable per-user snapshot; not stored inside a Steam library or game."""
     state_home = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
@@ -1284,6 +1412,8 @@ def main() -> int:
     parser.add_argument("--download-release", metavar="TAG", help="Download and verify selected AMDNR release")
     parser.add_argument("--release-asset", metavar="ZIP", help="Archive filename for --download-release")
     parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
+    parser.add_argument("--library-differential-json", action="store_true", help="Reconcile saved library index without binary scanning")
+    parser.add_argument("--library-index-exe", type=Path, metavar="GAME_DIR", help="Save a valid chosen executable in library index")
     parser.add_argument("--library-audit-json", action="store_true", help="Read-only executable readiness inventory")
     parser.add_argument("--library-audit-cache-json", action="store_true", help="Read saved audit without scanning games")
     parser.add_argument("--custom-games-json", action="store_true", help="List remembered custom game entries")
@@ -1381,6 +1511,21 @@ def main() -> int:
             return 1
     elif args.artwork_report:
         print(json.dumps(artwork_diagnostics(args.download_artwork), ensure_ascii=False, indent=2))
+    elif args.library_differential_json:
+        try:
+            print(json.dumps(differential_library(), ensure_ascii=False))
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.library_index_exe is not None:
+        if args.exe is None:
+            parser.error("--library-index-exe requires --exe")
+        try:
+            index_library_executable(args.library_index_exe, args.exe)
+            print("Library executable index updated")
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     elif args.library_audit_cache_json:
         try:
             print(json.dumps(cached_library_audit(), ensure_ascii=False))
