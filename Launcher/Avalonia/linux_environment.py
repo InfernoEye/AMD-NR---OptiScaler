@@ -196,18 +196,18 @@ def save_profile(game_folder: Path, payload: dict) -> dict:
 def launch_preview(game_folder: Path, alias: str, existing: str | None = None) -> dict:
     """Use existing Steam merge logic, prepend only the user's opted-in wrappers."""
     import amdnr_launcher as core
-    from steam_user_launch import merge_override
+    from steam_user_launch import preview_launch_options
     settings = profile(game_folder)
     current = existing
     if current is None:
         detected = core.steam_launch_options_for_directory(game_folder, alias)
-        if detected.get("status") not in ("ok", "empty"):
+        if detected.get("status") not in ("found", "empty", "ok"):
             return {"status": "needs_review", "reason": detected.get("reason"),
                     "launch_options": None}
         current = detected.get("existing") or "%command%"
     # Reuse the main launch-option reader merge; never manipulate Steam VDF.
-    merged = merge_override(current, alias)
-    if merged.get("status") != "ok":
+    merged = preview_launch_options(current, alias)
+    if merged.get("status") not in ("added", "merged"):
         return {"status": "needs_review", "reason": merged.get("reason"),
                 "launch_options": None}
     command = merged["preview"]
