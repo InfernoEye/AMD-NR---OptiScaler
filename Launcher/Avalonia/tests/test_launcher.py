@@ -498,7 +498,7 @@ class LauncherTests(unittest.TestCase):
             target = self.game / "runtime.dll"
             target.unlink()
             target.symlink_to(self.exe)
-            with self.assertRaisesRegex(ValueError, "unsafe|symlink"):
+            with self.assertRaisesRegex(ValueError, "[Ss]ymlink|[Uu]nsafe"):
                 launcher.remove_component(self.exe, asset, backup_modified=True, force=True)
             self.assertTrue(target.is_symlink())
             self.assertTrue(launcher.installed_components(self.exe))
