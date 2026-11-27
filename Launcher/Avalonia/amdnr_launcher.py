@@ -2349,15 +2349,25 @@ def _check_destination(target: Path, root: Path) -> None:
 
 
 def install(archive: Path, executable: Path, alias: str) -> str:
+    """User-confirmed first install, with a durable recovery journal.
+
+    All existing files are backed up and verified before the first destination
+    changes. If a normal error occurs, rollback restores the original state.
+    If the process is interrupted, Doctor can recover the same transaction.
+    """
+    import launcher_maintenance as maintenance
+
     if alias not in ALIASES:
         raise ValueError(f"Unsupported DLL alias: {alias}")
-    if not executable.is_file() or executable.suffix.lower() != ".exe":
+    if (not executable.is_file() or executable.is_symlink() or
+            executable.suffix.lower() != ".exe"):
         raise ValueError("Choose the game's actual Windows .exe file")
     root = executable.resolve().parent
     state_file = root / STATE_NAME
-    if (root / ".amdnr-linux-transaction.json").exists() or (root / ".amdnr-linux-transaction.json").is_symlink():
-        raise ValueError("Interrupted AMDNR update exists; recover it before installing")
-    if state_file.exists():
+    journal = root / maintenance.JOURNAL_NAME
+    if journal.exists() or journal.is_symlink():
+        raise ValueError("Interrupted AMDNR transaction exists; recover it first")
+    if state_file.exists() or state_file.is_symlink():
         raise ValueError("An installation is already recorded here; uninstall it first")
     with tempfile.TemporaryDirectory(prefix="amdnr-linux-") as work:
         staging = Path(work)
@@ -2369,44 +2379,53 @@ def install(archive: Path, executable: Path, alias: str) -> str:
                 relative = relative.with_name(alias)
             target = root / relative
             _check_destination(target, root)
-            replacements.append((source, target, str(relative)))
+            replacements.append((source, target, relative.as_posix()))
         if not replacements:
             raise ValueError("No compatible files found in archive")
-        if len({str(t).casefold() for _, t, _ in replacements}) != len(replacements):
+        if len({name.casefold() for _, _, name in replacements}) != len(replacements):
             raise ValueError("Package contains colliding filenames")
         backup = root / BACKUP_NAME / "linux-launcher"
-        if backup.exists():
+        if backup.exists() or backup.is_symlink():
             raise ValueError(f"Existing backup directory: {backup}; resolve it first")
         records = []
-        written: list[Path] = []
-        moved: list[tuple[Path, Path]] = []
+        touched = []
+        journal_ready = False
         try:
-            for source, target, relative in replacements:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                previous = target.exists()
-                backup_target = backup / relative
+            backup.mkdir(parents=True, mode=0o700)
+            for source, target, name in replacements:
+                if target.is_symlink() or (target.exists() and not target.is_file()):
+                    raise ValueError(f"Refusing non-regular destination: {target}")
+                previous = target.is_file()
+                old_sha = _digest(target) if previous else None
+                new_sha = _digest(source)
                 if previous:
-                    if not target.is_file() or target.is_symlink():
-                        raise ValueError(f"Refusing non-regular destination: {target}")
-                    backup_target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(target), str(backup_target))
-                    moved.append((backup_target, target))
-                shutil.copy2(source, target)
-                written.append(target)
-                records.append({"path": relative, "sha256": _digest(target),
+                    previous_copy = maintenance.safe_path(backup, name)
+                    previous_copy.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(target, previous_copy)
+                    if _digest(previous_copy) != old_sha or _digest(target) != old_sha:
+                        raise ValueError("Original changed during backup: " + name)
+                records.append({"path": name, "sha256": new_sha,
                                 "backed_up": previous})
-            state_file.write_text(json.dumps({"format": 1, "alias": alias,
-                                             "source_archive": archive.name,
-                                             "source_sha256": _digest(archive),
-                                             "files": records}, indent=2) + "\n",
-                                  encoding="utf-8")
+                touched.append({"path": name, "previous_sha256": old_sha,
+                                "expected_sha256": new_sha})
+            record = {"format": 1, "alias": alias, "source_archive": archive.name,
+                      "source_sha256": _digest(archive), "files": records}
+            record_bytes = (json.dumps(record, sort_keys=True, indent=2) + "\n").encode()
+            maintenance.write_json_atomic(journal, {
+                "format": 2, "mode": "install", "touched": touched,
+                "new_state_sha256": hashlib.sha256(record_bytes).hexdigest(),
+            })
+            journal_ready = True
+            for source, target, _ in replacements:
+                maintenance._write_binary_atomic(source, target)
+            maintenance.write_json_atomic(state_file, record)
+            journal.unlink()
         except Exception:
-            for target in reversed(written):
-                target.unlink(missing_ok=True)
-            for original, target in reversed(moved):
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(original), str(target))
-            if backup.exists():
+            if journal_ready:
+                # Any third-party change to touched files blocks unsafe
+                # rollback and intentionally retains the recovery journal.
+                maintenance.restore_transaction(executable)
+            elif backup.is_dir() and not backup.is_symlink():
                 shutil.rmtree(backup)
             raise
     if alias.lower().endswith(".asi"):
