@@ -104,17 +104,17 @@ All changes for this wizard are limited to `Launcher/Avalonia/`, including
 ## Current AMDNR host with native lmxxf (no NeuralHub)
 
 The experimental Linux ROCm Bridge now targets the independently published
-**AMDNR 0.3.5.8.28** host with its **lmxxf 0.4.6.2** component, while the
+**AMDNR 0.3.5.8.28** host with its **lmxxf 0.4.6.2** component or an explicitly chosen checksum-pinned Daniel runtime (0.4.0, 0.4.1, 0.4.3, 0.5.0, 0.5.1, 0.6.0), while the
 Linux bridge backend remains v0.3.7. On an explicit Prepare click, the
 launcher retains the verified bridge archive, applies an exact versioned
 host-staging adapter in its private extracted source, and downloads the host
 and lmxxf archives from the official AMDNR GitHub release. The upstream
 manager then verifies their SHA-256 digests and stages the native lmxxf
-backend, not Daniel or NeuralHub.
+backend by default. Daniel selections are separately staged and checked against the actual AMDNR host's embedded pass DLL hashes by upstream `manage.stage`; an incompatible combination fails preparation rather than being marked supported. Daniel 0.8 / NeuralHub is excluded.
 
 The release digests are recorded directly in `community_bridge.py` from
 GitHub release asset metadata. A new prepared directory named
-`package-amdnr-0.3.5.8.28` keeps the previously prepared v0.3.5.6 bundle
+`package-amdnr-0.3.5.8.28-<runtime>` keeps the previously prepared v0.3.5.6 bundle
 intact. Installation requires a complete new bundle with matching
 `SOURCE.txt` and `components.json` receipts; old bundles must not appear
 as if they were the newest. Existing game hooks, ReShade files, backups and
@@ -126,7 +126,10 @@ If the archive's layout or runtime interface changed incompatibly, the
 preparation stage should fail and installation must remain unavailable.
 The updated pin is a testable staging integration, not proof of working
 neural rendering on Proton-Wineland or Subnautica 2. Daniel 0.8/0.9 and
-NeuralHub remain deliberately out of scope.
+NeuralHub remain deliberately out of scope. Use the runtime selector in the
+Experimental Linux ROCm Bridge wizard. Only the selected runtime's staged
+package is used for installation; selecting another runtime cannot install
+the previously prepared one.
 
 ## Updating the community bridge safely
 
