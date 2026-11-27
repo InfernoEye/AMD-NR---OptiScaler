@@ -1989,7 +1989,7 @@ public sealed class MainWindow : Window
         var componentActions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
         var loadComponents = Button("LOAD OFFICIAL COMPONENTS");
         var previewComponent = Button("DOWNLOAD & PREVIEW");
-        var getDaniel = Button("GET DANIEL 0.6.0");
+        var getDaniel = Button("BROWSE DANIEL VERSIONS");
         var installComponent = Button("INSTALL PREVIEWED COMPONENT", true);
         var replaceComponent = Button("BACK UP & REPLACE CONFLICTS");
         previewComponent.IsEnabled = false;
@@ -2160,8 +2160,8 @@ public sealed class MainWindow : Window
             catch (Exception ex) { _status.Text = "Component preview failed: " + ex.Message; }
             finally { _busy = false; previewComponent.IsEnabled = true; }
         };
-        // One guided action discovers the historical official runtime and downloads
-        // a checked preview; installation is still explicit and never silent.
+        // Show all official Daniel runtimes in the existing version picker.
+        // Never install or replace an active version without explicit user action.
         getDaniel.Click += async (_, _) =>
         {
             if (_busy || _backend is null) return;
@@ -2173,39 +2173,27 @@ public sealed class MainWindow : Window
             previewedAsset = null;
             previewReplaceable = false;
             previewDetails.Children.Clear();
-            _status.Text = "Resolving and verifying official Daniel 0.6.0 runtime…";
+            _status.Text = "Checking official upstream Daniel runtime history…";
             try
             {
                 var entries = await _backend.ComponentsAsync();
-                var daniel = entries.FirstOrDefault(x =>
-                    x.Asset == "v0.6.0-Runtime.zip" && x.Tag == "Alpha0.3.5.5R4");
-                if (daniel is null)
-                    throw new InvalidOperationException("Official Daniel runtime not found.");
-                componentPicker.ItemsSource = entries.ToArray();
-                componentPicker.SelectedItem = daniel;
-                var result = await _backend.PreviewComponentAsync(selected, daniel.Tag, daniel.Asset);
+                var daniel = entries.Where(x =>
+                    x.Asset.StartsWith("v", StringComparison.OrdinalIgnoreCase) &&
+                    x.Asset.EndsWith("-Runtime.zip", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
                 if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
-                previewDetails.Children.Add(Text("Daniel 0.6.0 · " + result.FileCount +
-                    " runtime/attribution files · " + result.NewFileCount + " new · " +
-                    result.IdenticalCount + " identical · " + result.ConflictCount +
-                    " differing/unsafe files. " +
-                    string.Join(", ", result.Files.Take(8)), 12, MutedBrush));
-                if (!result.SafetyLimitExceeded &&
-                    (result.Installable ||
-                     (result.ConflictCount > 0 &&
-                      result.ConflictCount == result.ReplaceableCount)))
-                {
-                    previewedTag = daniel.Tag;
-                    previewedAsset = daniel.Asset;
-                    previewReplaceable = result.ConflictCount > 0;
-                    installComponent.IsEnabled = result.Installable;
-                    replaceComponent.IsEnabled = previewReplaceable;
-                    _status.Text = "Daniel 0.6.0 package verified. Review and choose install.";
-                }
-                else
-                    _status.Text = "Daniel runtime preview blocked; existing unsafe files or archive limits.";
+                componentPicker.ItemsSource = daniel;
+                componentPicker.SelectedIndex = daniel.Length > 0 ? 0 : -1;
+                previewDetails.Children.Add(Text(
+                    "Select a Daniel version, then Download & Preview. " +
+                    "Only one Daniel runtime can be installed per game. " +
+                    "Remove the installed version using the managed Remove Component action " +
+                    "before switching, so its original files can be restored. " +
+                    "Older runtimes may not be compatible with the current AMDNR build.",
+                    12, MutedBrush));
+                _status.Text = daniel.Length + " official Daniel runtime versions found.";
             }
-            catch (Exception ex) { _status.Text = "Daniel runtime download failed: " + ex.Message; }
+            catch (Exception ex) { _status.Text = "Daniel version lookup failed: " + ex.Message; }
             finally { _busy = false; getDaniel.IsEnabled = true; }
         };
         installComponent.Click += async (_, _) =>
