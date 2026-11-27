@@ -716,11 +716,15 @@ def import_extension(executable: Path, source: Path) -> dict[str, str]:
     if source.name in managed:
         raise ValueError("Extension is already registered; inspect it first")
     # Use exclusive creation to avoid races/overwrites.
+    created = False
     try:
-        with source.open("rb") as input_file, destination.open("xb") as output_file:
-            shutil.copyfileobj(input_file, output_file)
+        with destination.open("xb") as output_file:
+            created = True
+            with source.open("rb") as input_file:
+                shutil.copyfileobj(input_file, output_file)
     except Exception:
-        destination.unlink(missing_ok=True)
+        if created:
+            destination.unlink(missing_ok=True)
         raise
     try:
         managed[source.name] = _digest(destination)
@@ -763,11 +767,11 @@ def extension_inventory(executable: Path) -> dict[str, object]:
     }
     if plugins.is_dir() and not plugins.is_symlink():
         found = []
+        managed = _managed_extensions(executable)
         for candidate in sorted(plugins.iterdir(), key=lambda p: p.name.casefold()):
             if candidate.suffix.lower() not in (".asi", ".dll") or \
                     not candidate.is_file() or candidate.is_symlink():
                 continue
-            managed = _managed_extensions(executable)
             found.append({"name": candidate.name, "size": candidate.stat().st_size,
                           "managed": candidate.name in managed,
                           "modified": (candidate.name in managed and
