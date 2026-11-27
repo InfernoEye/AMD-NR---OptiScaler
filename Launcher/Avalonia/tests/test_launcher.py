@@ -28,6 +28,60 @@ class LauncherTests(unittest.TestCase):
             archive.writestr("release/OptiScaler.ini", b"configuration")
             archive.writestr("release/setup_windows.bat", b"not installed")
 
+    def test_library_audit_respects_steam_metadata_and_saved_custom_games(self):
+        steam_folder = self.root / "steamapps/common/WindowsGame"
+        steam_folder.mkdir(parents=True)
+        executable = steam_folder / "WindowsGame.exe"
+        executable.write_bytes(b"exe")
+        native_folder = self.root / "steamapps/common/LinuxGame"
+        native_folder.mkdir()
+        (native_folder / "LinuxGame.x86_64").write_bytes(b"\\x7fELFnative")
+        custom_folder = self.root / "custom/SoloGame"
+        custom_folder.mkdir(parents=True)
+        custom_exe = custom_folder / "Solo.exe"
+        custom_exe.write_bytes(b"exe")
+        custom = [{"name": "SoloGame", "folder": str(custom_folder)}]
+        metadata = {"selected": str(executable), "windows_missing": []}
+        with patch.object(launcher, "steam_games", return_value=[
+            ("WindowsGame", steam_folder), ("LinuxGame", native_folder)
+        ]), patch.object(launcher, "custom_games", return_value=custom), \\
+                patch.object(launcher, "steam_launch_for_directory", return_value=metadata), \\
+                patch.object(launcher, "saved_executable", side_effect=lambda folder:
+                             str(custom_exe) if folder == custom_folder else None):
+            audit = launcher.library_audit()
+        self.assertEqual(len(audit), 3)
+        rows = {entry["name"]: entry for entry in audit}
+        self.assertEqual(rows["WindowsGame"]["status"], "windows_ready")
+        self.assertEqual(rows["WindowsGame"]["source"], "steam")
+        self.assertEqual(rows["SoloGame"]["status"], "windows_ready")
+        self.assertEqual(rows["SoloGame"]["source"], "saved")
+        self.assertTrue(rows["SoloGame"]["custom"])
+        self.assertEqual(rows["LinuxGame"]["status"], "native_linux")
+        self.assertEqual(rows["LinuxGame"]["native"], ["LinuxGame.x86_64"])
+
+    def test_library_audit_handles_disconnected_custom_folder(self):
+        missing = self.root / "unmounted/Game"
+        with patch.object(launcher, "steam_games", return_value=[]), \\
+                patch.object(launcher, "custom_games", return_value=[
+                    {"name": "Offline game", "folder": str(missing)}
+                ]):
+            audit = launcher.library_audit()
+        self.assertEqual(audit[0]["status"], "missing_folder")
+        self.assertIsNone(audit[0]["executable"])
+
+    def test_library_audit_installed_record_is_not_verification(self):
+        with patch.object(launcher, "steam_games", return_value=[
+            ("Game", self.game)
+        ]), patch.object(launcher, "custom_games", return_value=[]), \\
+                patch.object(launcher, "steam_launch_for_directory",
+                             return_value={"selected": str(self.exe)}), \\
+                patch.object(launcher, "saved_executable", return_value=None):
+            state = self.game / launcher.STATE_NAME
+            state.write_text("{}")
+            audit = launcher.library_audit()
+        self.assertTrue(audit[0]["installed_record"])
+        self.assertEqual(audit[0]["status"], "windows_ready")
+
     def test_install_uninstall_restores_existing_files(self):
         proxy = self.game / "dxgi.dll"
         proxy.write_bytes(b"previous game dll")
