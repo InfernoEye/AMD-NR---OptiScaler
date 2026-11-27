@@ -617,7 +617,7 @@ def recover_migration(exe: Path, approved: bool) -> dict:
     return recover_pending(exe)
 
 
-def remove(exe: Path, approved: bool) -> dict:
+def remove(exe: Path, approved: bool, *, restore_previous: bool = True) -> dict:
     if not approved:
         raise ValueError("Community bridge removal requires explicit consent.")
     folder = _game_directory(exe)
@@ -638,14 +638,17 @@ def remove(exe: Path, approved: bool) -> dict:
         raise ValueError("Uninstall stopped; inspect changed files before retrying: " +
                          (finished.stdout + "\n" + finished.stderr)[-4000:])
     migration = None
-    from bridge_migration import latest_installed_snapshot, restore_snapshot
+    from bridge_migration import (latest_installed_snapshot, restore_snapshot,
+                                  retain_after_full_uninstall)
     old_snapshot = latest_installed_snapshot(exe)
     if old_snapshot is not None:
-        migration = restore_snapshot(old_snapshot)
-        if migration["blocked"]:
+        migration = (restore_snapshot(old_snapshot) if restore_previous
+                     else retain_after_full_uninstall(old_snapshot))
+        if restore_previous and migration["blocked"]:
             raise ValueError("Bridge uninstalled, but some original files could not be restored. "
                              f"Recovery snapshot: {old_snapshot}; blocked: " +
                              ", ".join(migration["blocked"]))
     return {"removed": True, "migration_restoration": migration, "steam_modified": False,
+            "previous_install_restored": restore_previous,
             "warning": "Remove the bridge wrapper from your Steam launch options manually.",
             "output": finished.stdout[-1000:]}
