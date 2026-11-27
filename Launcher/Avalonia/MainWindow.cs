@@ -1889,6 +1889,26 @@ public sealed class MainWindow : Window
             "Download from 3zwr1/AMD-NR---OptiScaler. ZIPs are SHA-256 verified. " +
             "Review files before installation. Differing files require explicit backed-up replacement.",
             12, MutedBrush));
+        var checkRuntimes = Button("CHECK GAME RUNTIME FILES");
+        var runtimeReport = new StackPanel { Spacing = 5 };
+        checkRuntimes.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null) return;
+            _busy = true;
+            checkRuntimes.IsEnabled = false;
+            runtimeReport.Children.Clear();
+            try
+            {
+                var report = await _backend.RuntimeDiagnosticsAsync(selected);
+                if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                runtimeReport.Children.Add(Text(report, 12, MutedBrush));
+                _status.Text = "Runtime file inspection completed; no game files changed.";
+            }
+            catch (Exception ex) { _status.Text = "Runtime inspection failed: " + ex.Message; }
+            finally { _busy = false; checkRuntimes.IsEnabled = true; }
+        };
+        official.Children.Add(checkRuntimes);
+        official.Children.Add(runtimeReport);
         var componentPicker = new ComboBox
         {
             PlaceholderText = "Load official AMDNR components",
