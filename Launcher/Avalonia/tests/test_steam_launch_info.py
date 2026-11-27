@@ -89,7 +89,7 @@ class AppInfoTests(unittest.TestCase):
     def test_platform_neutral_exe_is_a_windows_candidate(self):
         # Steamworks 'All OSes' launch options omit config.oslist.
         data = {"appinfo": {"common": {"type": "Game"}, "config": {
-            "launch": {"0": {"executable": r"game\\bin\\win64\\cs2.exe"}}
+            "launch": {"0": {"executable": r"game\bin\win64\cs2.exe"}}
         }}}
         report = steam.resolve_windows_launch(data, self.game)
         self.assertEqual(report["reason"], "steam_primary")
