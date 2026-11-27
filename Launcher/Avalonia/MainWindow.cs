@@ -1960,6 +1960,12 @@ public sealed class MainWindow : Window
         panel.Children.Add(addonDaniel);
         panel.Children.Add(Text("Default: AMDNR 0.3.5.8.28 + Linux bridge + lmxxf. " +
             "Daniel 0.8 / NeuralHub is not included.", 12, MutedBrush));
+        var extraAddonOptions = new StackPanel { Spacing = 5 };
+        var addonCatalogueState = Text("Checking verified optional component releases…",
+            12, MutedBrush);
+        extraAddonOptions.Children.Add(addonCatalogueState);
+        panel.Children.Add(extraAddonOptions);
+        var selectedAddons = new List<(ReleaseEntry Release, CheckBox Option)>();
         string Runtime() => addonDaniel.IsChecked == true ? "0.6.0" : "lmxxf";
 
         var state = Text("Checking existing bridge and prepared packages…", 13, ForegroundBrush);
@@ -2037,6 +2043,43 @@ public sealed class MainWindow : Window
         string? compiler = null;
         string finalText = "";
         bool busy = false;
+        async Task LoadOptionalAddons()
+        {
+            if (_backend is null) return;
+            try
+            {
+                var entries = await _backend.ComponentsAsync();
+                // Native lmxxf is bundled by the bridge and Daniel is the
+                // single runtime choice above. Avoid duplicate runtime archives.
+                var supported = entries.Where(x =>
+                    !IsDanielRuntime(x.Asset) &&
+                    !x.Asset.Contains("lmxxf", StringComparison.OrdinalIgnoreCase) &&
+                    !x.Asset.Contains("neuralhub", StringComparison.OrdinalIgnoreCase) &&
+                    !x.Prerelease)
+                    .GroupBy(x => x.Asset, StringComparer.OrdinalIgnoreCase)
+                    .Select(x => x.First()).Take(5).ToArray();
+                if (supported.Length == 0)
+                {
+                    addonCatalogueState.Text = "No additional verified add-on packages published.";
+                    return;
+                }
+                addonCatalogueState.Text = "Official optional add-ons (none selected by default):";
+                foreach (var release in supported)
+                {
+                    var toggle = new CheckBox
+                    {
+                        Content = release.Name + " (verified official package)",
+                        Foreground = ForegroundBrush, IsChecked = false,
+                    };
+                    extraAddonOptions.Children.Add(toggle);
+                    selectedAddons.Add((release, toggle));
+                }
+            }
+            catch (Exception ex)
+            {
+                addonCatalogueState.Text = "Optional add-on catalog unavailable: " + ex.Message;
+            }
+        }
 
         void Buttons()
         {
@@ -2197,7 +2240,37 @@ public sealed class MainWindow : Window
                     args.Add("--bridge-backup-and-replace");
                 var (exit, result) = await _backend.RunAsync(args);
                 if (exit != 0) throw new InvalidOperationException(result);
-                feedback.Text = "Installed successfully. Copy the final Steam launch options below.";
+                var added = new List<string>();
+                var skipped = new List<string>();
+                foreach (var (release, checkbox) in selectedAddons)
+                {
+                    if (checkbox.IsChecked != true) continue;
+                    try
+                    {
+                        // Preview validates archive contents and the destination;
+                        // never overwrite unrelated files without a separate review.
+                        var preview = await _backend.PreviewComponentAsync(
+                            gameExe, release.Tag, release.Asset);
+                        if (!preview.Installable || preview.ConflictCount > 0 ||
+                            preview.SafetyLimitExceeded)
+                        {
+                            skipped.Add(release.Name + " (conflicts or safety checks)");
+                            continue;
+                        }
+                        await _backend.InstallComponentAsync(
+                            gameExe, release.Tag, release.Asset);
+                        added.Add(release.Name);
+                    }
+                    catch (Exception addonError)
+                    {
+                        skipped.Add(release.Name + " (" + addonError.Message + ")");
+                    }
+                }
+                feedback.Text = "AMDNR with Linux bridge installed. " +
+                    (added.Count > 0 ? "Added: " + string.Join(", ", added) + ". " : "") +
+                    (skipped.Count > 0 ? "Add-ons requiring review: " +
+                        string.Join(", ", skipped) + ". " : "") +
+                    "Copy the final Steam launch options below.";
                 await Check();
             }
             catch (Exception ex)
@@ -2244,6 +2317,7 @@ public sealed class MainWindow : Window
                 await CopyToClipboardAsync(finalText, "Steam launch options copied.");
         };
         _ = Check();
+        _ = LoadOptionalAddons();
     }
 
 
