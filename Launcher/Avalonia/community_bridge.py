@@ -110,6 +110,7 @@ def status(exe: Path | None = None) -> dict:
     }
     if exe is not None:
         report["exe"] = str(exe)
+        report["community_installed"] = (exe.parent / "amdnr-linux/run.sh").is_file()
         if not exe.is_file():
             report["conflicts"] = ["Selected Windows executable is missing."]
         else:
