@@ -127,7 +127,7 @@ class AppInfoTests(unittest.TestCase):
         # Actual Steam installations may give their sole launch entry a type
         # and a display description, without making it an alternate game.
         data = {"appinfo": {"common": {"type": "Game"}, "config": {
-            "launch": {"0": {"executable": r"game\\bin\\win64\\cs2.exe",
+            "launch": {"0": {"executable": r"game\bin\win64\cs2.exe",
                               "type": "option1", "description": "Play game"}}
         }}}
         report = steam.resolve_windows_launch(data, self.game)
