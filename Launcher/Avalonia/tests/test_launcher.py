@@ -28,6 +28,55 @@ class LauncherTests(unittest.TestCase):
             archive.writestr("release/OptiScaler.ini", b"configuration")
             archive.writestr("release/setup_windows.bat", b"not installed")
 
+    def test_installed_games_overview_reads_records_without_hashing(self):
+        state_home = self.root / "state"
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(state_home)}):
+            launcher._write_library_index([{
+                "name": "Game With Spaces", "folder": str(self.game),
+                "executable": str(self.exe), "custom": False,
+            }])
+            record = self.game / launcher.STATE_NAME
+            record.write_text(json.dumps({
+                "format": 1, "alias": "dxgi.dll",
+                "files": [{"path": "missing.dll", "sha256": "not-verified"}],
+                "source_archive": "/tmp/amd-nr.zip",
+            }))
+            with patch.object(launcher, "_digest",
+                              side_effect=AssertionError("unexpected hashing")), \
+                 patch.object(launcher, "_game_binary_scan",
+                              side_effect=AssertionError("unexpected scan")):
+                overview = launcher.installed_games_overview()
+            self.assertEqual(len(overview), 1)
+            self.assertEqual(overview[0]["status"], "recorded")
+            self.assertEqual(overview[0]["alias"], "dxgi.dll")
+            self.assertEqual(overview[0]["tracked_files"], 1)
+            self.assertEqual(overview[0]["source_archive"], "/tmp/amd-nr.zip")
+            record.unlink()
+            self.assertEqual(launcher.installed_games_overview(), [])
+
+    def test_installed_games_overview_marks_corrupt_records(self):
+        state_home = self.root / "state"
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(state_home)}):
+            launcher._write_library_index([{
+                "name": "Game", "folder": str(self.game),
+                "executable": str(self.exe), "custom": True,
+            }])
+            record = self.game / launcher.STATE_NAME
+            record.write_text('{"format": 1, "alias": "bad.dll", "files": []}')
+            overview = launcher.installed_games_overview()
+            self.assertEqual(overview[0]["status"], "invalid_record")
+            self.assertIsNone(overview[0]["alias"])
+            self.assertTrue(overview[0]["custom"])
+
+    def test_installed_games_overview_ignores_stale_index_paths(self):
+        state_home = self.root / "state"
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(state_home)}):
+            launcher._write_library_index([{
+                "name": "Removed game", "folder": str(self.root / "gone"),
+                "executable": str(self.root / "gone" / "game.exe"),
+            }])
+            self.assertEqual(launcher.installed_games_overview(), [])
+
     def test_existing_full_audit_exe_is_imported_without_binary_scan(self):
         state = self.root / "state"
         with patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}):
