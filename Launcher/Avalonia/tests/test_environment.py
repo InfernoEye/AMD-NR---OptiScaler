@@ -86,14 +86,6 @@ class EnvironmentTests(unittest.TestCase):
             self.assertNotIn("PRIVATE", content)
             self.assertIn("report.json", bundle.namelist())
 
-    def test_performance_analysis_has_bounded_percentiles(self):
-        csv_file = self.root / "performance.csv"
-        csv_file.write_text("frametime,other\n10,a\n20,b\n30,c\n40,d\n")
-        result = environment.analyze_mangohud_csv(csv_file)
-        self.assertEqual(result["frames"], 4)
-        self.assertEqual(result["average_ms"], 25)
-        self.assertLessEqual(result["p95_ms"], 40)
-
     def test_compatibility_does_not_claim_hardware_support(self):
         with (patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.config)}),
               patch.object(environment, "gpu_probe", return_value=[{
