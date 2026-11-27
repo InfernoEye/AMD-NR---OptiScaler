@@ -1735,11 +1735,21 @@ public sealed class MainWindow : Window
         var reviewRepair = Button("BACK UP CHANGES & REPAIR");
         var recover = Button("RESTORE INTERRUPTED UPDATE");
         var nextProxy = Button("TRY NEXT PROXY");
+        var copyNewLaunchOptions = Button("COPY SAFE STEAM OPTIONS");
+        copyNewLaunchOptions.IsEnabled = false;
+        string? composedSteamOptions = null;
         maintenanceActions.Children.Add(autoRepair);
         maintenanceActions.Children.Add(update);
         maintenanceActions.Children.Add(reviewRepair);
         maintenanceActions.Children.Add(recover);
         maintenanceActions.Children.Add(nextProxy);
+        maintenanceActions.Children.Add(copyNewLaunchOptions);
+        copyNewLaunchOptions.Click += async (_, _) =>
+        {
+            if (composedSteamOptions is not null)
+                await CopyToClipboardAsync(composedSteamOptions,
+                    "Merged Steam launch options copied; paste into Steam manually.");
+        };
         maintenanceSection.Children.Add(maintenanceActions);
         var maintenanceResult = Text(
             "No maintenance operation has been run. Verify installed files first.", 12, MutedBrush);
@@ -1764,6 +1774,36 @@ public sealed class MainWindow : Window
                                          : "Maintenance safely refused; see the result below.";
                 if (exit == 0)
                 {
+                    if (args.Length > 0 && args[0] == "--try-next-proxy")
+                    {
+                        composedSteamOptions = null;
+                        copyNewLaunchOptions.IsEnabled = false;
+                        var alias = RecordedAlias(_exe);
+                        if (!string.IsNullOrWhiteSpace(alias) &&
+                            !alias.EndsWith(".asi", StringComparison.OrdinalIgnoreCase))
+                        {
+                            try
+                            {
+                                var folder = _selectedGame?.Folder ??
+                                    Path.GetDirectoryName(_exe)!;
+                                var options = await _backend.SteamUserOptionsAsync(folder, alias);
+                                if (!string.IsNullOrWhiteSpace(options.Preview))
+                                {
+                                    composedSteamOptions = options.Preview;
+                                    copyNewLaunchOptions.IsEnabled = true;
+                                    maintenanceResult.Text += "\nMerged Steam launch preview: " +
+                                        composedSteamOptions;
+                                }
+                                else
+                                    maintenanceResult.Text +=
+                                        "\nSteam options ambiguous; review them manually before launching.";
+                            }
+                            catch (Exception ex)
+                            {
+                                maintenanceResult.Text += "\nSteam preview unavailable: " + ex.Message;
+                            }
+                        }
+                    }
                     RefreshInstallStatus();
                     try
                     {
