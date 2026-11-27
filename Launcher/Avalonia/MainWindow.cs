@@ -31,6 +31,8 @@ public sealed class MainWindow : Window
     private readonly TextBlock _breadcrumb = Text("AMDNR  /  Library", 15, MutedBrush, FontWeight.SemiBold);
     private string _currentSection = "Library";
     private GameEntry? _selectedGame;
+    private IReadOnlyList<ExecutableEntry> _exeCandidates = Array.Empty<ExecutableEntry>();
+    private bool _showAlternativeExecutables;
     private readonly Dictionary<string, Button> _navigation = new();
     private Backend? _backend;
     private List<GameEntry> _games = new();
@@ -366,14 +368,47 @@ public sealed class MainWindow : Window
         return illustration;
     }
 
-    private void SelectGame(GameEntry game)
+    private async void SelectGame(GameEntry game)
     {
+        if (_busy) return;
         _selectedGame = game;
         _selectedFolder = game.Folder;
-        // Do not silently use the first EXE for installation: games can have
-        // uninstallers, launchers, and anti-cheat executables alongside the real EXE.
         _exe = null;
-        _status.Text = $"Selected {game.Name}. Choose the Windows executable to manage.";
+        _exeCandidates = Array.Empty<ExecutableEntry>();
+        _showAlternativeExecutables = false;
+        ShowGameDetails();
+        await FindExecutablesAsync(game);
+    }
+
+    private async Task FindExecutablesAsync(GameEntry game)
+    {
+        if (_backend is null || _busy) return;
+        _busy = true;
+        _status.Text = "Finding game executable candidates…";
+        try
+        {
+            var results = await _backend.ExecutablesAsync(game.Folder);
+            // Do not navigate to a different game after an asynchronous scan.
+            if (_selectedGame?.Folder != game.Folder) return;
+            _exeCandidates = results;
+            _status.Text = results.Count == 0
+                ? "No Windows executable detected. Choose one manually."
+                : $"Found {results.Count} executable candidates. Confirm the correct one.";
+            ShowGameDetails();
+        }
+        catch (Exception ex) { _status.Text = "Executable scan failed: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void ConfirmExecutable(string path)
+    {
+        if (!File.Exists(path) || !path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            _status.Text = "Selected executable is no longer available.";
+            return;
+        }
+        _exe = path;
+        _status.Text = "Confirmed game executable: " + path;
         ShowGameDetails();
     }
 
@@ -403,6 +438,7 @@ public sealed class MainWindow : Window
         summary.Children.Add(Text(game.Folder, 12, MutedBrush));
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         var install = Button(installed ? "MANAGE INSTALLATION" : "INSTALL AMDNR", true);
+        install.IsEnabled = _exe is not null && File.Exists(_exe);
         install.Click += (_, _) => ShowInstall();
         actions.Children.Add(install);
         var doctor = Button("DOCTOR");
@@ -437,69 +473,104 @@ public sealed class MainWindow : Window
         _content.Children.Add(Panel(hero, new Thickness(22)));
 
         var detail = new StackPanel { Spacing = 13 };
-        detail.Children.Add(Text("GAME CONFIGURATION", 12, AccentBrush, FontWeight.Bold));
-        detail.Children.Add(Text("Executable", 12, MutedBrush));
-        var exeLine = new TextBox
+        detail.Children.Add(Text("GAME EXECUTABLE", 12, AccentBrush, FontWeight.Bold));
+        var recommended = _exeCandidates.FirstOrDefault(e => e.Recommended);
+        var chosen = _exe;
+
+        if (!string.IsNullOrWhiteSpace(chosen) && File.Exists(chosen))
         {
-            Text = _exe ?? "", Watermark = "Select the game EXE to enable installation",
-            Background = BackgroundBrush, Foreground = ForegroundBrush,
-        };
-        exeLine.TextChanged += (_, _) => _exe = exeLine.Text;
-        detail.Children.Add(exeLine);
-        var selectExe = Button("CHANGE EXECUTABLE");
-        selectExe.Click += async (_, _) =>
+            var selected = new StackPanel { Spacing = 5 };
+            selected.Children.Add(Text("✓  Confirmed game executable", 15,
+                AccentBrush, FontWeight.SemiBold));
+            selected.Children.Add(Text(Path.GetFileName(chosen), 20,
+                ForegroundBrush, FontWeight.SemiBold));
+            selected.Children.Add(Text(Path.GetRelativePath(game.Folder, chosen), 12, MutedBrush));
+            detail.Children.Add(Panel(selected, new Thickness(14)));
+        }
+        else if (recommended is not null)
         {
-            var selected = await PickFileAsync("Select game executable",
-                new FilePickerFileType("Windows executable") { Patterns = new[] { "*.exe" } });
-            if (selected is not null)
+            var suggestion = new StackPanel { Spacing = 9 };
+            suggestion.Children.Add(Text("★  Recommended executable · not yet confirmed",
+                13, AccentBrush, FontWeight.SemiBold));
+            suggestion.Children.Add(Text(Path.GetFileName(recommended.Path), 20,
+                ForegroundBrush, FontWeight.SemiBold));
+            suggestion.Children.Add(Text(Path.GetRelativePath(game.Folder, recommended.Path),
+                13, MutedBrush));
+            var confirm = Button("USE THIS EXECUTABLE", true);
+            confirm.Click += (_, _) => ConfirmExecutable(recommended.Path);
+            suggestion.Children.Add(confirm);
+            detail.Children.Add(Panel(suggestion, new Thickness(14)));
+        }
+        else
+        {
+            detail.Children.Add(Text(_busy ? "Scanning game folder for Windows executables…"
+                : "No executable confirmed. Find or browse to the game EXE.",
+                14, MutedBrush));
+        }
+
+        detail.Children.Add(Text("Confirm the executable that Steam actually starts. " +
+            "Recommendations are heuristic, not verified installation targets.", 12, MutedBrush));
+
+        var exeActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        var alternatives = _exeCandidates.Where(e => e.Path != chosen &&
+            e.Path != recommended?.Path).ToList();
+        if (alternatives.Count > 0 || (recommended is not null && chosen != recommended.Path))
+        {
+            var toggle = Button(_showAlternativeExecutables
+                ? "HIDE ALTERNATIVES" : $"CHANGE EXECUTABLE ({_exeCandidates.Count})");
+            toggle.Click += (_, _) =>
             {
-                exeLine.Text = selected;
+                _showAlternativeExecutables = !_showAlternativeExecutables;
                 ShowGameDetails();
-            }
-        };
-        detail.Children.Add(selectExe);
-        var candidatesLabel = Text("Multiple game executables may be present. " +
-            "Select the actual Windows game executable before installing.", 12, MutedBrush);
-        detail.Children.Add(candidatesLabel);
-        var candidatesPanel = new StackPanel { Spacing = 8 };
-        var scanButton = Button("FIND GAME EXECUTABLES");
-        scanButton.Click += async (_, _) =>
+            };
+            exeActions.Children.Add(toggle);
+        }
+        var browse = Button("BROWSE EXE");
+        browse.Click += async (_, _) =>
         {
-            if (_backend is null || _busy) return;
-            _busy = true;
-            scanButton.IsEnabled = false;
-            _status.Text = "Finding Windows executables inside selected game…";
-            try
-            {
-                var files = await _backend.ExecutablesAsync(game.Folder);
-                candidatesPanel.Children.Clear();
-                if (files.Count == 0)
-                    candidatesPanel.Children.Add(Text("No Windows EXE found. Browse manually.", 13, MutedBrush));
-                foreach (var candidate in files)
-                {
-                    var path = candidate.Path;
-                    var name = System.IO.Path.GetRelativePath(game.Folder, path);
-                    var item = Button((candidate.Recommended ? "★  " :
-                        candidate.Suspicious ? "⚠  " : "") + name);
-                    item.Click += (_, _) =>
-                    {
-                        _exe = path;
-                        ShowGameDetails();
-                        _status.Text = "Selected executable: " + name;
-                    };
-                    candidatesPanel.Children.Add(item);
-                }
-                _status.Text = $"Found {files.Count} executable candidates. Choose the correct game EXE.";
-            }
-            catch (Exception ex) { _status.Text = "Executable scan failed: " + ex.Message; }
-            finally { _busy = false; scanButton.IsEnabled = true; }
+            var selected = await PickFileAsync("Select Windows game executable",
+                new FilePickerFileType("Windows executable") { Patterns = new[] { "*.exe" } });
+            if (selected is not null) ConfirmExecutable(selected);
         };
-        detail.Children.Add(scanButton);
-        detail.Children.Add(candidatesPanel);
-        detail.Children.Add(Text("Install status is based on the Linux launcher's installation " +
-            "record beside the selected executable. Existing installations made by other tools " +
-            "may not be detected.", 12, MutedBrush));
+        exeActions.Children.Add(browse);
+        var rescan = Button("RESCAN");
+        rescan.Click += async (_, _) => await FindExecutablesAsync(game);
+        exeActions.Children.Add(rescan);
+        detail.Children.Add(exeActions);
+
+        if (_showAlternativeExecutables)
+        {
+            var entries = new StackPanel { Spacing = 7 };
+            foreach (var candidate in _exeCandidates)
+            {
+                var choice = candidate;
+                var relative = Path.GetRelativePath(game.Folder, choice.Path);
+                var select = Button((choice.Suspicious ? "⚠  " :
+                    choice.Recommended ? "★  " : "") + relative +
+                    (choice.Path == _exe ? "  ·  SELECTED" : ""));
+                select.Click += (_, _) =>
+                {
+                    _showAlternativeExecutables = false;
+                    ConfirmExecutable(choice.Path);
+                };
+                entries.Children.Add(select);
+            }
+            detail.Children.Add(Panel(entries, new Thickness(12)));
+        }
         _content.Children.Add(Panel(detail));
+
+        var manage = new StackPanel { Spacing = 10 };
+        manage.Children.Add(Text("INSTALLATION", 12, AccentBrush, FontWeight.Bold));
+        manage.Children.Add(Text(HasInstallRecord()
+            ? "An installation record exists for this executable. You can inspect it below."
+            : _exe is null
+                ? "Confirm the game executable before configuring installation."
+                : "No installation recorded for this executable.", 13, MutedBrush));
+        var openInstall = Button(HasInstallRecord() ? "MANAGE INSTALLATION" : "CONFIGURE INSTALLATION", true);
+        openInstall.IsEnabled = _exe is not null && File.Exists(_exe);
+        openInstall.Click += (_, _) => ShowInstall();
+        manage.Children.Add(openInstall);
+        _content.Children.Add(Panel(manage));
 
         if (HasInstallRecord())
         {
