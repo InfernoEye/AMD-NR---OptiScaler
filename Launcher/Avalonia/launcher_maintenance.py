@@ -141,6 +141,70 @@ def _write_binary_atomic(source: Path, target: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
+
+def _restore_initial_install(root: Path, journal: Path, doc: dict) -> dict:
+    """Recover a crash during first install; never overwrite unknown edits."""
+    if doc.get("format") != 2 or doc.get("mode") != "install":
+        raise ValueError("Invalid first-install recovery journal")
+    touched = doc.get("touched")
+    if not isinstance(touched, list) or not touched or len(touched) > 1024:
+        raise ValueError("Invalid first-install recovery entries")
+    backup = root / "AMDNR_backup" / "linux-launcher"
+    if backup.is_symlink() or not backup.is_dir():
+        raise ValueError("First-install backups missing or unsafe")
+    state_file = root / ".amdnr-linux-install.json"
+    if state_file.is_symlink() or (state_file.exists() and not state_file.is_file()):
+        raise ValueError("Unsafe first-install record")
+    record_sha = doc.get("new_state_sha256")
+    if not isinstance(record_sha, str) or len(record_sha) != 64:
+        raise ValueError("Invalid first-install record checksum")
+    if state_file.is_file() and digest(state_file) != record_sha:
+        raise ValueError("First-install record changed independently")
+    actions = []
+    seen = set()
+    for entry in touched:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            raise ValueError("Malformed first-install entry")
+        name = entry["path"]
+        if name.casefold() in seen:
+            raise ValueError("Duplicate first-install entry")
+        seen.add(name.casefold())
+        target = safe_path(root, name)
+        saved = safe_path(backup, name)
+        previous = entry.get("previous_sha256")
+        expected = entry.get("expected_sha256")
+        for value in (previous, expected):
+            if value is not None:
+                if not isinstance(value, str) or len(value) != 64:
+                    raise ValueError("Malformed first-install digest")
+                try:
+                    int(value, 16)
+                except ValueError as exc:
+                    raise ValueError("Malformed first-install digest") from exc
+        if expected is None:
+            raise ValueError("Missing installed file checksum")
+        if target.is_symlink() or (target.exists() and not target.is_file()):
+            raise ValueError("Unsafe first-install destination: " + name)
+        current = digest(target) if target.is_file() else None
+        if current not in (previous, expected, None):
+            raise ValueError("First-install file changed independently: " + name)
+        if previous is not None and (saved.is_symlink() or not saved.is_file()
+                                     or digest(saved) != previous):
+            raise ValueError("Original first-install backup missing or changed: " + name)
+        actions.append((target, saved, previous))
+    # All checks complete: changes below affect only files recorded in the journal.
+    for target, saved, previous in reversed(actions):
+        if previous is None:
+            target.unlink(missing_ok=True)
+        else:
+            _write_binary_atomic(saved, target)
+    state_file.unlink(missing_ok=True)
+    journal.unlink()
+    shutil.rmtree(backup)
+    return {"status": "restored", "files_checked": len(touched),
+            "recovered_operation": "install"}
+
+
 def restore_transaction(executable: Path) -> dict:
     """Explicit, hash-guarded crash recovery. Never overwrites third-party edits."""
     root = executable.resolve().parent
@@ -150,6 +214,8 @@ def restore_transaction(executable: Path) -> dict:
     doc = json.loads(journal.read_text())
     if not isinstance(doc, dict):
         raise ValueError("Invalid recovery journal")
+    if doc.get("format") == 2:
+        return _restore_initial_install(root, journal, doc)
     if doc.get("format") != 1 or not isinstance(doc.get("touched"), list):
         raise ValueError("Invalid recovery journal")
     snapshot = root / "AMDNR_backup" / TRANSACTION_DIR
