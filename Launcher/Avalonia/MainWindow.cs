@@ -1993,8 +1993,7 @@ public sealed class MainWindow : Window
                 Background = BackgroundBrush,
                 Foreground = ForegroundBrush,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+
             };
             panel.Children.Add(editor);
             var outcome = Text("No changes saved.", 12, MutedBrush);
