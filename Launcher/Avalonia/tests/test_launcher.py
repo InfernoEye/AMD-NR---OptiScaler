@@ -292,6 +292,14 @@ class LauncherTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Remove installed Daniel"):
                 launcher.install_component(self.exe, tag, asset, replace_conflicts=True)
 
+    def test_daniel_080_preflight_blocks_before_network_or_game_changes(self):
+        with patch.object(launcher, "download_release") as download:
+            with self.assertRaisesRegex(ValueError, "NeuralHub"):
+                launcher.component_preview(self.exe, "Alpha0.3.5.8", "v0.8.0-Runtime.zip")
+            with self.assertRaisesRegex(ValueError, "NeuralHub"):
+                launcher.install_component(self.exe, "Alpha0.3.5.8", "v0.8.0-Runtime.zip")
+            download.assert_not_called()
+
     def test_daniel_080_requires_separate_neuralhub_installer(self):
         archive = self.root / "v0.8.0-Runtime.zip"
         with zipfile.ZipFile(archive, "w") as stream:
