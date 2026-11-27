@@ -1997,10 +1997,26 @@ public sealed class MainWindow : Window
         var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
         var install = Button("INSTALL AMDNR", true);
         var uninstall = Button("UNINSTALL AMDNR");
+        var forceUninstall = Button("FORCE REMOVE AMDNR");
+        var confirmForce = new CheckBox
+        {
+            Content = "I approve force removal of tracked AMDNR components and bridge files. " +
+                      "Preserve modified files in recovery snapshots; do not restore the old AMDNR.",
+            Foreground = ForegroundBrush, IsChecked = false, IsVisible = false,
+        };
         var refresh = Button("REFRESH STATUS");
         actions.Children.Add(install);
         actions.Children.Add(uninstall);
         panel.Children.Add(actions);
+        var forcePanel = new StackPanel { Spacing = 7 };
+        forcePanel.Children.Add(confirmForce);
+        forcePanel.Children.Add(forceUninstall);
+        panel.Children.Add(new Expander
+        {
+            Header = "Advanced: force remove AMDNR",
+            IsExpanded = false,
+            Content = forcePanel,
+        });
         var feedback = Text("", 13, ForegroundBrush);
         panel.Children.Add(feedback);
 
@@ -2103,6 +2119,7 @@ public sealed class MainWindow : Window
                 }
                 backupModifiedApproval.IsVisible = installed.Any(x =>
                     x.Modified.Count > 0);
+                confirmForce.IsVisible = true;
                 if (!backupModifiedApproval.IsVisible)
                     backupModifiedApproval.IsChecked = false;
                 Buttons();
@@ -2130,6 +2147,7 @@ public sealed class MainWindow : Window
                     (!conflicts || replaceApproval.IsChecked == true) &&
                     (ready || compilerApproval.IsChecked == true));
             uninstall.IsEnabled = !busy && bridgeInstalled;
+            forceUninstall.IsEnabled = !busy && bridgeInstalled && confirmForce.IsChecked == true;
             refresh.IsEnabled = !busy;
             addonDaniel.IsEnabled = !busy && !bridgeInstalled;
             if (bridgeInstalled) install.Content = "APPLY ADD-ON CHANGES";
@@ -2402,6 +2420,50 @@ public sealed class MainWindow : Window
             }
             finally { busy = false; Buttons(); }
         };
+        forceUninstall.Click += async (_, _) =>
+        {
+            if (busy || !bridgeInstalled || confirmForce.IsChecked != true) return;
+            busy = true;
+            Buttons();
+            var removed = new List<string>();
+            try
+            {
+                var managed = await _backend.InstalledComponentsAsync(gameExe);
+                foreach (var component in managed)
+                {
+                    await _backend.RemoveComponentAsync(gameExe, component.Asset,
+                        backupModified: true, forceRemove: true);
+                    removed.Add(component.Asset);
+                }
+                var (exit, result) = await _backend.RunAsync(new[]
+                {
+                    "--bridge-remove", "--bridge-remove-all", "--bridge-force-remove",
+                    "--approve-bridge-remove", "--exe", gameExe
+                });
+                if (exit != 0) throw new InvalidOperationException(result);
+                feedback.Text = "Force removal completed. Managed components removed: " +
+                    removed.Count + ". Modified files and prior AMDNR installations were " +
+                    "retained in recovery snapshots. Remove the bridge Steam launch option manually.";
+                steamPanel.IsVisible = false;
+                await Check();
+                await LoadOptionalAddons();
+            }
+            catch (Exception ex)
+            {
+                feedback.Text = "Force removal stopped after removing " + removed.Count +
+                    " managed components. Recovery snapshots are retained. " +
+                    "Remaining issue: " + ex.Message;
+                await Check();
+                await LoadOptionalAddons();
+            }
+            finally
+            {
+                confirmForce.IsChecked = false;
+                busy = false;
+                Buttons();
+            }
+        };
+        confirmForce.IsCheckedChanged += (_, _) => Buttons();
         addonDaniel.IsCheckedChanged += async (_, _) =>
         {
             if (!busy && !syncingInstalledRuntime) await Check();
