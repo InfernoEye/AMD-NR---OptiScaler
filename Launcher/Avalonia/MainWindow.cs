@@ -223,7 +223,7 @@ public sealed class MainWindow : Window
             return sidebar;
         if (_horizontalNavigation.TryGetValue(section, out var horizontal))
             return horizontal;
-        return _gridViewButton ?? _pageScroller;
+        return (Control?)_gridViewButton ?? _pageScroller;
     }
 
     private Control PrepareTourStep(int index)
