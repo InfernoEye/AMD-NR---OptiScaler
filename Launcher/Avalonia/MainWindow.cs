@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -171,29 +172,25 @@ public sealed class MainWindow : Window
         {
             if (_busy) return;
             if (focused is Button button && button.IsEnabled)
-                button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                button.RaiseEvent(new RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
             else if (focused is ComboBox combo && combo.IsEnabled)
                 combo.IsDropDownOpen = !combo.IsDropDownOpen;
             else if (focused is CheckBox checkbox && checkbox.IsEnabled)
                 checkbox.IsChecked = !(checkbox.IsChecked ?? false);
             return;
         }
-        var direction = action switch
-        {
-            JoystickNavigation.Action.Up => NavigationDirection.Up,
-            JoystickNavigation.Action.Down => NavigationDirection.Down,
-            JoystickNavigation.Action.Left => NavigationDirection.Left,
-            _ => NavigationDirection.Right,
-        };
-        // Use Avalonia's own focus navigation rather than synthesizing key
-        // presses into text fields or game-installation confirmation dialogs.
-        if (FocusManager is not null &&
-            !FocusManager.TryMoveFocus(direction, new FindNextElementOptions()))
-        {
-            var alternate = action is JoystickNavigation.Action.Up or JoystickNavigation.Action.Left
-                ? NavigationDirection.Previous : NavigationDirection.Next;
-            FocusManager.TryMoveFocus(alternate, new FindNextElementOptions());
-        }
+        // Keyboard Tab order is a stable fallback for joystick layouts on
+        // Avalonia 11.3.8, whose focus manager lacks spatial navigation.
+        // Only visible, enabled, focusable controls can be selected.
+        var candidates = this.GetVisualDescendants().OfType<Control>()
+            .Where(control => control.Focusable && control.IsVisible && control.IsEnabled)
+            .ToList();
+        if (candidates.Count == 0) return;
+        var index = candidates.FindIndex(control => ReferenceEquals(control, focused));
+        var backwards = action is JoystickNavigation.Action.Up or JoystickNavigation.Action.Left;
+        var next = index < 0 ? 0
+            : (index + (backwards ? candidates.Count - 1 : 1)) % candidates.Count;
+        candidates[next].Focus();
     }
 
     private static IBrush Brush(string hex) => new SolidColorBrush(Color.Parse(hex));
