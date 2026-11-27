@@ -9,6 +9,7 @@ using Avalonia.Platform.Storage;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Text.Json;
@@ -53,6 +54,7 @@ public sealed class MainWindow : Window
     private Button? _installAction;
     private Button? _uninstallAction;
     private ComboBox? _aliasBox;
+    private TextBlock? _installOverridePreview;
     private bool _busy;
     private string _libraryQuery = "";
     private bool _missingArtOnly;
@@ -777,6 +779,71 @@ public sealed class MainWindow : Window
         => !string.IsNullOrWhiteSpace(_exe) &&
            File.Exists(Path.Combine(Path.GetDirectoryName(_exe)!, ".amdnr-linux-install.json"));
 
+    private static string? ProtonOverride(string alias)
+    {
+        if (alias.EndsWith(".asi", StringComparison.OrdinalIgnoreCase))
+            return null;
+        return $"WINEDLLOVERRIDES=\"{Path.GetFileNameWithoutExtension(alias).ToLowerInvariant()}=n,b\" %command%";
+    }
+
+    private static string? RecordedAlias(string executable)
+    {
+        try
+        {
+            var stateFile = Path.Combine(Path.GetDirectoryName(executable)!,
+                ".amdnr-linux-install.json");
+            if (!File.Exists(stateFile)) return null;
+            using var record = JsonDocument.Parse(File.ReadAllText(stateFile));
+            return record.RootElement.TryGetProperty("alias", out var value) &&
+                value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private async Task CopyToClipboardAsync(string value, string success)
+    {
+        if (Clipboard is null)
+        {
+            _status.Text = "Clipboard not available on this desktop session.";
+            return;
+        }
+        try
+        {
+            await Clipboard.SetTextAsync(value);
+            _status.Text = success;
+        }
+        catch (Exception ex)
+        {
+            _status.Text = "Clipboard unavailable: " + ex.Message;
+        }
+    }
+
+    private void OpenGameFolder(string folder)
+    {
+        if (!Directory.Exists(folder))
+        {
+            _status.Text = "Game folder is unavailable.";
+            return;
+        }
+        try
+        {
+            var process = new ProcessStartInfo("xdg-open")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            process.ArgumentList.Add(folder);
+            Process.Start(process)?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _status.Text = "Could not open game folder: " + ex.Message;
+        }
+    }
+
     private void ShowGameDetails()
     {
         if (_selectedGame is not { } game) { ShowLibrary(); return; }
@@ -952,6 +1019,59 @@ public sealed class MainWindow : Window
             detail.Children.Add(Panel(entries, new Thickness(12)));
         }
         _content.Children.Add(Panel(detail));
+
+        var setup = new StackPanel { Spacing = 11 };
+        setup.Children.Add(Text("GAME SETUP  /  QUICK ACTIONS", 12, AccentBrush, FontWeight.Bold));
+        var selectedExe = !string.IsNullOrWhiteSpace(_exe) && File.Exists(_exe);
+        var savedAlias = selectedExe ? RecordedAlias(_exe!) : null;
+        var effectiveAlias = savedAlias ?? _alias;
+        setup.Children.Add(Text(selectedExe
+            ? "✓  Windows executable ready: " + Path.GetFileName(_exe!)
+            : nativeOnly ? "○  Native Linux build detected; Windows DLL setup unavailable."
+            : "○  Select a Windows game executable to continue.", 13,
+            selectedExe ? ForegroundBrush : MutedBrush));
+        setup.Children.Add(Text(HasInstallRecord()
+            ? "✓  AMDNR installation recorded (integrity not yet verified)."
+            : "○  AMDNR installation not recorded for this executable.", 13, MutedBrush));
+        if (selectedExe)
+        {
+            var command = ProtonOverride(effectiveAlias);
+            setup.Children.Add(Text("STEAM / PROTON LAUNCH OPTIONS", 11, MutedBrush,
+                FontWeight.Bold));
+            setup.Children.Add(Text(command ??
+                "ASI plugins require a compatible ASI loader; no WINEDLLOVERRIDES entry.",
+                14, AccentBrush, FontWeight.SemiBold));
+            setup.Children.Add(Text(savedAlias is not null
+                ? "Override uses the installed proxy: " + savedAlias
+                : "Preview uses the proxy selected on the Install page: " + effectiveAlias,
+                12, MutedBrush));
+            var tools = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+            if (command is not null)
+            {
+                var copy = Button("COPY PROTON OPTIONS", true);
+                copy.Click += async (_, _) => await CopyToClipboardAsync(command,
+                    "Steam launch options copied.");
+                tools.Children.Add(copy);
+            }
+            var copyExe = Button("COPY EXE PATH");
+            copyExe.Click += async (_, _) => await CopyToClipboardAsync(_exe!,
+                "Game executable path copied.");
+            tools.Children.Add(copyExe);
+            var open = Button("OPEN GAME FOLDER");
+            open.Click += (_, _) => OpenGameFolder(game.Folder);
+            tools.Children.Add(open);
+            setup.Children.Add(tools);
+        }
+        else
+        {
+            var open = Button("OPEN GAME FOLDER");
+            open.Click += (_, _) => OpenGameFolder(game.Folder);
+            setup.Children.Add(open);
+        }
+        setup.Children.Add(Text("Set the options in Steam → Properties → General → Launch Options. " +
+            "Compatibility depends on the game, Proton, and anti-cheat restrictions.",
+            12, MutedBrush));
+        _content.Children.Add(Panel(setup));
 
         if (HasInstallRecord())
         {
@@ -1200,7 +1320,13 @@ public sealed class MainWindow : Window
             Width = 220,
             HorizontalAlignment = HorizontalAlignment.Left,
         };
-        _aliasBox.SelectionChanged += (_, _) => _alias = _aliasBox.SelectedItem?.ToString() ?? "dxgi.dll";
+        _aliasBox.SelectionChanged += (_, _) =>
+        {
+            _alias = _aliasBox.SelectedItem?.ToString() ?? "dxgi.dll";
+            if (_installOverridePreview is not null)
+                _installOverridePreview.Text = ProtonOverride(_alias) ??
+                    "ASI plugins require a compatible ASI loader.";
+        };
         section.Children.Add(_aliasBox);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         var installButton = Button("Install AMDNR", true);
@@ -1217,22 +1343,19 @@ public sealed class MainWindow : Window
 
         var help = new StackPanel { Spacing = 8 };
         help.Children.Add(Text("Proton launch options", 18, ForegroundBrush, FontWeight.Bold));
-        help.Children.Add(Text(_alias.EndsWith(".asi", StringComparison.OrdinalIgnoreCase)
-            ? "ASI plugins require a compatible ASI loader."
-            : $"WINEDLLOVERRIDES=\"{Path.GetFileNameWithoutExtension(_alias).ToLowerInvariant()}=n,b\" %command%",
-            14, AccentBrush));
+        _installOverridePreview = Text(ProtonOverride(_alias) ??
+            "ASI plugins require a compatible ASI loader.", 14, AccentBrush);
+        help.Children.Add(_installOverridePreview);
         var copyOverride = Button("Copy launch options");
         copyOverride.Click += async (_, _) =>
         {
-            if (Clipboard is null) return;
-            if (_alias.EndsWith(".asi", StringComparison.OrdinalIgnoreCase))
+            var value = ProtonOverride(_alias);
+            if (value is null)
             {
                 _status.Text = "ASI plugins require a compatible loader; no DLL override to copy.";
                 return;
             }
-            var value = $"WINEDLLOVERRIDES=\"{Path.GetFileNameWithoutExtension(_alias).ToLowerInvariant()}=n,b\" %command%";
-            await Clipboard.SetTextAsync(value);
-            _status.Text = "Steam launch options copied to clipboard.";
+            await CopyToClipboardAsync(value, "Steam launch options copied to clipboard.");
         };
         help.Children.Add(copyOverride);
         help.Children.Add(Text("Set the override in Steam → Properties → General → Launch Options. " +
