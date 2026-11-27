@@ -67,6 +67,18 @@ python3 Launcher/Avalonia/amdnr_launcher.py --installation-json --exe "/path/to/
 
 This checks disk files but does not establish whether the game can initialize the Windows runtime under Proton. Missing original backups are reported rather than silently repaired or overwritten.
 
+## Windows executable discovery
+
+A detected Steam library entry is not necessarily a Windows/Proton game. Native Linux releases may contain ELF executables or shell launchers but no `.exe`. The game screen now reports those cases explicitly and **does not** offer the native binary as an AMDNR DLL installation target.
+
+Windows EXE discovery scans deeper directory layouts, skips symlinks, and continues past unreadable directories. The scan is bounded to avoid unresponsive browsing. If no Windows EXE is found, the UI explains whether native Linux launchers were found or the scan was incomplete. You can still browse to a Windows EXE manually if the game's Steam launch configuration uses a separate Windows build.
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --exe-scan-json "/path/to/steamapps/common/Game"
+```
+
+The JSON result contains `candidates`, `native`, `reason`, and `partial`. Suggestions use path structure, not hardcoded game names, and never verify actual Proton compatibility.
+
 ## Linux Doctor
 
 On **Doctor**, choose **Run Installation Diagnostics** to perform read-only checks of Steam libraries, the selected game EXE, the selected release ZIP and the Linux launcher's installation record. If recorded files exist, their SHA-256 hashes are compared against the installation record to identify missing or modified files.
