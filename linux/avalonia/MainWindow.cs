@@ -179,7 +179,12 @@ public sealed class MainWindow : Window
         var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(28, 20, 28, 10) };
         header.Children.Add(_breadcrumb);
         var refresh = Button("↻  Refresh");
-        refresh.Click += async (_, _) => await RefreshGamesAsync();
+        refresh.Click += async (_, _) =>
+        {
+            // Refresh always returns to the library; it must never reselect a game.
+            _selectedGame = null;
+            await RefreshGamesAsync();
+        };
         Grid.SetColumn(refresh, 1);
         header.Children.Add(refresh);
         return header;
@@ -608,15 +613,10 @@ public sealed class MainWindow : Window
         {
             _games = (await _backend.GamesAsync()).ToList();
             _status.Text = $"Detected {_games.Count} Steam games";
+            // Scan changes should update the list, not navigate to a selected game.
+            // Keep this deterministic even if the previous page was Game Details.
             if (_currentSection == "Library")
-            {
-                if (_selectedGame is not null && _games.Any(g => g.Folder == _selectedGame.Folder))
-                {
-                    _selectedGame = _games.First(g => g.Folder == _selectedGame.Folder);
-                    ShowGameDetails();
-                }
-                else ShowLibrary();
-            }
+                ShowLibrary();
         }
         catch (Exception ex) { _status.Text = $"Steam scan failed: {ex.Message}"; }
         finally { _busy = false; }
