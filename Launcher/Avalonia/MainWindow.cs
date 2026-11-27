@@ -3143,6 +3143,30 @@ public sealed class MainWindow : Window
                 finally { _busy = false; save.IsEnabled = true; }
             };
             panel.Children.Add(save);
+            panel.Children.Add(Text("OPEN SOURCE & ACKNOWLEDGEMENTS",
+                12, AccentBrush, FontWeight.Bold));
+            panel.Children.Add(Text(
+                "Thanks to hassanm0301 and AMDNR-Linux contributors for their public ROCm/HIP " +
+                "bridge research and Proton compatibility findings. This project has informed " +
+                "our Linux investigation; no AMDNR-Linux code or bridge binaries are " +
+                "integrated into this launcher. AMDNR-Linux is licensed GPL-3.0; " +
+                "any future code reuse requires license compliance and explicit attribution. " +
+                "See Launcher/Avalonia/THIRD_PARTY_ACKNOWLEDGEMENTS.md in our source repository.",
+                12, MutedBrush));
+            var researchCredits = Button("VIEW AMDNR-LINUX RESEARCH");
+            researchCredits.Click += (_, _) =>
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "https://github.com/hassanm0301/AMDNR-Linux",
+                        UseShellExecute = true,
+                    });
+                }
+                catch (Exception ex) { _status.Text = "Could not open credits: " + ex.Message; }
+            };
+            panel.Children.Add(researchCredits);
             panel.Children.Add(Text("LINUX LAUNCHER UPDATES", 12, AccentBrush, FontWeight.Bold));
             panel.Children.Add(Text(
                 "Checks independent Linux launcher releases from your fork. AMDNR game files still " +
