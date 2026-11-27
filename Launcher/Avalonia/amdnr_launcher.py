@@ -2648,6 +2648,8 @@ def main() -> int:
     parser.add_argument("--recover-transaction", action="store_true", help="Restore crash-recovery snapshot with strict hash checks")
     parser.add_argument("--try-next-proxy", action="store_true", help="Switch clean managed proxy to next unoccupied DLL alias")
     parser.add_argument("--uninstall", action="store_true", help="Uninstall and restore backups")
+    parser.add_argument("--bridge-discover-json", action="store_true",
+                        help="Read-only bounded discovery of GPU/Proton and local x64 compiler candidates")
     parser.add_argument("--bridge-status-json", action="store_true",
                         help="Read-only community ROCm bridge compatibility and conflict status")
     parser.add_argument("--bridge-prepare", type=Path, metavar="COMPILER",
@@ -2663,10 +2665,15 @@ def main() -> int:
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
-    if args.bridge_status_json or args.bridge_prepare is not None or args.bridge_install or args.bridge_remove:
+    if args.bridge_discover_json or args.bridge_status_json or args.bridge_prepare is not None or args.bridge_install or args.bridge_remove:
         try:
             import community_bridge
-            if args.bridge_status_json:
+            if args.bridge_discover_json:
+                if args.exe is None:
+                    parser.error("--bridge-discover-json requires --exe")
+                import bridge_discovery
+                result = bridge_discovery.discover(args.exe)
+            elif args.bridge_status_json:
                 result = community_bridge.status(args.exe)
             elif args.bridge_prepare is not None:
                 result = community_bridge.prepare(args.bridge_prepare)
