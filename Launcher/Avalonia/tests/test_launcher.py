@@ -35,7 +35,7 @@ class LauncherTests(unittest.TestCase):
         executable.write_bytes(b"exe")
         native_folder = self.root / "steamapps/common/LinuxGame"
         native_folder.mkdir()
-        (native_folder / "LinuxGame.x86_64").write_bytes(b"\\x7fELFnative")
+        (native_folder / "LinuxGame.x86_64").write_bytes(b"\x7fELFnative")
         custom_folder = self.root / "custom/SoloGame"
         custom_folder.mkdir(parents=True)
         custom_exe = custom_folder / "Solo.exe"
@@ -44,8 +44,8 @@ class LauncherTests(unittest.TestCase):
         metadata = {"selected": str(executable), "windows_missing": []}
         with patch.object(launcher, "steam_games", return_value=[
             ("WindowsGame", steam_folder), ("LinuxGame", native_folder)
-        ]), patch.object(launcher, "custom_games", return_value=custom), \\
-                patch.object(launcher, "steam_launch_for_directory", return_value=metadata), \\
+        ]), patch.object(launcher, "custom_games", return_value=custom), \
+                patch.object(launcher, "steam_launch_for_directory", return_value=metadata), \
                 patch.object(launcher, "saved_executable", side_effect=lambda folder:
                              str(custom_exe) if folder == custom_folder else None):
             audit = launcher.library_audit()
@@ -61,7 +61,7 @@ class LauncherTests(unittest.TestCase):
 
     def test_library_audit_handles_disconnected_custom_folder(self):
         missing = self.root / "unmounted/Game"
-        with patch.object(launcher, "steam_games", return_value=[]), \\
+        with patch.object(launcher, "steam_games", return_value=[]), \
                 patch.object(launcher, "custom_games", return_value=[
                     {"name": "Offline game", "folder": str(missing)}
                 ]):
@@ -72,9 +72,9 @@ class LauncherTests(unittest.TestCase):
     def test_library_audit_installed_record_is_not_verification(self):
         with patch.object(launcher, "steam_games", return_value=[
             ("Game", self.game)
-        ]), patch.object(launcher, "custom_games", return_value=[]), \\
+        ]), patch.object(launcher, "custom_games", return_value=[]), \
                 patch.object(launcher, "steam_launch_for_directory",
-                             return_value={"selected": str(self.exe)}), \\
+                             return_value={"selected": str(self.exe)}), \
                 patch.object(launcher, "saved_executable", return_value=None):
             state = self.game / launcher.STATE_NAME
             state.write_text("{}")
