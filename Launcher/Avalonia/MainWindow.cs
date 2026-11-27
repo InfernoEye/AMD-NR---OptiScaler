@@ -55,6 +55,7 @@ public sealed class MainWindow : Window
     private Button? _uninstallAction;
     private ComboBox? _aliasBox;
     private TextBlock? _installOverridePreview;
+    private SteamUserOptions? _steamUserOptions;
     private bool _busy;
     private string _libraryQuery = "";
     private bool _missingArtOnly;
@@ -657,6 +658,27 @@ public sealed class MainWindow : Window
         return illustration;
     }
 
+    private async Task ReadGameSteamOptionsAsync(GameEntry game)
+    {
+        if (_backend is null || game.Custom)
+        {
+            _steamUserOptions = null;
+            return;
+        }
+        try
+        {
+            var alias = _exe is not null ? RecordedAlias(_exe) ?? _alias : _alias;
+            var options = await _backend.SteamUserOptionsAsync(game.Folder, alias);
+            if (_selectedGame?.Folder == game.Folder)
+                _steamUserOptions = options;
+        }
+        catch (Exception)
+        {
+            if (_selectedGame?.Folder == game.Folder)
+                _steamUserOptions = new SteamUserOptions("unavailable", null, null, null);
+        }
+    }
+
     private async void SelectGame(GameEntry game)
     {
         if (_busy) return;
@@ -669,12 +691,14 @@ public sealed class MainWindow : Window
         _steamPreferredExe = null;
         _steamLaunchReason = null;
         _steamMissingWindows = Array.Empty<string>();
+        _steamUserOptions = null;
         _exeScanPartial = false;
         _showAlternativeExecutables = false;
         if (_indexedExecutables.TryGetValue(Path.GetFullPath(game.Folder), out var cached) &&
             File.Exists(cached))
         {
             _exe = cached;
+            await ReadGameSteamOptionsAsync(game);
             _status.Text = "Restored indexed executable: " + Path.GetFileName(cached) +
                 " · Rescan for updated candidates.";
             ShowGameDetails();
@@ -687,6 +711,7 @@ public sealed class MainWindow : Window
         {
             _exeScanReason = audit.Status == "native_linux"
                 ? "native_linux_files" : audit.Status;
+            await ReadGameSteamOptionsAsync(game);
             _status.Text = audit.Status == "native_linux"
                 ? "Restored native Linux detection from saved audit · Rescan to update."
                 : "Restored executable scan result from saved audit · Rescan to update.";
@@ -719,6 +744,7 @@ public sealed class MainWindow : Window
             if (_selectedGame?.Folder != game.Folder) return;
             var chosen = saved ?? results.FirstOrDefault(e => e.AutoSelect)?.Path;
             _exe = chosen;
+            await ReadGameSteamOptionsAsync(game);
             if (chosen is not null && File.Exists(chosen))
             {
                 _indexedExecutables[Path.GetFullPath(game.Folder)] = chosen;
@@ -766,6 +792,7 @@ public sealed class MainWindow : Window
             await _backend.RememberExecutableAsync(game.Folder, path);
             if (_selectedGame?.Folder != game.Folder) return;
             _exe = path;
+            await ReadGameSteamOptionsAsync(game);
             _indexedExecutables[Path.GetFullPath(game.Folder)] = path;
             try { await _backend.IndexLibraryExecutableAsync(game.Folder, path); }
             catch (Exception) { /* Manual choice was already saved independently. */ }
@@ -1035,12 +1062,45 @@ public sealed class MainWindow : Window
             : "○  AMDNR installation not recorded for this executable.", 13, MutedBrush));
         if (selectedExe)
         {
-            var command = ProtonOverride(effectiveAlias);
+            var steamOptions = _steamUserOptions;
+            var command = game.Custom ? ProtonOverride(effectiveAlias) :
+                steamOptions?.Preview;
             setup.Children.Add(Text("STEAM / PROTON LAUNCH OPTIONS", 11, MutedBrush,
                 FontWeight.Bold));
-            setup.Children.Add(Text(command ??
-                "ASI plugins require a compatible ASI loader; no WINEDLLOVERRIDES entry.",
-                14, AccentBrush, FontWeight.SemiBold));
+            if (game.Custom)
+                setup.Children.Add(Text("Custom game: Steam launch options cannot be read automatically.",
+                    12, MutedBrush));
+            else if (steamOptions?.Status == "multiple_profiles")
+                setup.Children.Add(Text("Multiple Steam profiles have different launch options. " +
+                    "Select the active account's options in Steam; automatic merging is disabled.",
+                    13, MutedBrush));
+            else if (steamOptions?.Status == "unavailable" ||
+                     steamOptions?.Status == "manifest_missing" ||
+                     steamOptions?.Status == "not_steam_install")
+                setup.Children.Add(Text("Steam launch options could not be read. " +
+                    "Check Steam → Properties → General before setting an override.",
+                    13, MutedBrush));
+            else if (steamOptions?.Status == "found")
+                setup.Children.Add(Text("Existing Steam options: " + steamOptions.Existing,
+                    12, MutedBrush));
+            else if (steamOptions?.Status == "empty")
+                setup.Children.Add(Text("Steam has no existing launch options for this game.",
+                    12, MutedBrush));
+            else
+                setup.Children.Add(Text("Reading Steam launch options…", 12, MutedBrush));
+            if (command is not null)
+            {
+                setup.Children.Add(Text("FINAL PREVIEW · COPY INTO STEAM", 11,
+                    AccentBrush, FontWeight.Bold));
+                setup.Children.Add(Text(command, 14, ForegroundBrush, FontWeight.SemiBold));
+            }
+            else if (steamOptions?.ComposeStatus == "complex_options")
+                setup.Children.Add(Text("Existing override is too complex to merge safely. " +
+                    "Review it manually in Steam; the launcher will not overwrite it.",
+                    13, MutedBrush));
+            else if (effectiveAlias.EndsWith(".asi", StringComparison.OrdinalIgnoreCase))
+                setup.Children.Add(Text("ASI plugins require a compatible ASI loader; " +
+                    "no WINEDLLOVERRIDES entry.", 13, MutedBrush));
             setup.Children.Add(Text(savedAlias is not null
                 ? "Override uses the installed proxy: " + savedAlias
                 : "Preview uses the proxy selected on the Install page: " + effectiveAlias,
@@ -1048,7 +1108,7 @@ public sealed class MainWindow : Window
             var tools = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
             if (command is not null)
             {
-                var copy = Button("COPY PROTON OPTIONS", true);
+                var copy = Button("COPY FINAL OPTIONS", true);
                 copy.Click += async (_, _) => await CopyToClipboardAsync(command,
                     "Steam launch options copied.");
                 tools.Children.Add(copy);
