@@ -975,10 +975,12 @@ def prepare_mochi_model(executable: Path, source: Path) -> dict[str, object]:
 
 # Optional user-approved COMMUNITY mirror; never an official NVIDIA endpoint.
 # Pin both the GitHub release ZIP and the known, extractor-approved NVIDIA input.
+# The plain dlssnr-310.9.16 release carries a MODIFIED runtime and fails
+# Mochi's exact-source hash. Use the separate NVIDIA-original mirror release.
 MOCHI_COMMUNITY_REPO = "RankFTW/rhi-repo"
-MOCHI_COMMUNITY_TAG = "dlssnr-310.9.16"
-MOCHI_COMMUNITY_ASSET = "nvngx_dlssnr_310.9.16.zip"
-MOCHI_COMMUNITY_ZIP_SHA256 = "dbeb1f2790b5c621887db99b1a56ac8bd5cb35207e8c074cbb806710f7460cab"
+MOCHI_COMMUNITY_TAG = "dlssnr-310.9.16-nvidia"
+MOCHI_COMMUNITY_ASSET = "nvngx_dlssnr_310.9.16-nvidia.zip"
+MOCHI_COMMUNITY_ZIP_SHA256 = "5277355f0578d36f2a25413d8c7ff4c6f9966cea5bad714305f23b20173e09f6"
 MOCHI_EXPECTED_DLL_SHA256 = "2bc19bc09a7b89dd44f73e2ac0108fcc586e2154bdd0830f242f4f040e28789f"
 
 
