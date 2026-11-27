@@ -41,6 +41,20 @@ MAX_ARCHIVE_BYTES = 90 * 1024 * 1024
 MAX_UNPACKED_BYTES = 450 * 1024 * 1024
 OWN_RECORD = ".amdnr-linux-install.json"  # used by both installers, with incompatible formats
 
+# The latest native lmxxf AMDNR host is separate from the Linux bridge release.
+# Exact SHA-256 digests and sizes from the publisher's GitHub release assets.
+# No Daniel/NeuralHub runtime is selected or fetched.
+HOST_VERSION = "0.3.5.8.28"
+HOST_SHA256 = "94cd51e77676156d5f8c2ad760e6ae2347da9a03fdacf29e3b29d0a6d5895aa9"
+HOST_SIZE = 550947033
+LMXXF_VERSION = "0.4.6.2"
+LMXXF_SHA256 = "a0c7344a615be5a810c601f3151d28d4bd22c728353ff2a9bbb31baf6f13b498"
+LMXXF_SIZE = 794752422
+HOST_ARCHIVE = f"AMDNR-v{HOST_VERSION}.zip"
+LMXXF_ARCHIVE = f"AMDNR-lmxxf-{LMXXF_VERSION}.zip"
+HOST_RELEASE_URL = f"https://github.com/3zwr1/AMD-NR---OptiScaler/releases/download/Alpha{HOST_VERSION}"
+
+
 
 def check_releases(*, opener=None) -> dict:
     """Read-only update discovery. Discovery never authorizes third-party code.
@@ -124,7 +138,27 @@ def source_path() -> Path:
 
 
 def prepared_path() -> Path:
-    return cache_dir() / "package"
+    # Preserve the old v0.3.5.6 staged package without treating it as latest.
+    return cache_dir() / f"package-amdnr-{HOST_VERSION}"
+
+
+def package_is_ready(package: Path) -> bool:
+    """Only recognize a complete staged bundle for the chosen AMDNR host."""
+    marker = package / "amdnr-linux/SOURCE.txt"
+    components = package / "amdnr-linux/components.json"
+    try:
+        if not (package / "amdnr-linux/run.sh").is_file() or not (package / "d3d12.dll").is_file():
+            return False
+        if not marker.is_file() or marker.is_symlink() or not components.is_file():
+            return False
+        description = marker.read_text(encoding="utf-8")
+        config = json.loads(components.read_text(encoding="utf-8"))
+        return (f"Host/runtime: AMDNR {HOST_VERSION}," in description and
+                f"Archive SHA-256: {HOST_SHA256}" in description and
+                f"SHA-256 {LMXXF_SHA256}" in description and
+                config.get("neural_runtime") == "lmxxf")
+    except (OSError, ValueError, UnicodeError):
+        return False
 
 
 def _game_directory(exe: Path) -> Path:
@@ -178,8 +212,10 @@ def status(exe: Path | None = None) -> dict:
             and file_hash(archive) == SHA256,
         "source_ready": (src / "RELEASE-MANIFEST.json").is_file()
             and (src / "linux/setup.py").is_file(),
-        "prepared": (package / "amdnr-linux/run.sh").is_file()
-            and (package / "d3d12.dll").is_file(),
+        "prepared": package_is_ready(package),
+        "host_version": HOST_VERSION,
+        "lmxxf_version": LMXXF_VERSION,
+        "legacy_prepared": (cache_dir() / "package/amdnr-linux/run.sh").is_file(),
         "required_proton": "Wine 11-based Proton (tested GE-Proton11-9)",
         "tested_gpu": "RX 9070 XT; other GPUs not validated",
         "steam_options_unchanged": True,
@@ -296,6 +332,59 @@ def apply_reviewed_libelf_pin(src: Path) -> bool:
     return True
 
 
+# Upstream v0.3.7 stages only older hosts. This narrowly updates its
+# verified, private source copy; no upstream archive, game or system file is
+# changed. Any unexpected upstream layout is rejected.
+UPSTREAM_DEFAULT_HOST = 'RELEASE_VERSION = "0.3.5.6"'
+UPDATED_DEFAULT_HOST = f'RELEASE_VERSION = "{HOST_VERSION}"'
+UPSTREAM_HOST_ENTRY = '    "a11143327ede14ff4d7fe50ea0ce9d148320aeec4cd163f11c8c9973c944a97d": "0.3.5.8R2",'
+UPDATED_HOST_ENTRY = f'    "{HOST_SHA256}": "{HOST_VERSION}",'
+UPSTREAM_LMXXF_ENTRY = 'LMXXF_ARCHIVES = {'
+UPDATED_LMXXF_ENTRY = (
+    'LMXXF_ARCHIVES = {\\n'
+    f'    "{HOST_VERSION}": runtimes.Download(\\n'
+    f'        "{LMXXF_ARCHIVE}", "{LMXXF_VERSION}",\\n'
+    f'        "{HOST_RELEASE_URL}/{LMXXF_ARCHIVE}",\\n'
+    f'        "{LMXXF_SHA256}", {LMXXF_SIZE}),'
+)
+
+
+def apply_current_amdnr_pin(src: Path) -> bool:
+    """Opt into a digest-pinned native lmxxf AMDNR host, not NeuralHub.
+
+    Preserve the Linux bridge's old host whitelist and add one reviewed tuple.
+    Refuse to modify unexpected private source or skip a hash check.
+    """
+    if VERSION != "0.3.7":
+        raise ValueError("Current AMDNR adapter only applies to Linux bridge v0.3.7")
+    manager = src / "linux/manage.py"
+    setup = src / "linux/setup.py"
+    for path in (manager, setup):
+        if not path.is_file() or path.is_symlink():
+            raise ValueError(f"Missing regular verified upstream script: {path.name}")
+    original_manager = manager.read_text(encoding="utf-8")
+    original_setup = setup.read_text(encoding="utf-8")
+    if (original_manager.count(UPDATED_HOST_ENTRY) == 1 and
+            original_manager.count(UPDATED_LMXXF_ENTRY) == 1 and
+            original_setup.count(UPDATED_DEFAULT_HOST) == 1 and
+            UPSTREAM_DEFAULT_HOST not in original_setup):
+        return False
+    if (original_manager.count(UPSTREAM_HOST_ENTRY) != 1 or
+            original_manager.count(UPSTREAM_LMXXF_ENTRY) != 1 or
+            UPDATED_HOST_ENTRY in original_manager or
+            UPDATED_LMXXF_ENTRY in original_manager or
+            original_setup.count(UPSTREAM_DEFAULT_HOST) != 1):
+        raise ValueError("Unexpected upstream host-staging interface; refusing current AMDNR override.")
+    amended_manager = original_manager.replace(
+        UPSTREAM_HOST_ENTRY, UPSTREAM_HOST_ENTRY + "\\n" + UPDATED_HOST_ENTRY, 1
+    ).replace(UPSTREAM_LMXXF_ENTRY, UPDATED_LMXXF_ENTRY, 1)
+    amended_setup = original_setup.replace(UPSTREAM_DEFAULT_HOST, UPDATED_DEFAULT_HOST, 1)
+    # Both files live solely under the already checksum-verified private source.
+    manager.write_text(amended_manager, encoding="utf-8")
+    setup.write_text(amended_setup, encoding="utf-8")
+    return True
+
+
 def preparer_python() -> str:
     """Find an existing Python 3.12+ with zstd support, without installing packages."""
     candidates = [sys.executable, shutil.which("python3.14"), shutil.which("python3.13"),
@@ -347,6 +436,8 @@ def prepare(compiler: Path) -> dict:
     dependency_actions = reuse_or_fetch_pinned_ubuntu_packages(cache_dir() / "upstream-cache")
     if apply_reviewed_libelf_pin(src):
         dependency_actions.append("Applied reviewed libelf1 0.188 pin to private upstream fetch script")
+    if apply_current_amdnr_pin(src):
+        dependency_actions.append(f"Selected SHA-256 pinned AMDNR {HOST_VERSION} and lmxxf {LMXXF_VERSION}")
     command = [interpreter, str(src / "linux/setup.py"), "prepare",
                "--compiler", str(compiler.resolve()),
                "--output", str(prepared_path()),
@@ -358,9 +449,9 @@ def prepare(compiler: Path) -> dict:
     if finished.returncode:
         raise ValueError("Community setup failed (exit %d): %s" %
                          (finished.returncode, (finished.stdout + "\n" + finished.stderr)[-5000:]))
-    if not status()["prepared"]:
-        raise ValueError("Community setup completed without the expected staged package.")
-    return {"prepared": True, "package": str(prepared_path()),
+    if not package_is_ready(prepared_path()):
+        raise ValueError("Community setup did not stage the expected current AMDNR/lmxxf package.")
+    return {"prepared": True, "package": str(prepared_path()), "host_version": HOST_VERSION,
             "provider": PROJECT, "dependency_actions": dependency_actions,
             "output": finished.stdout[-1500:]}
 
