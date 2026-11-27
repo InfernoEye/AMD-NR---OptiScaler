@@ -2687,6 +2687,10 @@ def main() -> int:
     parser.add_argument("--backup-modified", action="store_true", help="Explicit consent to retain/replace changed tracked files")
     parser.add_argument("--recovery-status", action="store_true", help="Inspect interrupted transaction journal")
     parser.add_argument("--compatibility-json", action="store_true", help="Linux GPU, Proton tools, game process and anti-cheat probe")
+    parser.add_argument("--check-launcher-updates", action="store_true", help="Check signed metadata for independent Linux launcher releases")
+    parser.add_argument("--download-launcher-update", action="store_true", help="Download and SHA-256 verify latest Linux AppImage")
+    parser.add_argument("--apply-launcher-update", type=Path, metavar="APPIMAGE", help="Replace running user-owned AppImage after explicit consent")
+    parser.add_argument("--accept-launcher-update", action="store_true", help="Approve replacing the current Linux AppImage")
     parser.add_argument("--proton-profile-json", type=Path, metavar="FOLDER", help="Read game-specific Proton preferences")
     parser.add_argument("--save-proton-profile", type=Path, metavar="FOLDER", help="Save a per-game JSON profile from --profile-json")
     parser.add_argument("--profile-json", type=str, metavar="JSON", help="Proton profile JSON content")
@@ -2866,6 +2870,20 @@ def main() -> int:
                 result = maintenance.next_proxy(args.exe, ALIASES)
             print(json.dumps(result, ensure_ascii=False))
         except (OSError, ValueError, TypeError, KeyError, zipfile.BadZipFile) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif (args.check_launcher_updates or args.download_launcher_update or args.apply_launcher_update):
+        try:
+            import launcher_updates as updates
+            if args.check_launcher_updates:
+                result = updates.check_updates()
+            elif args.download_launcher_update:
+                result = updates.download_update()
+            else:
+                result = updates.apply_downloaded_update(
+                    args.apply_launcher_update, consent=args.accept_launcher_update)
+            print(json.dumps(result, ensure_ascii=False))
+        except (OSError, ValueError, TypeError, KeyError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     elif (args.compatibility_json or args.proton_profile_json or args.save_proton_profile or
