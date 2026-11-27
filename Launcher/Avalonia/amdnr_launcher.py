@@ -914,7 +914,8 @@ def installed_components(executable: Path) -> list:
     return output
 
 
-def remove_component(executable: Path, asset: str, *, backup_modified: bool = False) -> dict:
+def remove_component(executable: Path, asset: str, *, backup_modified: bool = False,
+                     force: bool = False) -> dict:
     from launcher_maintenance import _ensure_not_running
     _ensure_not_running(executable)
     records = _component_records(executable)
@@ -924,6 +925,8 @@ def remove_component(executable: Path, asset: str, *, backup_modified: bool = Fa
     rec = records[asset]
     installed = installed_components(executable)
     match = next(x for x in installed if x["asset"] == asset)
+    if force and not backup_modified:
+        raise ValueError("Force removal requires explicit modified-file preservation consent.")
     if match["modified"] and not backup_modified:
         raise ValueError("Component modified or backup missing; approval for preserved removal required: " +
                          match["modified"][0])
@@ -966,24 +969,49 @@ def remove_component(executable: Path, asset: str, *, backup_modified: bool = Fa
         # removal must not silently erase the earlier game file.
         for name, info in rec.get("replaced", {}).items():
             backup = _component_target(backup_dir, name)
-            if backup.is_symlink() or not backup.is_file() or _digest(backup) != info.get("original_sha256"):
-                raise ValueError("Original component backup missing or modified; preserved current files at " +
-                                 str(modified_snapshot))
+            if backup.is_symlink():
+                raise ValueError("Unsafe component original backup: " + name)
+            if not backup.is_file() or _digest(backup) != info.get("original_sha256"):
+                if not force:
+                    raise ValueError("Original component backup missing or modified; preserved current files at " +
+                                     str(modified_snapshot))
+                # Explicit force mode cannot restore a vanished original. Its
+                # managed replacement is removed, with its current bytes saved.
+                if (root / name).is_file() and name not in match["modified"]:
+                    raise ValueError("Missing original backup not listed as modified: " + name)
+
 
     # Copy originals to temporary files before making any change. Never delete backups
     # until the registry is saved; recovery remains possible after an interrupted removal.
     staged = []
+    unrestorable = []
     try:
-        for name in rec.get("replaced", {}):
+        for name, info in rec.get("replaced", {}).items():
             dest = _component_target(root, name)
             backup = _component_target(backup_dir, name)
+            if force and (not backup.is_file() or
+                          _digest(backup) != info.get("original_sha256")):
+                unrestorable.append(name)
+                continue
             with tempfile.NamedTemporaryFile(dir=dest.parent, prefix=".amdnr-restore-",
                                              delete=False) as temp_stream:
                 temp = Path(temp_stream.name)
             staged.append((temp, dest))
             shutil.copyfile(backup, temp)
+        # No symlink in any managed destination may be followed or overwritten.
+        for _, dest in staged:
+            if dest.is_symlink():
+                raise ValueError("Unsafe component destination symlink: " + str(dest))
+        for name in rec["files"]:
+            if _component_target(root, name).is_symlink():
+                raise ValueError("Unsafe component destination symlink: " + name)
+        for name in unrestorable:
+            if _component_target(root, name).is_symlink():
+                raise ValueError("Unsafe component destination symlink: " + name)
         for temp, dest in staged:
             os.replace(temp, dest)
+        for name in unrestorable:
+            _component_target(root, name).unlink(missing_ok=True)
         for name in rec["files"]:
             dest = _component_target(root, name)
             if dest.is_symlink():
@@ -1006,7 +1034,8 @@ def remove_component(executable: Path, asset: str, *, backup_modified: bool = Fa
             pass
     return {"status": "removed", "asset": asset,
             "files": len(rec["files"]), "restored": len(rec.get("replaced", {})),
-            "preserved_modified": str(modified_snapshot) if modified_snapshot else None}
+            "preserved_modified": str(modified_snapshot) if modified_snapshot else None,
+            "originals_not_restored": unrestorable, "forced": force}
 
 
 def prepare_mochi_model(executable: Path, source: Path) -> dict[str, object]:
@@ -2653,6 +2682,8 @@ def main() -> int:
     parser.add_argument("--remove-component", metavar="ZIP")
     parser.add_argument("--backup-modified-component", action="store_true",
                         help="Explicit consent to preserve modified managed files before removal")
+    parser.add_argument("--force-remove-component", action="store_true",
+                        help="If an original backup is lost, preserve current managed files and remove owned paths")
     parser.add_argument("--component-asset", metavar="ZIP")
     parser.add_argument("--extensions-json", action="store_true", help="Read installed ASI/DLL plugins and loader state")
     parser.add_argument("--import-extension", type=Path, metavar="ASI", help="Import a local ASI extension without overwrites")
@@ -2856,7 +2887,8 @@ def main() -> int:
                     result = installed_components(args.exe)
                 elif args.remove_component:
                     result = remove_component(args.exe, args.remove_component,
-                                              backup_modified=args.backup_modified_component)
+                                              backup_modified=args.backup_modified_component,
+                                              force=args.force_remove_component)
                 else:
                     if not args.component_asset:
                         parser.error("Component preview/install requires --component-asset")
