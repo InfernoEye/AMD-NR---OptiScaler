@@ -139,7 +139,7 @@ def restore_transaction(executable: Path) -> dict:
             raise ValueError("Target changed to a symlink: " + name)
         old_sha = entry.get("previous_sha256")
         new_sha = entry.get("expected_sha256")
-        if not isinstance(new_sha, str) or len(new_sha) != 64:
+        if new_sha is not None and (not isinstance(new_sha, str) or len(new_sha) != 64):
             raise ValueError("Malformed recovery entry")
         current = digest(target) if target.is_file() else None
         if current not in (old_sha, new_sha, None):
