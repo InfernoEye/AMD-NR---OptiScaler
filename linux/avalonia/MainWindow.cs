@@ -82,13 +82,13 @@ public sealed class MainWindow : Window
     private static IBrush Brush(string hex) => new SolidColorBrush(Color.Parse(hex));
 
     private static TextBlock Text(string text, double size = 14, IBrush? color = null,
-        FontWeight weight = default)
+        FontWeight? weight = null)
         => new()
         {
             Text = text,
             FontSize = size,
             Foreground = color ?? ForegroundBrush,
-            FontWeight = weight,
+            FontWeight = weight ?? FontWeight.Normal,
             TextWrapping = TextWrapping.Wrap,
             VerticalAlignment = VerticalAlignment.Center,
         };
