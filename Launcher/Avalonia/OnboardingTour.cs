@@ -144,7 +144,9 @@ internal sealed class OnboardingTour
         }
         var polish = UiLanguage.Current == "pl";
         var current = Steps[_index];
+        var bottomAnchor = _index is 1 or 2 || _horizontalNavigation();
         var content = new StackPanel { Width = 328, Spacing = 11 };
+        content.Children.Add(Text(bottomAnchor ? "▲" : "◀", 17, Red, true));
         content.Children.Add(Text((polish ? "PREZENTACJA" : "WALKTHROUGH") +
             $"   {_index + 1} / {Steps.Length}", 11, Red, true));
         content.Children.Add(Text(polish ? current.PlTitle : current.EnTitle, 21, Light, true));
@@ -176,8 +178,7 @@ internal sealed class OnboardingTour
             Padding = new Thickness(18),
         };
         _popup.PlacementTarget = target;
-        _popup.Placement = _index is 1 or 2 || _horizontalNavigation()
-            ? PlacementMode.Bottom : PlacementMode.Right;
+        _popup.Placement = bottomAnchor ? PlacementMode.Bottom : PlacementMode.Right;
         Dispatcher.UIThread.Post(() => { if (IsActive) _popup.IsOpen = true; });
     }
 }
