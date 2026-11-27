@@ -83,22 +83,24 @@ jobs:
             dist/AMDNR-Linux-x86_64.tar.gz
             dist/SHA256SUMS.txt
           if-no-files-found: error
-      - name: Publish first Linux testing prerelease
+      - name: Publish Linux branch prerelease
         if: github.ref == 'refs/heads/feature/native-linux-launcher'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=linux-v0.1.0-beta.1
+          # Unique, immutable tag per successful build. Do not reuse the
+          # original beta.1 tag; it points to an older commit.
+          TAG="linux-v0.1.0-beta.${GITHUB_RUN_NUMBER}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Testing release already exists; skip replacing its assets"
+            echo "Prerelease $TAG already published for this run."
           else
             gh release create "$TAG" \
               dist/AMDNR-Linux-x86_64.AppImage \
               dist/AMDNR-Linux-x86_64.tar.gz \
               dist/SHA256SUMS.txt \
-              --target "$GITHUB_SHA" --prerelease \
-              --title "AMDNR Linux Launcher 0.1.0 beta 1 (testing)" \
-              --notes "First public Linux/Proton launcher test. AppImage bundles .NET 10 and CPython 3.12; no system Python or .NET SDK needed. Run on x86_64 Linux. Steam and GPU drivers remain system dependencies. Neural rendering under Proton, particularly Daniel runtimes, is NOT yet confirmed. Do not use in anti-cheat-protected multiplayer games without checking the game's rules. Please report game, GPU, distro, Proton version, and redacted Doctor logs. The original Windows launcher is unchanged."
+              --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "AMDNR Linux Launcher $TAG (testing)" \
+              --notes "Automated Linux x86_64 AppImage build for commit $GITHUB_SHA. Includes the standalone .NET 10 and CPython 3.12 launcher. Built and smoke-tested in CI; rendering compatibility under Proton is not guaranteed. The original Windows launcher is unchanged." 
           fi
       - name: Publish tagged Linux release
         if: startsWith(github.ref, 'refs/tags/linux-v')
