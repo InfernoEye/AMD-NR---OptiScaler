@@ -370,10 +370,10 @@ public sealed class MainWindow : Window
     {
         _selectedGame = game;
         _selectedFolder = game.Folder;
-        _exe = GuessExecutable(game.Folder);
-        _status.Text = _exe is null
-            ? $"Selected {game.Name}; choose the Windows executable manually."
-            : $"Selected {game.Name}: {_exe}";
+        // Do not silently use the first EXE for installation: games can have
+        // uninstallers, launchers, and anti-cheat executables alongside the real EXE.
+        _exe = null;
+        _status.Text = $"Selected {game.Name}. Choose the Windows executable to manage.";
         ShowGameDetails();
     }
 
@@ -500,23 +500,6 @@ public sealed class MainWindow : Window
             "record beside the selected executable. Existing installations made by other tools " +
             "may not be detected.", 12, MutedBrush));
         _content.Children.Add(Panel(detail));
-    }
-
-    private static string? GuessExecutable(string folder)
-    {
-        // This is a hint, not an automatic install destination; user can replace it.
-        try
-        {
-            return Directory.EnumerateFiles(folder, "*.exe", SearchOption.AllDirectories)
-                .Where(path => path.Split(Path.DirectorySeparatorChar).Length
-                    - folder.Split(Path.DirectorySeparatorChar).Length <= 6)
-                .Where(path => !new[] { "unins", "setup", "crash", "redist", "anticheat",
-                                        "updater", "vcredist" }.Any(part =>
-                    Path.GetFileName(path).Contains(part, StringComparison.OrdinalIgnoreCase)))
-                .OrderBy(path => path.Length)
-                .FirstOrDefault();
-        }
-        catch (Exception) { return null; }
     }
 
     private void ShowInstall()
