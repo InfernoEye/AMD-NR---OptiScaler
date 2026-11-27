@@ -4,7 +4,6 @@ No Steam file is modified; any launch command generated here is a preview.
 """
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
 import os
@@ -303,33 +302,3 @@ def support_bundle(executable: Path, output_dir: Path | None = None) -> dict:
     return {"file": str(target), "logs": collected, "local_only": True}
 
 
-def analyze_mangohud_csv(path: Path) -> dict:
-    if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_PERF_CSV:
-        raise ValueError("Select a bounded MangoHud CSV")
-    import statistics
-    with path.open(newline="") as stream:
-        lines = csv.DictReader(stream)
-        if lines.fieldnames is None:
-            raise ValueError("CSV has no headers")
-        col = next((name for name in lines.fieldnames if name.lower() in
-                    ("frametime", "frametime_ms", "frame_time")), None)
-        if col is None:
-            raise ValueError("No frame-time column found")
-        values = []
-        for i, row in enumerate(lines):
-            if i > 500000:
-                raise ValueError("Performance capture exceeds 500k rows")
-            try:
-                number = float(row[col])
-            except (ValueError, KeyError, TypeError):
-                continue
-            if 0 < number < 1000:
-                values.append(number)
-    if not values:
-        raise ValueError("No valid frame times")
-    ordered = sorted(values)
-    return {"frames": len(values), "average_ms": round(statistics.mean(values), 2),
-            "median_ms": round(statistics.median(values), 2),
-            "p95_ms": round(ordered[int((len(values) - 1) * 0.95)], 2),
-            "p99_ms": round(ordered[int((len(values) - 1) * 0.99)], 2),
-            "note": "MangoHud data is observational and does not prove which runtime rendered frames."}
