@@ -1730,7 +1730,7 @@ public sealed class MainWindow : Window
         _content.Children.Add(back);
 
         // Artwork remains decorative; game modifications always require explicit action.
-        var hero = new Grid { MinHeight = 265, ClipToBounds = true };
+        var hero = new Grid { MinHeight = 170, ClipToBounds = true };
         hero.Children.Add(GameArtwork(game, 310, fill: true));
         hero.Children.Add(new Border
         {
@@ -1757,18 +1757,18 @@ public sealed class MainWindow : Window
             installed ? AccentBrush : MutedBrush));
         summary.Children.Add(Text(game.Folder, 12, MutedBrush));
         var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
-        // Install/uninstall and add-ons now live in the single game setup panel below.
+        // Optional tools stay collapsed; install/uninstall is on the game page below.
         var doctor = Button(UiLanguage.Translate("Doctor").ToUpperInvariant());
         doctor.Click += (_, _) => ShowDoctor();
         actions.Children.Add(doctor);
         // Linux/Proton users reach the bridge wizard from the primary Install action.
         // Legacy Windows-DLL installation remains under Advanced in that wizard.
-        summary.Children.Add(actions);
+        // No second install entry point in the hero; keep it uncluttered.
         if (_exe is not null && File.Exists(_exe))
         {
             var configure = Button(UiLanguage.Translate("Configure AMDNR").ToUpperInvariant());
             configure.Click += (_, _) => ShowGameConfiguration();
-            summary.Children.Add(configure);
+            actions.Children.Add(configure);
 
         }
         var coverButton = Button(UiLanguage.Translate("Change cover art").ToUpperInvariant());
@@ -1793,13 +1793,19 @@ public sealed class MainWindow : Window
             }
             catch (Exception ex) { _status.Text = "Cover update failed: " + ex.Message; }
         };
-        summary.Children.Add(coverButton);
+        actions.Children.Add(coverButton);
         if (game.Custom)
         {
             var edit = Button("EDIT / REMOVE CUSTOM GAME");
             edit.Click += (_, _) => ShowEditCustomGame(game);
-            summary.Children.Add(edit);
+            actions.Children.Add(edit);
         }
+        summary.Children.Add(new Expander
+        {
+            Header = "More game tools",
+            IsExpanded = false,
+            Content = actions,
+        });
         hero.Children.Add(summary);
         _content.Children.Add(new Border
         {
@@ -1917,7 +1923,12 @@ public sealed class MainWindow : Window
             }
             detail.Children.Add(Panel(entries, new Thickness(12)));
         }
-        _content.Children.Add(Panel(detail));
+        _content.Children.Add(new Expander
+        {
+            Header = "Game executable: " + (string.IsNullOrEmpty(_exe) ? "Select executable" : Path.GetFileName(_exe)),
+            IsExpanded = false,
+            Content = Panel(detail),
+        });
 
         AddGameInstallPanel(game);
     }
