@@ -123,6 +123,37 @@ cannot be made, the copy action is disabled. A successful installation
 does not establish that the specific Proton-Wineland version can run the
 selected neural rendering runtime.
 
+## Force remove a damaged AMDNR installation
+
+The per-game page now includes **Advanced: force remove AMDNR** with a separate
+explicit approval checkbox. This is for damaged installations that regular
+uninstall cannot restore because files differ from recorded hashes or backups
+are missing. It is not the default uninstall path.
+
+Force removal first archives modified component bytes in a private, per-game
+state snapshot; removes recorded component files with `--backup-modified-component`
+and `--force-remove-component`; then preserves modified bridge-managed files
+before invoking AMDNR-Linux's reviewed `manage.py uninstall --force` mode.
+Original game files are restored from verified backups when available.
+
+If the upstream manager still fails, the adapter quarantines only files named
+in the trusted v1 community-bridge installation record, its bridge runtime
+directory and its own backup/record files. The quarantine journal lives under
+`<game executable folder>/.amdnr-force-removals/<id>/`. Existing original
+game files are restored from available installer backups. Missing original
+backups are reported, not invented; unrelated game files are not moved.
+
+**Important:** a failed upstream forced uninstall may leave previously
+modified Proton-prefix files unrecovered. In that case the UI explicitly
+reports the remaining prefix-recovery requirement instead of claiming a clean
+uninstall. Steam launch options and all user save files are untouched; remove
+the obsolete bridge wrapper from Steam's Launch Options manually.
+
+Modified bridge files additionally have a preserved snapshot under
+`$XDG_STATE_HOME/amdnr/bridge-force-recovery/` (or
+`~/.local/state/amdnr/bridge-force-recovery/`). Neither force removal
+nor regular removal deletes recovery snapshots automatically.
+
 ## Apply checked add-ons and full AMDNR uninstall
 
 The per-game add-on checkboxes reflect **actual installed component records**:
