@@ -884,7 +884,20 @@ def runtime_diagnostics(executable: Path) -> dict[str, object]:
         names = list(record.get("files", {})) + list(record.get("replaced", {}))
         runtime_paths = [name for name in names
                          if name.casefold().endswith((".dll", ".asi", ".bin", ".pak"))]
+        archive_candidates = []
+        cache_archive = _release_cache_dir() / str(record.get("tag", "")) / asset
+        if cache_archive.is_file() and not cache_archive.is_symlink():
+            try:
+                with zipfile.ZipFile(cache_archive) as source:
+                    archive_candidates = [
+                        item.filename for item in source.infolist()
+                        if not item.is_dir() and item.filename.casefold().endswith(
+                            (".dll", ".asi", ".pak", ".bin"))][:80]
+            except (OSError, ValueError, zipfile.BadZipFile):
+                archive_candidates = ["[Could not inspect cached component ZIP]"]
         components.append({"asset": asset, "runtime_paths": runtime_paths[:80],
+                           "archive_candidates": archive_candidates,
+                           "cached_archive_present": cache_archive.is_file(),
                            "managed_files": len(names)})
     return {"folder": str(root), "files": paths, "plugins_asi": plugin_asi,
             "components": components,
