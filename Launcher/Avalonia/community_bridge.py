@@ -2,7 +2,7 @@
 """Opt-in adapter for the separately maintained AMDNR-Linux GPL-3.0+ bridge.
 
 No third-party source is copied into this repository. A checksum-pinned published
-release is downloaded only on explicit Prepare. Its unmodified setup/manage CLI
+release is downloaded only on explicit Prepare. Its reviewed setup/manage CLI
 does the staging and installation with its own backup and recovery records.
 
 This module never writes Steam settings, Proton configurations or game files
@@ -261,6 +261,41 @@ def fetch_verified() -> Path:
     return archive
 
 
+# Versioned compatibility fix for the exact v0.3.7 release. Both the
+# downloaded Debian archive and this source release are checksum-verified.
+# Only this precise dependency entry is changed, and only in the private cache.
+UPSTREAM_LIBELF_PIN = (
+    'e/elfutils/libelf1_0.186-1ubuntu0.1_amd64.deb", '
+    '"2cc781614b045b450a1e073ee3b0902f393ee58ede1d2ea4526ad805fcccf538"'
+)
+REVIEWED_LIBELF_PIN = (
+    'e/elfutils/libelf1_0.188-1~bpo22.04.1_amd64.deb", '
+    '"280b71b2f310fa637e325a4923db4c634964994de1a75f5e5770ef6247179c55"'
+)
+
+
+def apply_reviewed_libelf_pin(src: Path) -> bool:
+    """Patch one old upstream dependency tuple, never relax SHA-256 checking.
+
+    Returns True when an update was applied and False if already updated.
+    Rejects unknown upstream script layouts instead of guessing at a patch.
+    """
+    if VERSION != "0.3.7":
+        raise ValueError("libelf compatibility patch is only reviewed for linux-v0.3.7")
+    script = src / "linux/fetch-rocm.py"
+    if not script.is_file() or script.is_symlink():
+        raise ValueError("Expected regular upstream linux/fetch-rocm.py is missing.")
+    content = script.read_text(encoding="utf-8")
+    if content.count(REVIEWED_LIBELF_PIN) == 1 and UPSTREAM_LIBELF_PIN not in content:
+        return False
+    if content.count(UPSTREAM_LIBELF_PIN) != 1 or REVIEWED_LIBELF_PIN in content:
+        raise ValueError("Unrecognized upstream libelf pin; refusing to alter source.")
+    revised = content.replace(UPSTREAM_LIBELF_PIN, REVIEWED_LIBELF_PIN, 1)
+    # This script lives only under the verified release's private extraction.
+    script.write_text(revised, encoding="utf-8")
+    return True
+
+
 def preparer_python() -> str:
     """Find an existing Python 3.12+ with zstd support, without installing packages."""
     candidates = [sys.executable, shutil.which("python3.14"), shutil.which("python3.13"),
@@ -304,12 +339,14 @@ def prepare(compiler: Path) -> dict:
     manifest = json.loads((src / "RELEASE-MANIFEST.json").read_text())
     if manifest.get("release") != "linux-v" + VERSION:
         raise ValueError("Community release manifest identifies a different release.")
-    # Upstream pins Ubuntu .deb files by SHA-256 but its primary archive
-    # URLs sometimes return 404. First reuse exact pinned packages from the
-    # distro's package archive cache; otherwise try Ubuntu mirrors with the
-    # original SHA-256. No installed system .so is substituted.
+    # The verified upstream release has an unavailable libelf1 0.186 pin.
+    # Fetch a replacement under a reviewed SHA-256 pin, then update the exact
+    # matching upstream fetch-rocm tuple in the private extracted source.
+    # Other upstream dependencies and integrity checking remain unchanged.
     from bridge_deps import reuse_or_fetch_pinned_ubuntu_packages
     dependency_actions = reuse_or_fetch_pinned_ubuntu_packages(cache_dir() / "upstream-cache")
+    if apply_reviewed_libelf_pin(src):
+        dependency_actions.append("Applied reviewed libelf1 0.188 pin to private upstream fetch script")
     command = [interpreter, str(src / "linux/setup.py"), "prepare",
                "--compiler", str(compiler.resolve()),
                "--output", str(prepared_path()),
