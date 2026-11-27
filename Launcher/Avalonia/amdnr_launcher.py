@@ -533,6 +533,7 @@ def _save_component_records(executable: Path, records: dict) -> None:
 # Keep bounded extraction and enforce available storage at installation time.
 MAX_COMPONENT_UNPACKED = 12 * 1024 ** 3
 MAX_COMPONENT_FILE = 8 * 1024 ** 3
+MAX_COMPONENT_FILES = 10000
 
 
 def _component_entries(archive: Path, *, inspect_only: bool = False) -> list:
@@ -553,7 +554,7 @@ def _component_entries(archive: Path, *, inspect_only: bool = False) -> list:
                     entry.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)):
                 raise ValueError("Unsupported component file")
             size += entry.file_size
-            if len(entries) >= (100000 if inspect_only else 500):
+            if len(entries) >= (100000 if inspect_only else MAX_COMPONENT_FILES):
                 raise ValueError("Component archive has too many files for safe inspection/extraction")
             if not inspect_only and entry.file_size > MAX_COMPONENT_FILE:
                 raise ValueError("Component file exceeds 8 GiB extracted size limit")
@@ -586,6 +587,18 @@ def _component_target(root: Path, name: str) -> Path:
     return dest
 
 
+def _component_existing_matches(source: zipfile.ZipFile, entry: zipfile.ZipInfo,
+                                dest: Path) -> bool:
+    """Compare exact bytes without modifying an existing game file."""
+    if dest.is_symlink() or not dest.is_file() or dest.stat().st_size != entry.file_size:
+        return False
+    expected = hashlib.sha256()
+    with source.open(entry) as incoming:
+        for chunk in iter(lambda: incoming.read(1024 * 1024), b""):
+            expected.update(chunk)
+    return _digest(dest) == expected.hexdigest()
+
+
 def component_preview(executable: Path, tag: str, asset: str) -> dict:
     if not executable.is_file() or executable.is_symlink() or executable.suffix.lower() != ".exe":
         raise ValueError("Select a Windows game executable")
@@ -595,19 +608,25 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
     root = executable.resolve().parent
     entries = _component_entries(archive, inspect_only=True)
     total_size = sum(e.file_size for e in entries)
-    too_many = len(entries) > 500
+    too_many = len(entries) > MAX_COMPONENT_FILES
     too_large = (too_many or total_size > MAX_COMPONENT_UNPACKED or any(
         e.file_size > MAX_COMPONENT_FILE for e in entries))
     largest_files = [{"name": e.filename, "bytes": e.file_size}
                      for e in sorted(entries, key=lambda e: e.file_size, reverse=True)[:5]]
-    conflicts = []
-    for entry in entries:
-        try:
-            dest = _component_target(root, entry.filename)
-            if dest.exists():
+    conflicts, identical, new_files = [], [], []
+    with zipfile.ZipFile(archive) as source:
+        for entry in entries:
+            try:
+                dest = _component_target(root, entry.filename)
+                if dest.exists():
+                    if not too_large and _component_existing_matches(source, entry, dest):
+                        identical.append(entry.filename)
+                    else:
+                        conflicts.append(entry.filename)
+                else:
+                    new_files.append(entry.filename)
+            except (ValueError, OSError):
                 conflicts.append(entry.filename)
-        except ValueError:
-            conflicts.append(entry.filename)
     return {"tag": tag, "asset": asset,
             "files": [e.filename for e in entries[:50]],
             "file_count": len(entries),
@@ -615,37 +634,50 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
             "too_many_files": too_many,
             "safety_limit_exceeded": too_large,
             "conflicts": conflicts[:50], "conflict_count": len(conflicts),
+            "identical": identical[:50], "identical_count": len(identical),
+            "new_file_count": len(new_files),
             "installable": not conflicts and not too_large}
 
 
 def install_component(executable: Path, tag: str, asset: str) -> dict:
     preview = component_preview(executable, tag, asset)
-    if preview["conflicts"]:
-        raise ValueError("Component would overwrite game files: " + ", ".join(preview["conflicts"][:6]))
     if preview["safety_limit_exceeded"]:
         raise ValueError("Component exceeds safe extraction limits; inspection only")
+    if preview["conflict_count"]:
+        raise ValueError("Component would overwrite game files: " + ", ".join(preview["conflicts"][:6]))
     records = _component_records(executable)
     if asset in records:
         raise ValueError("Component already managed")
     root = executable.resolve().parent
     archive = _release_cache_dir() / tag / asset
-    # Leave additional headroom for filesystem metadata and other game changes.
-    required = sum(e.file_size for e in _component_entries(archive))
+    entries = _component_entries(archive)
+    # Headroom based only on files actually missing; unchanged existing files are never owned.
+    required = sum(e.file_size for e in entries)  # Conservative upper bound.
     free = shutil.disk_usage(root).free
     if free < required + max(128 * 1024 ** 2, required // 20):
         raise ValueError("Insufficient free disk space for extracted component")
     added, hashes = [], {}
     try:
         with zipfile.ZipFile(archive) as source:
-            for entry in _component_entries(archive):
+            for entry in entries:
                 dest = _component_target(root, entry.filename)
+                if dest.exists():
+                    if not _component_existing_matches(source, entry, dest):
+                        raise ValueError("Existing game file differs; refusing overwrite: " + entry.filename)
+                    continue
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with source.open(entry) as incoming, dest.open("xb") as output:
                     added.append(dest)
                     sha = hashlib.sha256()
+                    written = 0
                     for block in iter(lambda: incoming.read(1024 * 1024), b""):
+                        written += len(block)
+                        if written > entry.file_size or written > MAX_COMPONENT_FILE:
+                            raise ValueError("Unexpected extracted file size")
                         sha.update(block)
                         output.write(block)
+                    if written != entry.file_size:
+                        raise ValueError("Incomplete component extraction")
                     hashes[entry.filename] = sha.hexdigest()
         records[asset] = {"tag": tag, "files": hashes}
         _save_component_records(executable, records)
@@ -653,7 +685,8 @@ def install_component(executable: Path, tag: str, asset: str) -> dict:
         for dest in reversed(added):
             dest.unlink(missing_ok=True)
         raise
-    return {"status": "installed", "asset": asset, "files": len(added)}
+    return {"status": "installed", "asset": asset, "files": len(added),
+            "existing_identical_kept": len(entries) - len(added)}
 
 
 def installed_components(executable: Path) -> list:
