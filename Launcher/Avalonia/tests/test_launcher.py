@@ -403,7 +403,8 @@ class LauncherTests(unittest.TestCase):
 
     def test_approved_modified_component_removal_preserves_changed_bytes(self):
         tag, asset = "Alpha1", "AMDNR-lmxxf-test.zip"
-        archive = self.root / asset
+        archive = self.root / tag / asset
+        archive.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(archive, "w") as stream:
             stream.writestr("components/runtime.dll", b"official runtime")
         state = self.root / "state"
@@ -426,7 +427,8 @@ class LauncherTests(unittest.TestCase):
 
     def test_approved_missing_managed_file_can_remove_record(self):
         tag, asset = "Alpha1", "AMDNR-WrongGPU-test.zip"
-        archive = self.root / asset
+        archive = self.root / tag / asset
+        archive.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(archive, "w") as stream:
             stream.writestr("components/runtime.dll", b"official")
         with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
@@ -441,7 +443,8 @@ class LauncherTests(unittest.TestCase):
 
     def test_approved_modified_replacement_restores_original(self):
         tag, asset = "Alpha1", "AMDNR-WrongGPU-test.zip"
-        archive = self.root / asset
+        archive = self.root / tag / asset
+        archive.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(archive, "w") as stream:
             stream.writestr("runtime.dll", b"component")
         dest = self.game / "runtime.dll"
