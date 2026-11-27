@@ -16,6 +16,8 @@ import shutil
 import sys
 import tempfile
 import zipfile
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 ALIASES = ("dxgi.dll", "version.dll", "winmm.dll", "winhttp.dll",
            "wininet.dll", "dbghelp.dll", "d3d12.dll", "OptiScaler.asi")
@@ -97,39 +99,100 @@ def steam_games() -> list[tuple[str, Path]]:
     return sorted(games, key=lambda g: g[0].casefold())
 
 
-def steam_game_details() -> list[dict[str, str | None]]:
-    """Find locally cached Steam artwork without downloading or guessing game IDs."""
-    details: list[dict[str, str | None]] = []
+def _steam_artwork(appid: str, roots: list[Path], download: bool = False) -> str | None:
+    """Prefer existing Steam cover art; optionally fill gaps from Steam's image CDN."""
+    if not appid.isdecimal():
+        return None
+
+    cache_home = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    cache_path = cache_home / "amdnr" / "steam-artwork" / f"{appid}_library_600x900.jpg"
+
+    # Find genuine local assets across all registered Steam locations. The recent
+    # Steam library cache stores some pictures inside an app-ID subdirectory.
+    candidates: list[Path] = [cache_path]
+    for root in roots:
+        steam_cache = root / "appcache" / "librarycache"
+        candidates.extend((
+            steam_cache / f"{appid}_library_600x900.jpg",
+            steam_cache / appid / "library_600x900.jpg",
+            steam_cache / f"{appid}_library_600x900.png",
+            steam_cache / f"{appid}_header.jpg",
+            steam_cache / appid / "header.jpg",
+            steam_cache / f"{appid}_header.png",
+        ))
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and candidate.stat().st_size > 64:
+                return str(candidate)
+        except OSError:
+            pass
+
+    if not download or os.environ.get("AMDNR_NO_ARTWORK_DOWNLOAD") == "1":
+        return None
+
+    # Only numeric Steam IDs are accepted and the host is fixed, so manifests
+    # cannot redirect this network request to arbitrary URLs.
+    for suffix in ("library_600x900.jpg", "header.jpg"):
+        url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/{suffix}"
+        try:
+            request = urllib.request.Request(
+                url, headers={"User-Agent": "AMDNR-Linux-Launcher/1.0"})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                if response.status != 200:
+                    continue
+                payload = response.read(4 * 1024 * 1024 + 1)
+            if len(payload) > 4 * 1024 * 1024 or len(payload) < 64:
+                continue
+            if not payload.startswith(b"\xff\xd8\xff"):
+                continue
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                dir=cache_path.parent, prefix=".art-", delete=False
+            ) as output:
+                temporary = Path(output.name)
+                output.write(payload)
+            try:
+                os.replace(temporary, cache_path)
+            finally:
+                temporary.unlink(missing_ok=True)
+            return str(cache_path)
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def steam_game_details(download_artwork: bool = False) -> list[dict[str, str | None]]:
+    """Resolve Steam IDs and local artwork; optionally fetch missing covers."""
     roots = steam_roots()
+    pending: list[tuple[str, Path, str | None]] = []
     for name, folder in steam_games():
         appid = None
-        # The authoritative app ID is in a manifest belonging to this library.
         manifest_dir = folder.parent.parent
-        for manifest in manifest_dir.glob("appmanifest_*.acf"):
-            try:
-                content = manifest.read_text(encoding="utf-8-sig", errors="replace")
-                if vdf_value(content, "installdir") == folder.name:
-                    appid = vdf_value(content, "appid") or manifest.stem.removeprefix("appmanifest_")
-                    break
-            except OSError:
-                continue
-        artwork = None
-        if appid and appid.isdecimal():
-            for root in roots:
-                cache = root / "appcache/librarycache"
-                for art in (
-                    cache / f"{appid}_library_600x900.jpg",
-                    cache / appid / "library_600x900.jpg",
-                    cache / f"{appid}_header.jpg",
-                    cache / appid / "header.jpg",
-                ):
-                    if art.is_file():
-                        artwork = str(art)
+        try:
+            manifests = manifest_dir.glob("appmanifest_*.acf")
+            for manifest in manifests:
+                try:
+                    content = manifest.read_text(encoding="utf-8-sig", errors="replace")
+                    if vdf_value(content, "installdir") == folder.name:
+                        appid = vdf_value(content, "appid") or manifest.stem.removeprefix(
+                            "appmanifest_")
                         break
-                if artwork:
-                    break
-        details.append({"name": name, "folder": str(folder), "artwork": artwork})
-    return details
+                except OSError:
+                    continue
+        except OSError:
+            pass
+        pending.append((name, folder, appid))
+
+    def resolve(game: tuple[str, Path, str | None]) -> dict[str, str | None]:
+        name, folder, appid = game
+        artwork = _steam_artwork(appid, roots, download_artwork) if appid else None
+        return {"name": name, "folder": str(folder), "artwork": artwork}
+
+    # Downloads are concurrent, bounded, and do not slow normal/offline scans.
+    if download_artwork:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            return list(pool.map(resolve, pending))
+    return [resolve(game) for game in pending]
 
 
 def guess_executable(directory: Path) -> Path | None:
@@ -398,6 +461,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="List detected Steam games")
     parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
+    parser.add_argument("--download-artwork", action="store_true", help="Fetch missing cover art from Steam CDN")
     parser.add_argument("--install", type=Path, metavar="ZIP", help="Install an AMDNR release ZIP")
     parser.add_argument("--uninstall", action="store_true", help="Uninstall and restore backups")
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
@@ -420,7 +484,7 @@ def main() -> int:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     elif args.list_json:
-        print(json.dumps(steam_game_details(), ensure_ascii=False))
+        print(json.dumps(steam_game_details(args.download_artwork), ensure_ascii=False))
     elif args.list:
         for name, folder in steam_games():
             print(f"{name}\t{folder}")
