@@ -2006,8 +2006,9 @@ public sealed class MainWindow : Window
             {
                 var result = await _backend.PreviewComponentAsync(selected, chosen.Tag, chosen.Asset);
                 if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
-                previewDetails.Children.Add(Text(result.Files.Count + " archive files: " +
-                    string.Join(", ", result.Files.Take(12)) +
+                previewDetails.Children.Add(Text(result.Files.Count + " archive files · " +
+                    (result.ExtractedBytes / (1024.0 * 1024 * 1024)).ToString("F2") +
+                    " GiB extracted: " + string.Join(", ", result.Files.Take(12)) +
                     (result.Files.Count > 12 ? "…" : ""), 12, MutedBrush));
                 if (result.Conflicts.Count > 0)
                     previewDetails.Children.Add(Text("Existing files block installation: " +
