@@ -15,6 +15,7 @@ import community_bridge as bridge
 import bridge_discovery as discovery
 import bridge_deps as deps
 import bridge_migration as migration
+import bridge_force_remove as force_removal
 import hashlib
 
 
@@ -514,6 +515,67 @@ class BridgeTests(unittest.TestCase):
         replacement.write_bytes(b"other")
         next_snapshot = migration.snapshot_existing(exe)
         self.assertEqual(next_snapshot["status"], "backed_up")
+
+    def test_force_bridge_snapshot_preserves_only_modified_managed_files(self):
+        exe = self.exe()
+        game = exe.parent
+        bridge_file = game / "amdnr-linux/run.sh"
+        bridge_file.parent.mkdir(parents=True)
+        bridge_file.write_bytes(b"modified wrapper")
+        unmodified = game / "safe.dll"
+        unmodified.write_bytes(b"expected")
+        record = {"version": 1, "launcher": {"proxy_name": "winmm.dll"},
+                  "files": [
+                      {"path": "amdnr-linux/run.sh", "sha256": hashlib.sha256(b"original").hexdigest()},
+                      {"path": "safe.dll", "sha256": hashlib.sha256(b"expected").hexdigest()},
+                  ], "installed": ["amdnr-linux/run.sh", "safe.dll"]}
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
+            outcome = force_removal.preserve_changed_bridge_files(game, record)
+        self.assertEqual(outcome["preserved"], ["amdnr-linux/run.sh"])
+        saved = Path(outcome["snapshot"]) / "amdnr-linux/run.sh"
+        self.assertEqual(saved.read_bytes(), b"modified wrapper")
+        self.assertEqual(bridge_file.read_bytes(), b"modified wrapper")
+        self.assertEqual(unmodified.read_bytes(), b"expected")
+
+    def test_force_bridge_snapshot_rejects_symlinked_paths(self):
+        exe = self.exe()
+        game = exe.parent
+        target = self.root / "not-managed"
+        target.write_bytes(b"data")
+        (game / "untrusted.dll").symlink_to(target)
+        record = {"version": 1, "launcher": {}, "files": [
+            {"path": "untrusted.dll", "sha256": hashlib.sha256(b"data").hexdigest()},
+        ], "installed": ["untrusted.dll"]}
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            force_removal.preserve_changed_bridge_files(game, record)
+        self.assertEqual(target.read_bytes(), b"data")
+
+    def test_bridge_force_removal_invokes_upstream_force_after_snapshot(self):
+        exe = self.exe()
+        game = exe.parent
+        bridge_file = game / "amdnr-linux/run.sh"
+        bridge_file.parent.mkdir(parents=True)
+        bridge_file.write_bytes(b"updated")
+        (game / ".amdnr-linux-install.json").write_text(json.dumps({
+            "version": 1, "launcher": {"proxy_name": "winmm.dll"},
+            "files": [{"path": "amdnr-linux/run.sh",
+                       "sha256": hashlib.sha256(b"old").hexdigest()}],
+            "installed": ["amdnr-linux/run.sh"]
+        }))
+        src = self.root / "source"
+        manager = src / "linux/manage.py"
+        manager.parent.mkdir(parents=True)
+        manager.write_text("# test")
+        finished = subprocess.CompletedProcess(args=["manage"], returncode=0, stdout="Restored", stderr="")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(bridge, "source_path", return_value=src),
+              patch("launcher_maintenance._ensure_not_running"),
+              patch.object(bridge.subprocess, "run", return_value=finished) as run):
+            outcome = bridge.remove(exe, True, restore_previous=False, force=True)
+        self.assertTrue(outcome["forced"])
+        self.assertTrue(Path(outcome["preserved_bridge"]["snapshot"]).is_dir())
+        self.assertIn("--force", run.call_args.args[0])
+        self.assertFalse(outcome["previous_install_restored"])
 
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
