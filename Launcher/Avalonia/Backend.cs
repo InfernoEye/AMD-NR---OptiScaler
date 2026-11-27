@@ -76,6 +76,49 @@ public sealed class Backend
         return games;
     }
 
+    public async Task<IReadOnlyList<GameEntry>> CustomGamesAsync()
+    {
+        var (exit, output) = await RunAsync(new[] { "--custom-games-json" });
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var games = new List<GameEntry>();
+        foreach (var item in document.RootElement.EnumerateArray())
+        {
+            var name = item.GetProperty("name").GetString();
+            var folder = item.GetProperty("folder").GetString();
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(folder))
+                continue;
+            var artwork = item.GetProperty("artwork").GetString();
+            games.Add(new GameEntry(name, folder,
+                artwork is not null && File.Exists(artwork) ? artwork : null, true));
+        }
+        return games;
+    }
+
+    public async Task AddCustomGameAsync(string folder, string name)
+    {
+        var (exit, output) = await RunAsync(new[] {
+            "--add-custom-game", folder, "--custom-name", name
+        });
+        if (exit != 0) throw new InvalidOperationException(output);
+    }
+
+    public async Task RenameCustomGameAsync(string folder, string name)
+    {
+        var (exit, output) = await RunAsync(new[] {
+            "--rename-custom-game", folder, "--custom-name", name
+        });
+        if (exit != 0) throw new InvalidOperationException(output);
+    }
+
+    public async Task RemoveCustomGameAsync(string folder)
+    {
+        var (exit, output) = await RunAsync(new[] {
+            "--remove-custom-game", folder
+        });
+        if (exit != 0) throw new InvalidOperationException(output);
+    }
+
     public async Task<InstallationReport> InstallationAsync(string executable)
     {
         var (exit, output) = await RunAsync(new[] { "--installation-json", "--exe", executable });
@@ -156,7 +199,7 @@ public sealed class Backend
 
 }
 
-public sealed record GameEntry(string Name, string Folder, string? Artwork);
+public sealed record GameEntry(string Name, string Folder, string? Artwork, bool Custom = false);
 
 public sealed record InstallationReport(bool Installed, string Status, string? Alias,
     string? SourceArchive, string? SourceSha256, int Files, int Verified,
