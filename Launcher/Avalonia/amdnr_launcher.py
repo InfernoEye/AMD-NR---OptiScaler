@@ -503,7 +503,7 @@ def _component_records(executable: Path) -> dict:
     path = _component_manifest(executable)
     if not path.exists():
         return {}
-    if path.is_symlink() or path.stat().st_size > 256 * 1024:
+    if path.is_symlink() or path.stat().st_size > 4 * 1024 * 1024:
         raise ValueError("Invalid component registry")
     data = json.loads(path.read_text())
     if not isinstance(data, dict) or data.get("format") != 1 or not isinstance(data.get("components"), dict):
@@ -613,7 +613,7 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
         e.file_size > MAX_COMPONENT_FILE for e in entries))
     largest_files = [{"name": e.filename, "bytes": e.file_size}
                      for e in sorted(entries, key=lambda e: e.file_size, reverse=True)[:5]]
-    conflicts, identical, new_files = [], [], []
+    conflicts, identical, new_files, replaceable = [], [], [], []
     with zipfile.ZipFile(archive) as source:
         for entry in entries:
             try:
@@ -623,6 +623,8 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
                         identical.append(entry.filename)
                     else:
                         conflicts.append(entry.filename)
+                        if dest.is_file() and not dest.is_symlink() and not too_large:
+                            replaceable.append(entry.filename)
                 else:
                     new_files.append(entry.filename)
             except (ValueError, OSError):
@@ -634,39 +636,116 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
             "too_many_files": too_many,
             "safety_limit_exceeded": too_large,
             "conflicts": conflicts[:50], "conflict_count": len(conflicts),
+            "replaceable_count": len(replaceable),
             "identical": identical[:50], "identical_count": len(identical),
             "new_file_count": len(new_files),
             "installable": not conflicts and not too_large}
 
 
-def install_component(executable: Path, tag: str, asset: str) -> dict:
+
+def _component_backup_dir(executable: Path, asset: str) -> Path:
+    """Per-game/per-component immutable originals outside the game directory."""
+    if not _is_component_zip(asset):
+        raise ValueError("Invalid component asset")
+    manifest = _component_manifest(executable)
+    return manifest.parent / (manifest.stem + ".backups") / hashlib.sha256(asset.encode()).hexdigest()
+
+
+def _write_component_file(source: zipfile.ZipFile, entry: zipfile.ZipInfo,
+                          destination: Path) -> str:
+    """Bounded extraction to exclusive temp file; atomic rename in destination directory."""
+    with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=".amdnr-component-",
+                                     delete=False) as stream:
+        temp = Path(stream.name)
+    try:
+        sha = hashlib.sha256()
+        written = 0
+        with source.open(entry) as incoming, temp.open("wb") as output:
+            for block in iter(lambda: incoming.read(1024 * 1024), b""):
+                written += len(block)
+                if written > entry.file_size or written > MAX_COMPONENT_FILE:
+                    raise ValueError("Unexpected extracted file size")
+                sha.update(block)
+                output.write(block)
+            output.flush()
+            os.fsync(output.fileno())
+        if written != entry.file_size:
+            raise ValueError("Incomplete component extraction")
+        os.replace(temp, destination)
+        return sha.hexdigest()
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def install_component(executable: Path, tag: str, asset: str,
+                      *, replace_conflicts: bool = False) -> dict:
     preview = component_preview(executable, tag, asset)
     if preview["safety_limit_exceeded"]:
         raise ValueError("Component exceeds safe extraction limits; inspection only")
-    if preview["conflict_count"]:
+    if preview["conflict_count"] and (not replace_conflicts or
+                                       preview["conflict_count"] != preview["replaceable_count"]):
         raise ValueError("Component would overwrite game files: " + ", ".join(preview["conflicts"][:6]))
     records = _component_records(executable)
     if asset in records:
         raise ValueError("Component already managed")
+    if replace_conflicts and any(asset != other and name in
+           (set(record.get("files", {})) | set(record.get("replaced", {})))
+           for other, record in records.items() if isinstance(record, dict)
+           for name in preview["conflicts"]):
+        raise ValueError("A conflicting file is managed by another component")
+
     root = executable.resolve().parent
     archive = _release_cache_dir() / tag / asset
     entries = _component_entries(archive)
-    # Headroom based only on files actually missing; unchanged existing files are never owned.
-    required = sum(e.file_size for e in entries)  # Conservative upper bound.
+    required = sum(e.file_size for e in entries)
     free = shutil.disk_usage(root).free
     if free < required + max(128 * 1024 ** 2, required // 20):
         raise ValueError("Insufficient free disk space for extracted component")
-    added, hashes = [], {}
+
+    backup_dir = _component_backup_dir(executable, asset)
+    if backup_dir.is_symlink() or backup_dir.exists():
+        raise ValueError("Component backup directory already exists; inspect before retrying")
+
+    added, replaced, hashes = [], {}, {}
+    created_backup = False
     try:
+        if replace_conflicts and preview["conflict_count"]:
+            backup_dir.mkdir(parents=True, exist_ok=False)
+            created_backup = True
         with zipfile.ZipFile(archive) as source:
             for entry in entries:
-                dest = _component_target(root, entry.filename)
+                name = entry.filename
+                dest = _component_target(root, name)
                 if dest.exists():
-                    if not _component_existing_matches(source, entry, dest):
-                        raise ValueError("Existing game file differs; refusing overwrite: " + entry.filename)
+                    if _component_existing_matches(source, entry, dest):
+                        continue
+                    if not replace_conflicts or not dest.is_file() or dest.is_symlink():
+                        raise ValueError("Existing game file differs; refusing overwrite: " + name)
+                    original_sha = _digest(dest)
+                    backup = _component_target(backup_dir, name)
+                    backup.parent.mkdir(parents=True, exist_ok=True)
+                    with dest.open("rb") as incoming, backup.open("xb") as outgoing:
+                        shutil.copyfileobj(incoming, outgoing)
+                        outgoing.flush()
+                        os.fsync(outgoing.fileno())
+                    if _digest(backup) != original_sha or _digest(dest) != original_sha:
+                        raise ValueError("Game file changed during backup: " + name)
+                    replaced[name] = {"original_sha256": original_sha, "sha256": None}
+                    replacement = dest.parent / (".amdnr-pending-" + hashlib.sha256(name.encode()).hexdigest())
+                    if replacement.exists() or replacement.is_symlink():
+                        raise ValueError("Temporary replacement path already exists")
+                    try:
+                        new_sha = _write_component_file(source, entry, replacement)
+                        if _digest(dest) != original_sha:
+                            raise ValueError("Game file changed during replacement: " + name)
+                        os.replace(replacement, dest)
+                        replaced[name]["sha256"] = new_sha
+                    finally:
+                        replacement.unlink(missing_ok=True)
                     continue
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                with source.open(entry) as incoming, dest.open("xb") as output:
+                # Atomic exclusive creation for brand-new files, without overwriting existing.
+                with dest.open("xb") as output, source.open(entry) as incoming:
                     added.append(dest)
                     sha = hashlib.sha256()
                     written = 0
@@ -676,24 +755,36 @@ def install_component(executable: Path, tag: str, asset: str) -> dict:
                             raise ValueError("Unexpected extracted file size")
                         sha.update(block)
                         output.write(block)
+                    output.flush()
+                    os.fsync(output.fileno())
                     if written != entry.file_size:
                         raise ValueError("Incomplete component extraction")
-                    hashes[entry.filename] = sha.hexdigest()
-        records[asset] = {"tag": tag, "files": hashes}
+                    hashes[name] = sha.hexdigest()
+        records[asset] = {"tag": tag, "files": hashes, "replaced": replaced}
         _save_component_records(executable, records)
     except Exception:
+        for name, metadata in reversed(list(replaced.items())):
+            dest = _component_target(root, name)
+            backup = _component_target(backup_dir, name)
+            # Restore only our own replacement (never overwrite a third-party edit).
+            if (metadata["sha256"] is not None and dest.is_file()
+                    and _digest(dest) == metadata["sha256"] and backup.is_file()):
+                shutil.copy2(backup, dest)
         for dest in reversed(added):
-            dest.unlink(missing_ok=True)
+            if dest.is_file() and not dest.is_symlink():
+                dest.unlink()
+        # Retain backups on failures, to avoid losing originals during an interrupted rollback.
         raise
     return {"status": "installed", "asset": asset, "files": len(added),
-            "existing_identical_kept": len(entries) - len(added)}
+            "replaced_files": len(replaced),
+            "existing_identical_kept": len(entries) - len(added) - len(replaced)}
 
 
 def installed_components(executable: Path) -> list:
     root = executable.resolve().parent
     output = []
     for asset, rec in _component_records(executable).items():
-        if not isinstance(rec, dict) or not isinstance(rec.get("files"), dict):
+        if not isinstance(rec, dict) or not isinstance(rec.get("files"), dict) or not isinstance(rec.get("replaced", {}), dict):
             raise ValueError("Invalid component record")
         changed = []
         for name, digest in rec["files"].items():
@@ -702,7 +793,23 @@ def installed_components(executable: Path) -> list:
             dest = _component_target(root, name)
             if not dest.is_file() or _digest(dest) != digest:
                 changed.append(name)
-        output.append({"asset": asset, "tag": rec.get("tag"), "files": len(rec["files"]), "modified": changed})
+        backup_dir = _component_backup_dir(executable, asset)
+        if backup_dir.is_symlink():
+            raise ValueError("Unsafe component backups")
+        for name, info in rec.get("replaced", {}).items():
+            if not isinstance(info, dict):
+                raise ValueError("Invalid component replacement record")
+            digest, original = info.get("sha256"), info.get("original_sha256")
+            if not all(isinstance(d, str) and re.fullmatch(r"[0-9a-f]{64}", d) for d in (digest, original)):
+                raise ValueError("Invalid component replacement digests")
+            dest = _component_target(root, name)
+            backup = _component_target(backup_dir, name)
+            if (not dest.is_file() or _digest(dest) != digest or
+                    not backup.is_file() or _digest(backup) != original):
+                changed.append(name)
+        output.append({"asset": asset, "tag": rec.get("tag"),
+                       "files": len(rec["files"]) + len(rec.get("replaced", {})),
+                       "modified": changed})
     return output
 
 
@@ -711,16 +818,36 @@ def remove_component(executable: Path, asset: str) -> dict:
     if asset not in records:
         raise ValueError("Component not managed")
     root = executable.resolve().parent
-    for name, digest in records[asset]["files"].items():
-        dest = _component_target(root, name)
-        if not dest.is_file() or _digest(dest) != digest:
-            raise ValueError("Component modified; refusing removal: " + name)
-    for name in records[asset]["files"]:
-        _component_target(root, name).unlink()
-    count = len(records[asset]["files"])
-    del records[asset]
-    _save_component_records(executable, records)
-    return {"status": "removed", "asset": asset, "files": count}
+    rec = records[asset]
+    installed = installed_components(executable)
+    match = next(x for x in installed if x["asset"] == asset)
+    if match["modified"]:
+        raise ValueError("Component modified or backup missing; refusing removal: " + match["modified"][0])
+    backup_dir = _component_backup_dir(executable, asset)
+    # Copy originals to temporary files before making any change. Never delete backups
+    # until the registry is saved; recovery remains possible after an interrupted removal.
+    staged = []
+    try:
+        for name in rec.get("replaced", {}):
+            dest = _component_target(root, name)
+            backup = _component_target(backup_dir, name)
+            with tempfile.NamedTemporaryFile(dir=dest.parent, prefix=".amdnr-restore-",
+                                             delete=False) as temp_stream:
+                temp = Path(temp_stream.name)
+            staged.append((temp, dest))
+            shutil.copyfile(backup, temp)
+        for temp, dest in staged:
+            os.replace(temp, dest)
+        for name in rec["files"]:
+            _component_target(root, name).unlink()
+        del records[asset]
+        _save_component_records(executable, records)
+    finally:
+        for temp, _ in staged:
+            temp.unlink(missing_ok=True)
+    # Backups retained after removal for additional manual recovery.
+    return {"status": "removed", "asset": asset,
+            "files": len(rec["files"]), "restored": len(rec.get("replaced", {}))}
 
 
 def release_catalog(limit: int = 12) -> list[dict[str, object]]:
@@ -2146,6 +2273,7 @@ def main() -> int:
     parser.add_argument("--installed-components-json", action="store_true")
     parser.add_argument("--component-preview", metavar="TAG")
     parser.add_argument("--install-component", metavar="TAG")
+    parser.add_argument("--replace-component-conflicts", action="store_true")
     parser.add_argument("--remove-component", metavar="ZIP")
     parser.add_argument("--component-asset", metavar="ZIP")
     parser.add_argument("--extensions-json", action="store_true", help="Read installed ASI/DLL plugins and loader state")
@@ -2237,7 +2365,8 @@ def main() -> int:
                     if args.component_preview:
                         result = component_preview(args.exe, args.component_preview, args.component_asset)
                     else:
-                        result = install_component(args.exe, args.install_component, args.component_asset)
+                        result = install_component(args.exe, args.install_component, args.component_asset,
+                                                   replace_conflicts=args.replace_component_conflicts)
             print(json.dumps(result, ensure_ascii=False))
         except (OSError, ValueError, TypeError, KeyError, zipfile.BadZipFile) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
