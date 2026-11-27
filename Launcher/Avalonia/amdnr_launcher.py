@@ -777,6 +777,73 @@ def executable_scan(directory: Path) -> dict[str, object]:
             "reason": reason, "partial": partial, "steam_launch": steam}
 
 
+def library_audit() -> list[dict[str, object]]:
+    """Read-only executable readiness inventory for Steam and saved custom games.
+
+    Runs only on explicit request; ordinary Library refresh never scans binaries.
+    A recorded AMDNR installation is an inventory marker, not integrity proof.
+    """
+    entries: list[tuple[str, Path, bool]] = [
+        (name, folder, False) for name, folder in steam_games()
+    ]
+    seen = {str(folder.resolve()) for _, folder, _ in entries}
+    for entry in custom_games():
+        folder = Path(str(entry["folder"]))
+        canonical = str(folder.resolve())
+        if canonical not in seen:
+            entries.append((str(entry["name"]), folder, True))
+            seen.add(canonical)
+
+    results: list[dict[str, object]] = []
+    for name, folder, custom in sorted(entries, key=lambda x: x[0].casefold()):
+        row: dict[str, object] = {
+            "name": name, "folder": str(folder), "custom": custom,
+            "status": "needs_attention", "executable": None,
+            "source": None, "native": [], "steam_windows_missing": [],
+            "installed_record": False,
+        }
+        try:
+            if not folder.is_dir():
+                row["status"] = "missing_folder"
+                results.append(row)
+                continue
+            saved = saved_executable(folder)
+            # If Steam supplies a unique installed EXE or the user saved one,
+            # no costly filesystem crawl is needed for Windows readiness.
+            steam = steam_launch_for_directory(folder) if not custom else {}
+            row["steam_windows_missing"] = steam.get("windows_missing", [])
+            choice = saved or steam.get("selected")
+            if choice is not None and Path(choice).is_file():
+                row["status"] = "windows_ready"
+                row["executable"] = choice
+                row["source"] = "saved" if saved else "steam"
+            else:
+                scan = executable_scan(folder)
+                row["native"] = scan["native"]
+                choice = next((candidate["path"] for candidate in scan["candidates"]
+                               if candidate["auto_select"]), None)
+                if choice:
+                    row["status"] = "windows_ready"
+                    row["executable"] = choice
+                    row["source"] = "heuristic"
+                elif scan["candidates"]:
+                    row["status"] = "needs_selection"
+                elif scan["reason"] == "native_linux_files":
+                    row["status"] = "native_linux"
+                elif scan["partial"]:
+                    row["status"] = "scan_incomplete"
+                else:
+                    row["status"] = "no_windows_exe"
+            selected = row["executable"]
+            if isinstance(selected, str):
+                state = Path(selected).parent / STATE_NAME
+                row["installed_record"] = state.is_file()
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            row["status"] = "scan_error"
+        results.append(row)
+    return results
+
+
 def executable_candidates(directory: Path) -> list[dict[str, object]]:
     """Backwards-compatible candidate list for the Linux GUI and CLI."""
     return executable_scan(directory)["candidates"]
@@ -1155,6 +1222,7 @@ def main() -> int:
     parser.add_argument("--download-release", metavar="TAG", help="Download and verify selected AMDNR release")
     parser.add_argument("--release-asset", metavar="ZIP", help="Archive filename for --download-release")
     parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
+    parser.add_argument("--library-audit-json", action="store_true", help="Read-only executable readiness inventory")
     parser.add_argument("--custom-games-json", action="store_true", help="List remembered custom game entries")
     parser.add_argument("--add-custom-game", type=Path, metavar="FOLDER", help="Add custom game directory")
     parser.add_argument("--rename-custom-game", type=Path, metavar="FOLDER", help="Rename custom game entry")
@@ -1250,6 +1318,8 @@ def main() -> int:
             return 1
     elif args.artwork_report:
         print(json.dumps(artwork_diagnostics(args.download_artwork), ensure_ascii=False, indent=2))
+    elif args.library_audit_json:
+        print(json.dumps(library_audit(), ensure_ascii=False))
     elif args.list_json:
         print(json.dumps(steam_game_details(args.download_artwork), ensure_ascii=False))
     elif args.list:
