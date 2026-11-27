@@ -951,8 +951,10 @@ def prepare_mochi_model(executable: Path, source: Path) -> dict[str, object]:
         info = {}
         for name in produced:
             path = staging / name
+            with path.open("rb") as prepared:
+                signature = prepared.read(8)
             if (not 1024 * 1024 < path.stat().st_size <= 512 * 1024 * 1024 or
-                    path.open("rb").read(8) != b"NRMODEL1"):
+                    signature != b"NRMODEL1"):
                 raise ValueError("Mochi model output failed format/size validation: " + name)
             info[name] = {"bytes": path.stat().st_size, "sha256": _digest(path)}
         target_dir.mkdir(parents=True, exist_ok=True)
