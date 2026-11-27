@@ -508,6 +508,74 @@ public sealed class MainWindow : Window
         exeRow.Children.Add(browseExe);
         section.Children.Add(exeRow);
 
+        var releaseSection = new StackPanel { Spacing = 11 };
+        releaseSection.Children.Add(Text("UPSTREAM AMDNR BUILDS", 12, AccentBrush, FontWeight.Bold));
+        releaseSection.Children.Add(Text("Browse published AMDNR packages. Downloaded ZIPs are verified against " +
+            "upstream SHA256SUMS.txt before use. Downloads do not install anything.", 13, MutedBrush));
+
+        var releases = new ComboBox
+        {
+            MinWidth = 350,
+            MaxWidth = 720,
+            PlaceholderText = "Load upstream builds to select a release",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        releaseSection.Children.Add(releases);
+        var releaseActions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 12,
+        };
+        var loadReleases = Button("LOAD BUILDS");
+        var download = Button("DOWNLOAD SELECTED ZIP", true);
+        download.IsEnabled = false;
+        loadReleases.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null) return;
+            _busy = true;
+            loadReleases.IsEnabled = false;
+            _status.Text = "Loading upstream AMDNR releases…";
+            try
+            {
+                var entries = await _backend.ReleasesAsync();
+                releases.ItemsSource = entries;
+                releases.SelectedIndex = entries.Count > 0 ? 0 : -1;
+                download.IsEnabled = entries.Count > 0;
+                _status.Text = entries.Count > 0
+                    ? $"Found {entries.Count} upstream AMDNR ZIP builds."
+                    : "No verified upstream release ZIPs found.";
+            }
+            catch (Exception ex) { _status.Text = "Release lookup failed: " + ex.Message; }
+            finally { _busy = false; loadReleases.IsEnabled = true; }
+        };
+        download.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null || releases.SelectedItem is not ReleaseEntry chosen)
+                return;
+            _busy = true;
+            download.IsEnabled = false;
+            _status.Text = $"Downloading {chosen.Asset} ({chosen.Bytes / (1024 * 1024)} MiB); checking SHA-256…";
+            try
+            {
+                var (exit, output) = await _backend.RunAsync(new[]
+                {
+                    "--download-release", chosen.Tag,
+                    "--release-asset", chosen.Asset,
+                });
+                if (exit != 0) { _status.Text = "Download failed: " + output; return; }
+                var path = output.Trim();
+                if (!File.Exists(path)) { _status.Text = "Downloaded ZIP not found."; return; }
+                _archive = path;
+                if (_archiveBox is not null) _archiveBox.Text = path;
+                _status.Text = "Verified ZIP ready. Review the game executable before installing.";
+            }
+            catch (Exception ex) { _status.Text = "Download failed: " + ex.Message; }
+            finally { _busy = false; download.IsEnabled = true; }
+        };
+        releaseActions.Children.Add(loadReleases);
+        releaseActions.Children.Add(download);
+        releaseSection.Children.Add(releaseActions);
+        _content.Children.Add(Panel(releaseSection));
+
         section.Children.Add(Text("RELEASE ARCHIVE", 11, MutedBrush, FontWeight.Bold));
         var archiveRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 10 };
         _archiveBox = new TextBox
