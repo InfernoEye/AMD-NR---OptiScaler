@@ -313,7 +313,6 @@ public sealed class MainWindow : Window
             ItemSpacing = 6, LineSpacing = 5,
             Margin = new Thickness(12, 8),
         };
-        buttons.Children.Add(Text("AMDNR", 21, AccentBrush, FontWeight.Bold));
         AddTopNav(buttons, "Library", ShowLibrary);
         AddTopNav(buttons, "Installed", ShowInstalledGames);
         AddTopNav(buttons, "Install", ShowInstall);
@@ -332,7 +331,7 @@ public sealed class MainWindow : Window
 
     private void AddTopNav(WrapPanel panel, string name, Action action)
     {
-        var button = Button(UiLanguage.Translate(name));
+        var button = Button(NavIcon(name) + "  " + UiLanguage.Translate(name));
         button.Padding = new Thickness(10, 7);
         button.Click += (_, _) => action();
         _horizontalNavigation[name] = button;
@@ -437,29 +436,58 @@ public sealed class MainWindow : Window
         return control;
     }
 
+    private static string NavIcon(string name) => name switch
+    {
+        "Library" => "▦",
+        "Installed" => "✓",
+        "Install" => "＋",
+        "Doctor" => "✚",
+        "Compatibility" => "◈",
+        "Settings" => "⚙",
+        "Help" => "?",
+        _ => "·",
+    };
+
+    private static string NavLabel(string name) =>
+        NavIcon(name) + "   " + UiLanguage.Translate(name).ToUpperInvariant();
+
     private Control BuildSidebar()
     {
-        var stack = new StackPanel { Spacing = 9, Margin = new Thickness(16, 25) };
-        stack.Children.Add(Text("AMDNR", 31, AccentBrush, FontWeight.Bold));
-        stack.Children.Add(Text("LINUX LAUNCHER", 11, MutedBrush, FontWeight.SemiBold));
-        stack.Children.Add(new Border { Height = 26 });
+        var stack = new StackPanel { Spacing = 6, Margin = new Thickness(10, 17) };
+        stack.Children.Add(Text("WORKSPACE", 10, MutedBrush, FontWeight.Bold));
+        stack.Children.Add(new Border { Height = 6 });
         AddNav(stack, "Library", ShowLibrary);
         AddNav(stack, "Installed", ShowInstalledGames);
         AddNav(stack, "Install", ShowInstall);
         AddNav(stack, "Doctor", ShowDoctor);
+        stack.Children.Add(new Border { Height = 18 });
+        stack.Children.Add(Text("SYSTEM", 10, MutedBrush, FontWeight.Bold));
+        stack.Children.Add(new Border { Height = 4 });
         AddNav(stack, "Compatibility", ShowCompatibility);
         AddNav(stack, "Settings", ShowSettings);
         AddNav(stack, "Help", ShowHelp);
-        stack.Children.Add(new Border { Height = 30 });
-        stack.Children.Add(Text("LINUX / PROTON", 11, MutedBrush, FontWeight.Bold));
-        stack.Children.Add(Text("Native desktop interface", 12, MutedBrush));
-        stack.Children.Add(Text("Controller: D-pad / stick navigate · A select · B back", 11, MutedBrush));
+        stack.Children.Add(new Border { Height = 24 });
+        stack.Children.Add(new Border
+        {
+            BorderBrush = LineBrush,
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            Height = 15,
+        });
+        stack.Children.Add(Text("DEFAULT RUNTIME", 10, MutedBrush, FontWeight.Bold));
+        stack.Children.Add(Text("AMDNR / OptiScaler", 12, ForegroundBrush));
+        stack.Children.Add(Text("Linux + Proton · Setup is always reviewed",
+            11, MutedBrush));
         return new Border
         {
             Background = SidebarBrush,
             BorderBrush = LineBrush,
             BorderThickness = new Thickness(0, 0, 1, 0),
-            Child = stack,
+            Child = new ScrollViewer
+            {
+                Content = stack,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            },
         };
     }
 
@@ -467,14 +495,15 @@ public sealed class MainWindow : Window
     {
         var button = new Button
         {
-            Content = UiLanguage.Translate(name),
+            Content = NavLabel(name),
             HorizontalContentAlignment = HorizontalAlignment.Left,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(18, 13),
+            Padding = new Thickness(12, 12),
             Background = Brushes.Transparent,
             Foreground = ForegroundBrush,
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(8),
+            BorderBrush = Brushes.Transparent,
+            BorderThickness = new Thickness(2, 0, 0, 0),
+            CornerRadius = new CornerRadius(6),
         };
         button.Click += (_, _) => { action(); Highlight(name); };
         stack.Children.Add(button);
@@ -484,9 +513,9 @@ public sealed class MainWindow : Window
     private void ApplyLanguage()
     {
         foreach (var (name, button) in _navigation)
-            button.Content = UiLanguage.Translate(name);
+            button.Content = NavLabel(name);
         foreach (var (name, button) in _horizontalNavigation)
-            button.Content = UiLanguage.Translate(name);
+            button.Content = NavIcon(name) + "  " + UiLanguage.Translate(name);
         if (_gridViewButton is not null)
             _gridViewButton.Content = "▦ " + UiLanguage.Translate("Grid");
         if (_listViewButton is not null)
@@ -511,6 +540,7 @@ public sealed class MainWindow : Window
         {
             button.Background = name == selected ? AccentDarkBrush : Brushes.Transparent;
             button.Foreground = name == selected ? ForegroundBrush : MutedBrush;
+            button.BorderBrush = name == selected ? AccentBrush : Brushes.Transparent;
         }
         foreach (var (name, button) in _horizontalNavigation)
         {
