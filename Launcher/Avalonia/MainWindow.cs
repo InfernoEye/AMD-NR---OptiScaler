@@ -2218,7 +2218,7 @@ public sealed class MainWindow : Window
             danielPreviewDetails.Children.Clear();
             previewDaniel.IsEnabled = danielPicker.SelectedItem is ReleaseEntry;
         };
-        loadDaniel.Click += async (_, _) =>
+        async Task LoadDanielVersions()
         {
             if (_busy || _backend is null) return;
             _busy = true;
@@ -2236,6 +2236,7 @@ public sealed class MainWindow : Window
             catch (Exception ex) { _status.Text = "Daniel versions unavailable: " + ex.Message; }
             finally { _busy = false; loadDaniel.IsEnabled = true; }
         };
+        loadDaniel.Click += async (_, _) => await LoadDanielVersions();
         previewDaniel.Click += async (_, _) =>
         {
             if (_busy || _backend is null || danielPicker.SelectedItem is not ReleaseEntry chosen)
@@ -2399,6 +2400,7 @@ public sealed class MainWindow : Window
             finally { _busy = false; await ReloadManagedComponents(); }
         };
         await ReloadManagedComponents();
+        await LoadDanielVersions();
 
         async Task Reload()
         {
