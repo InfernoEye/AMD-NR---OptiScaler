@@ -973,6 +973,91 @@ def prepare_mochi_model(executable: Path, source: Path) -> dict[str, object]:
             "note": "Locally verified model data installed; restart the game to test Mochi runtime."}
 
 
+# Optional user-approved COMMUNITY mirror; never an official NVIDIA endpoint.
+# Pin both the GitHub release ZIP and the known, extractor-approved NVIDIA input.
+MOCHI_COMMUNITY_REPO = "RankFTW/rhi-repo"
+MOCHI_COMMUNITY_TAG = "dlssnr-310.9.16"
+MOCHI_COMMUNITY_ASSET = "nvngx_dlssnr_310.9.16.zip"
+MOCHI_COMMUNITY_ZIP_SHA256 = "dbeb1f2790b5c621887db99b1a56ac8bd5cb35207e8c074cbb806710f7460cab"
+MOCHI_EXPECTED_DLL_SHA256 = "2bc19bc09a7b89dd44f73e2ac0108fcc586e2154bdd0830f242f4f040e28789f"
+
+
+def prepare_mochi_from_community(executable: Path, *, consent: bool = False) -> dict[str, object]:
+    """Opt-in, hash-pinned, inspect-only community mirror fetch; no DLL persistence.
+
+    Neither the mirror nor its copyright authorization is asserted to be
+    official. No binary is installed or executed: the verified DLL is used
+    only as input to the bundled local model extractor and then deleted.
+    """
+    if not consent:
+        raise ValueError("Community binary download requires explicit user opt-in")
+    if not executable.is_file() or executable.is_symlink() or executable.suffix.lower() != ".exe":
+        raise ValueError("Select an existing Windows game executable")
+    root = executable.resolve().parent
+    target = _component_target(root, "dlssnr-amd")
+    if target.is_symlink() or (target.exists() and not target.is_dir()):
+        raise ValueError("Unsafe Mochi model destination")
+    if any((target / x).exists() or (target / x).is_symlink()
+           for x in ("dlssnr.bin", "dlssnr-small.bin")):
+        raise ValueError("Mochi model destination already exists; no files replaced")
+    # Fetch metadata only from the fixed GitHub repository/tag. Do not trust
+    # arbitrary URLs or SHA values supplied by the release description.
+    metadata = _github_json(
+        f"https://api.github.com/repos/{MOCHI_COMMUNITY_REPO}/releases/tags/{MOCHI_COMMUNITY_TAG}")
+    if not isinstance(metadata, dict) or metadata.get("draft"):
+        raise ValueError("Community mirror release metadata unavailable")
+    asset = next((a for a in metadata.get("assets", [])
+                  if isinstance(a, dict) and a.get("name") == MOCHI_COMMUNITY_ASSET), None)
+    if not isinstance(asset, dict) or not isinstance(asset.get("size"), int):
+        raise ValueError("Pinned community ZIP not found")
+    if not 0 < asset["size"] <= 512 * 1024 * 1024:
+        raise ValueError("Community source exceeds download limit")
+    if asset.get("digest") != "sha256:" + MOCHI_COMMUNITY_ZIP_SHA256:
+        raise ValueError("Community mirror ZIP digest changed; no download attempted")
+    from urllib.parse import quote
+    url = (f"https://github.com/{MOCHI_COMMUNITY_REPO}/releases/download/"
+           f"{quote(MOCHI_COMMUNITY_TAG)}/{quote(MOCHI_COMMUNITY_ASSET)}")
+    with tempfile.TemporaryDirectory(prefix=".amdnr-community-", dir=root) as work:
+        staging = Path(work)
+        archive = staging / MOCHI_COMMUNITY_ASSET
+        request = urllib.request.Request(
+            url, headers={"User-Agent": "AMDNR-Avalonia-Linux/1.0"})
+        total, hasher = 0, hashlib.sha256()
+        with urllib.request.urlopen(request, timeout=60) as response, archive.open("xb") as output:
+            for chunk in iter(lambda: response.read(1024 * 1024), b""):
+                total += len(chunk)
+                if total > asset["size"]:
+                    raise ValueError("Community ZIP exceeds advertised size")
+                hasher.update(chunk)
+                output.write(chunk)
+        if total != asset["size"] or hasher.hexdigest() != MOCHI_COMMUNITY_ZIP_SHA256:
+            raise ValueError("Community ZIP failed pinned SHA-256 verification")
+        if not zipfile.is_zipfile(archive):
+            raise ValueError("Community source is not a valid ZIP")
+        with zipfile.ZipFile(archive) as source:
+            entries = [e for e in source.infolist()
+                       if not e.is_dir() and e.filename.split("/")[-1].lower() == "nvngx_dlssnr.dll"]
+            if len(entries) != 1 or entries[0].file_size > 512 * 1024 * 1024:
+                raise ValueError("Expected exactly one supported NVIDIA DLL in community ZIP")
+            entry = entries[0]
+            dll = staging / "nvngx_dlssnr.dll"
+            dll_sha = hashlib.sha256()
+            copied = 0
+            with source.open(entry) as incoming, dll.open("xb") as output:
+                for chunk in iter(lambda: incoming.read(1024 * 1024), b""):
+                    copied += len(chunk)
+                    if copied > entry.file_size or copied > 512 * 1024 * 1024:
+                        raise ValueError("Community DLL exceeds declared extracted size")
+                    dll_sha.update(chunk)
+                    output.write(chunk)
+            if copied != entry.file_size or dll_sha.hexdigest() != MOCHI_EXPECTED_DLL_SHA256:
+                raise ValueError("Community NVIDIA DLL does not match supported model source SHA-256")
+        result = prepare_mochi_model(executable, dll)
+        result["source"] = "User-approved community mirror (verified input)"
+        result["community_mirror"] = MOCHI_COMMUNITY_REPO
+        return result
+
+
 def runtime_diagnostics(executable: Path) -> dict[str, object]:
     """Read-only file-level diagnostics for the actual AMDNR proxy/runtime layout."""
     if not executable.is_file() or executable.is_symlink() or executable.suffix.lower() != ".exe":
@@ -2468,6 +2553,10 @@ def main() -> int:
     parser.add_argument("--settings-json", action="store_true", help="Read persistent launcher preferences")
     parser.add_argument("--save-settings-base64", metavar="JSON_B64", help="Save validated launcher preferences")
     parser.add_argument("--ini-json", action="store_true", help="Read OptiScaler.ini beside --exe")
+    parser.add_argument("--auto-prepare-mochi-model", action="store_true",
+                        help="Download and verify optional pinned community source and prepare Mochi")
+    parser.add_argument("--accept-community-source", action="store_true",
+                        help="Explicit consent to use unofficial third-party NVIDIA binary mirror")
     parser.add_argument("--prepare-mochi-model", type=Path, metavar="NVIDIA_DLL_OR_ZIP",
                         help="Prepare Mochi models locally from verified user-provided NVIDIA DLL")
     parser.add_argument("--runtime-diagnostics-json", action="store_true",
@@ -2548,6 +2637,15 @@ def main() -> int:
                     raise ValueError("Settings payload too large")
                 print(json.dumps(save_launcher_settings(json.loads(payload)), ensure_ascii=False))
         except (OSError, ValueError, TypeError, UnicodeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.auto_prepare_mochi_model:
+        if args.exe is None:
+            parser.error("--auto-prepare-mochi-model requires --exe")
+        try:
+            print(json.dumps(prepare_mochi_from_community(
+                args.exe, consent=args.accept_community_source), ensure_ascii=False))
+        except (OSError, ValueError, TypeError, zipfile.BadZipFile) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     elif args.prepare_mochi_model is not None:
