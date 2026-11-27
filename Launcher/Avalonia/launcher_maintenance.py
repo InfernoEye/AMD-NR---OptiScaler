@@ -178,6 +178,35 @@ def restore_transaction(executable: Path) -> dict:
     return {"status": "restored", "files_checked": len(doc["touched"])}
 
 
+def repair_automatically(executable: Path, *, allow_modified: bool = False) -> dict:
+    """Resolve the recorded official package without asking for a ZIP path."""
+    import amdnr_launcher as core
+    root = executable.resolve().parent
+    state = valid_record(root)
+    _preflight(root, state)
+    asset = state.get("source_archive")
+    expected = state.get("source_sha256")
+    if (not isinstance(asset, str) or not asset.endswith(".zip") or
+            not isinstance(expected, str) or len(expected) != 64):
+        raise ValueError("This older installation has no verifiable package record; select a ZIP manually")
+    candidates = []
+    cache = core._release_cache_dir()
+    if cache.is_dir():
+        candidates = [p for p in list(cache.glob("*/" + asset))[:64]
+                      if p.is_file() and not p.is_symlink()]
+    for path in candidates:
+        if digest(path) == expected:
+            return repair_or_update(executable, path, allow_modified=allow_modified)
+    # Official upstream release lookup only; no fork URLs or unverified copies.
+    matches = [item for item in core.release_catalog(limit=30)
+               if item.get("asset") == asset]
+    for item in matches:
+        downloaded = core.download_release(item["tag"], asset)
+        if digest(downloaded) == expected:
+            return repair_or_update(executable, downloaded, allow_modified=allow_modified)
+    raise ValueError("Exact recorded package unavailable from verified cache or official recent releases; select the original ZIP manually")
+
+
 def repair_or_update(executable: Path, archive: Path, *, update: bool = False,
                      allow_modified: bool = False, alias: str | None = None) -> dict:
     """Prepare a complete transaction and preserve a crash recovery journal.
