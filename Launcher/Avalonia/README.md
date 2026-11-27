@@ -84,6 +84,57 @@ python3 Launcher/Avalonia/amdnr_launcher.py --remove-custom-game "/path/to/game"
 
 The registry only stores the game's display name and local installation folder. Game installation files are never modified when adding, editing, or forgetting the entry.
 
+## Configuration editor, extensions, health and release management
+
+**Game details → Configure AMDNR** opens the actual UTF-8 `OptiScaler.ini`
+beside the selected Windows EXE. The editor displays discovered INI sections and
+supports raw edits without guessing unsupported setting names. On explicit Save
+it creates a timestamped backup under
+`${XDG_STATE_HOME:-~/.local/state}/amdnr/config-backups/` and refuses changes
+when the file has been edited since opening. Unknown INI keys and comments
+remain in the editor. Edits to launcher-installed INI files intentionally show
+as **modified** in a subsequent integrity check; they are not silently
+overwritten during uninstall.
+
+**Game details → Manage Extensions** reads `plugins/*.asi` and `plugins/*.dll`
+from the selected executable's folder. The supported loader is OptiScaler's
+`[Plugins] LoadAsiPlugins=true`. Enable/Disable is an explicit, backed-up INI
+change. **Import Local .ASI** copies a user-chosen plugin into the game
+`plugins` directory without replacing existing files. The launcher tracks a
+SHA-256 digest of each imported plugin in
+`${XDG_STATE_HOME:-~/.local/state}/amdnr/managed-extensions/`. It only
+offers removal for its own unmodified imports; third-party and changed
+plugins are left untouched. Plugin loading is not verified at runtime.
+Only import plugins from trusted sources, especially for multiplayer or
+anti-cheat-protected games.
+
+**Installed → Verify All Installed Files** runs the existing hash-based
+installation check on demand for each indexed AMDNR installation and reports
+healthy/needs-attention states, missing or modified files and missing
+backups. The normal Installed view remains fast and metadata-only.
+
+**Installed → Check Available Versions** fetches upstream release metadata and
+shows published packages alongside installed archive names. A chosen ZIP can
+be downloaded and SHA-256 verified for a **manual** update. The installer does
+not replace an existing installation automatically: review the current
+installation, preserve backups, and uninstall/restore before installing a
+different package. There is no automated rollback yet, and old installer
+records may not identify a release tag exactly.
+
+**Settings** saves the default proxy DLL, absolute release download directory,
+and whether to display prerelease versions in the release picker at
+`${XDG_CONFIG_HOME:-~/.config}/amdnr/launcher-settings.json`. These settings
+are read on startup. They do not trigger library rescans.
+
+CLI equivalents:
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --settings-json
+python3 Launcher/Avalonia/amdnr_launcher.py --ini-json --exe "/path/to/game.exe"
+python3 Launcher/Avalonia/amdnr_launcher.py --extensions-json --exe "/path/to/game.exe"
+python3 Launcher/Avalonia/amdnr_launcher.py --installed-games-json
+```
+
 ## Installed Games dashboard
 
 Select **Installed** in the sidebar for a compact inventory of AMDNR
