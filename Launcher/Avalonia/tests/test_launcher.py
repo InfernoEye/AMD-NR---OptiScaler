@@ -77,6 +77,65 @@ class LauncherTests(unittest.TestCase):
             }])
             self.assertEqual(launcher.installed_games_overview(), [])
 
+    def test_ini_editor_preserves_unknown_settings_and_backups(self):
+        ini = self.game / "OptiScaler.ini"
+        original = (b"\xef\xbb\xbf[Upscaling]\r\n; keep this comment\r\n"
+                    b"CustomSetting = magic\r\n[Other]\r\nEnabled=true\r\n")
+        ini.write_bytes(original)
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
+            snap = launcher.ini_snapshot(self.exe)
+            self.assertEqual(snap["sections"][1]["name"], "Upscaling")
+            self.assertIn("CustomSetting", snap["sections"][1]["keys"])
+            updated = snap["text"].replace("magic", "new-value")
+            saved = launcher.save_game_ini(self.exe, snap["sha256"], updated)
+            self.assertEqual(saved["status"], "saved")
+            self.assertEqual(Path(saved["backup"]).read_bytes(), original)
+            self.assertIn("CustomSetting = new-value", ini.read_text(encoding="utf-8-sig"))
+            self.assertIn("; keep this comment", ini.read_text(encoding="utf-8-sig"))
+            self.assertEqual(launcher.save_game_ini(
+                self.exe, saved["sha256"], updated)["status"], "unchanged")
+
+    def test_ini_editor_conflict_and_restrictions(self):
+        ini = self.game / "OptiScaler.ini"
+        ini.write_text("[Settings]\nKnown=1\n")
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
+            snap = launcher.ini_snapshot(self.exe)
+            ini.write_text("[Settings]\nKnown=2\n")
+            with self.assertRaisesRegex(ValueError, "changed since"):
+                launcher.save_game_ini(self.exe, snap["sha256"], "[Settings]\nKnown=3\n")
+            with self.assertRaisesRegex(ValueError, "at least one"):
+                launcher.save_game_ini(self.exe,
+                                       launcher.ini_snapshot(self.exe)["sha256"], "x=y")
+            ini.unlink()
+            ini.symlink_to(self.root / "outside.ini")
+            with self.assertRaisesRegex(ValueError, "not found"):
+                launcher.ini_snapshot(self.exe)
+
+    def test_persistent_launcher_preferences(self):
+        config = self.root / "config"
+        download = self.root / "custom-downloads"
+        with patch.dict("os.environ", {"XDG_CONFIG_HOME": str(config)}):
+            initial = launcher.launcher_settings()
+            self.assertEqual(initial["default_alias"], "dxgi.dll")
+            custom = launcher.save_launcher_settings({
+                "default_alias": "winmm.dll", "download_directory": str(download),
+                "show_prereleases": True
+            })
+            self.assertTrue(custom["show_prereleases"])
+            self.assertEqual(launcher.launcher_settings()["default_alias"], "winmm.dll")
+            self.assertEqual(launcher._release_cache_dir(), download)
+            with self.assertRaisesRegex(ValueError, "absolute"):
+                launcher.save_launcher_settings({
+                    "default_alias": "winmm.dll", "download_directory": "../relative",
+                    "show_prereleases": False,
+                })
+            with self.assertRaisesRegex(ValueError, "proxy"):
+                launcher.save_launcher_settings({
+                    "default_alias": "unsafe.dll", "download_directory": str(download),
+                    "show_prereleases": False,
+                })
+            self.assertEqual(launcher.launcher_settings(), custom)
+
     def test_existing_full_audit_exe_is_imported_without_binary_scan(self):
         state = self.root / "state"
         with patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}):
