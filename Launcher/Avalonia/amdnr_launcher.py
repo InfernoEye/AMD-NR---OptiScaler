@@ -845,6 +845,16 @@ def differential_library() -> list[dict[str, object]]:
     Missing custom mounts remain saved; deleted Steam manifests remove entries.
     """
     previous = _read_library_index()
+    # Upgrade existing users' saved full-audit selections into the new index
+    # without rescanning game files or Steam metadata.
+    try:
+        prior_audit = {
+            str(row["folder"]): row.get("executable")
+            for row in cached_library_audit()
+            if row.get("status") == "windows_ready"
+        }
+    except ValueError:
+        prior_audit = {}
     steam = steam_games()
     custom = custom_games()
     games: list[dict[str, object]] = []
@@ -895,7 +905,8 @@ def differential_library() -> list[dict[str, object]]:
             row["artwork"] = None
         # A remembered manual choice outranks cached automatic metadata.
         row["executable"] = (saved_executable(folder) or
-                             _valid_index_executable(folder, row["executable"]))
+                             _valid_index_executable(folder, row["executable"]) or
+                             _valid_index_executable(folder, prior_audit.get(str(folder))))
     games.sort(key=lambda row: str(row["name"]).casefold())
     _write_library_index(games)
     return games
