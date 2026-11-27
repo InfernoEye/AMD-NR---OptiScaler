@@ -34,6 +34,9 @@ jobs:
       - name: Stamp tagged launcher version
         if: startsWith(github.ref, 'refs/tags/linux-v')
         run: echo "$GITHUB_REF_NAME" > Launcher/Avalonia/VERSION
+      - name: Stamp first beta launcher version
+        if: github.ref == 'refs/heads/feature/native-linux-launcher'
+        run: echo "linux-v0.1.0-beta.1" > Launcher/Avalonia/VERSION
       - name: Publish self-contained Linux launcher
         run: >-
           dotnet publish Launcher/Avalonia/Amdnr.Avalonia.csproj
