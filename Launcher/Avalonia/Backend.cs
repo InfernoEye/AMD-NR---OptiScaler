@@ -254,7 +254,8 @@ public sealed class Backend
                 .Select(x => x.GetString() ?? "").ToArray(),
             root.GetProperty("conflicts").EnumerateArray()
                 .Select(x => x.GetString() ?? "").ToArray(),
-            root.GetProperty("installable").GetBoolean());
+            root.GetProperty("installable").GetBoolean(),
+            root.GetProperty("extracted_bytes").GetInt64());
     }
 
     public async Task InstallComponentAsync(string executable, string tag,
@@ -525,7 +526,7 @@ public sealed record InstalledGameSummary(string Name, string Folder,
 public sealed record ManagedComponent(string Asset, string Tag, int FileCount,
     IReadOnlyList<string> Modified);
 public sealed record ComponentPreview(string Asset, IReadOnlyList<string> Files,
-    IReadOnlyList<string> Conflicts, bool Installable);
+    IReadOnlyList<string> Conflicts, bool Installable, long ExtractedBytes);
 
 public sealed record ExtensionEntry(string Name, long Bytes, bool Managed, bool Modified);
 public sealed record ExtensionInventory(string Folder,
