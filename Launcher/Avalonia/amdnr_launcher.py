@@ -465,7 +465,7 @@ def _github_json(url: str) -> object:
 # Discover the full release history and keep one authoritative release per version.
 DANIEL_RUNTIME_TAG = "Alpha0.3.5.5R4"  # Legacy 0.6.0 fallback for existing installations.
 DANIEL_RUNTIME_ASSET = "v0.6.0-Runtime.zip"
-DANIEL_RUNTIME_RE = re.compile(r"v(\\d+\\.\\d+\\.\\d+)-Runtime\\.zip", re.I)
+DANIEL_RUNTIME_RE = re.compile(r"v(\d+\.\d+\.\d+)-Runtime\.zip", re.I)
 DANIEL_REQUIRED_FILES = frozenset({
     "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll",
     "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin",
@@ -529,7 +529,7 @@ def component_catalog(limit: int = 12) -> list[dict[str, object]]:
                         "prerelease": bool(release.get("prerelease", False)),
                     }
             elif index < limit and re.fullmatch(
-                    r"AMDNR-(?!v[0-9]|Launcher)[A-Za-z0-9._-]+\\.zip", name, re.I):
+                    r"AMDNR-(?!v[0-9]|Launcher)[A-Za-z0-9._-]+\.zip", name, re.I):
                 if name not in seen:
                     seen.add(name)
                     found.append({"tag": tag, "name": name, "asset": name,
@@ -541,7 +541,7 @@ def component_catalog(limit: int = 12) -> list[dict[str, object]]:
 
 def _is_component_zip(name: str) -> bool:
     return (_daniel_version(name) is not None or bool(re.fullmatch(
-        r"AMDNR-(?!v[0-9]|Launcher)[A-Za-z0-9._-]+\\.zip", name, re.I)))
+        r"AMDNR-(?!v[0-9]|Launcher)[A-Za-z0-9._-]+\.zip", name, re.I)))
 
 
 def _component_install_name(asset: str, zip_member: str) -> str:
@@ -756,6 +756,12 @@ def install_component(executable: Path, tag: str, asset: str,
     preview = component_preview(executable, tag, asset)
     if preview["safety_limit_exceeded"]:
         raise ValueError("Component exceeds safe extraction limits; inspection only")
+    if _daniel_version(asset) is not None:
+        previous = [name for name in _component_records(executable)
+                    if _daniel_version(name) is not None and name != asset]
+        if previous:
+            raise ValueError("Remove installed Daniel " + ", ".join(previous) +
+                             " before installing another version")
     if preview["conflict_count"] and (not replace_conflicts or
                                        preview["conflict_count"] != preview["replaceable_count"]):
         raise ValueError("Component would overwrite game files: " + ", ".join(preview["conflicts"][:6]))
