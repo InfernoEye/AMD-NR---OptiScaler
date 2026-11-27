@@ -35,6 +35,43 @@
 > Windows DLL will run. Doctor can create a locally stored, redacted
 > AMDNR support bundle; it is not a separate benchmarking tool.
 
+## Guided ROCm bridge preparation (launcher-only)
+
+The optional ROCm bridge page now starts with an automatic, **read-only**
+inspection of the selected Windows executable's Steam library, available AMD
+GPU device nodes (`/sys/class/drm`, `/dev/kfd`, and `/dev/dri/renderD*`),
+installed Proton tool directories, and a bounded search for
+`d3dcompiler_47.dll`. The search avoids symlinks, caps traversal count and
+duration, prefers the selected game folder, and verifies a native **x64 PE**
+header before proposing a compiler. PE structure is **not proof** of Microsoft
+origin, permission to copy, or runtime compatibility. A user must verify
+provenance and may instead browse to their own compiler manually.
+
+The UI walks through three separate stages:
+**(1) Detect & Check** (no writes);
+**(2) Prepare Dependencies** (requires explicit approval for external
+GPL-licensed scripts and separately pinned downloads); and
+**(3) Review Changes & Install** (a separate approval, with fresh conflict
+checks and managed backups). A collapsed Restore section remains available.
+Steam launch options are always shown as **copy-only** text; nothing
+automatically changes Steam or the Proton prefix. Using the external wrapper
+later can modify the game's **existing** Proton prefix, as disclosed in UI.
+
+Detected Proton installations do **not** prove which Proton version the game
+actually uses. No GPU/Proton compatibility or in-game rendering result is
+inferred from a successful hardware scan. Existing AMDNR backup/installation
+markers and ReShade/proxy files continue to block bridge installation rather
+than being automatically removed.
+
+For manual read-only preflight:
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --bridge-discover-json --exe "/path/to/game-Win64-Test.exe"
+```
+
+All changes for this wizard are limited to `Launcher/Avalonia/`, including
+`bridge_discovery.py` and regression tests in `tests/test_community_bridge.py`.
+
 ## Experimental AMDNR-Linux ROCm bridge
 
 The **Experimental Linux ROCm Bridge** action on the selected game's details page
