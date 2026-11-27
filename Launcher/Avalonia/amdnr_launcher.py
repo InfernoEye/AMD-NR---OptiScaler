@@ -523,7 +523,7 @@ def _release_asset(tag: str, asset_name: str) -> tuple[str, str, int]:
 
 
 def _release_cache_dir() -> Path:
-    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "amdnr" / "releases"
+    return Path(str(launcher_settings()["download_directory"]))
 
 
 def download_release(tag: str, asset_name: str) -> Path:
@@ -572,6 +572,174 @@ def download_release(tag: str, asset_name: str) -> Path:
         return destination
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _launcher_settings_path() -> Path:
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return config / "amdnr" / "launcher-settings.json"
+
+
+def launcher_settings() -> dict[str, object]:
+    """Validated, per-user preferences; no game files are read."""
+    defaults: dict[str, object] = {
+        "default_alias": "dxgi.dll",
+        "download_directory": str(
+            Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+            / "amdnr" / "releases"),
+        "show_prereleases": False,
+    }
+    path = _launcher_settings_path()
+    if not path.exists():
+        return defaults
+    try:
+        if path.stat().st_size > 64 * 1024:
+            raise ValueError("Launcher settings are too large")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("format") != 1:
+            raise ValueError("Invalid launcher settings format")
+        alias = data.get("default_alias")
+        if alias in ALIASES:
+            defaults["default_alias"] = alias
+        download = data.get("download_directory")
+        if isinstance(download, str) and len(download) <= 4096 and \
+                Path(download).is_absolute():
+            defaults["download_directory"] = download
+        if isinstance(data.get("show_prereleases"), bool):
+            defaults["show_prereleases"] = data["show_prereleases"]
+        return defaults
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError(f"Unable to read launcher settings: {exc}") from exc
+
+
+def save_launcher_settings(data: object) -> dict[str, object]:
+    if not isinstance(data, dict):
+        raise ValueError("Settings must be a JSON object")
+    alias = data.get("default_alias")
+    download = data.get("download_directory")
+    prerelease = data.get("show_prereleases")
+    if alias not in ALIASES:
+        raise ValueError("Unsupported default proxy DLL")
+    if not isinstance(download, str) or not 1 <= len(download) <= 4096 or \
+            not Path(download).is_absolute() or "\0" in download:
+        raise ValueError("Download directory must be an absolute path")
+    path = Path(download)
+    if path.is_symlink() or (path.exists() and not path.is_dir()):
+        raise ValueError("Download path must be a directory, not a symlink or file")
+    if not isinstance(prerelease, bool):
+        raise ValueError("Show prereleases must be true or false")
+    output = {"format": 1, "default_alias": alias,
+              "download_directory": download,
+              "show_prereleases": prerelease}
+    target = _launcher_settings_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=target.parent,
+            prefix=".settings-", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            os.chmod(temporary, 0o600)
+            json.dump(output, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return {key: value for key, value in output.items() if key != "format"}
+
+
+def _game_ini_path(executable: Path) -> Path:
+    if not executable.is_file() or executable.is_symlink() or \
+            executable.suffix.casefold() != ".exe":
+        raise ValueError("Choose an existing, regular Windows game executable")
+    target = executable.resolve().parent / "OptiScaler.ini"
+    if not target.is_file() or target.is_symlink():
+        raise ValueError("OptiScaler.ini not found beside the selected executable")
+    if target.stat().st_size > 512 * 1024:
+        raise ValueError("OptiScaler.ini is too large to edit safely")
+    return target
+
+
+def ini_snapshot(executable: Path) -> dict[str, object]:
+    """Exact UTF-8 INI text and discovered section/key names, no assumptions."""
+    ini = _game_ini_path(executable)
+    content = ini.read_bytes()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("INI is not UTF-8; edit it manually to preserve encoding") from exc
+    sections: list[dict[str, object]] = []
+    current: dict[str, object] = {"name": "General (before sections)", "keys": []}
+    for line in text.splitlines():
+        match = re.match(r"^\s*\[([^\]\r\n]{1,120})\]\s*$", line)
+        if match:
+            sections.append(current)
+            current = {"name": match.group(1).strip(), "keys": []}
+        else:
+            setting = re.match(r"^\s*([^;#\s][^=\r\n]{0,119}?)\s*=", line)
+            if setting:
+                keys = current["keys"]
+                if isinstance(keys, list) and len(keys) < 150:
+                    keys.append(setting.group(1).strip())
+    sections.append(current)
+    return {"text": text, "sha256": hashlib.sha256(content).hexdigest(),
+            "sections": sections[:150], "path": str(ini)}
+
+
+def save_game_ini(executable: Path, expected_sha: str, new_text: str) -> dict[str, str]:
+    """Optimistic-concurrency save with untouched backup outside the game.
+
+    Preserve unknown fields, whitespace and comments in the user-edited text.
+    Never update installer-owned file checksums or rewrite its backup manifest.
+    """
+    ini = _game_ini_path(executable)
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha):
+        raise ValueError("Invalid original INI checksum")
+    if not isinstance(new_text, str) or "\0" in new_text:
+        raise ValueError("Invalid INI content")
+    new_data = new_text.encode("utf-8")
+    if len(new_data) > 512 * 1024:
+        raise ValueError("INI content exceeds the 512 KiB limit")
+    if not re.search(r"^\s*\[[^\]\r\n]+\]", new_text, flags=re.MULTILINE):
+        raise ValueError("INI must contain at least one [section]")
+    original = ini.read_bytes()
+    if hashlib.sha256(original).hexdigest() != expected_sha.casefold():
+        raise ValueError("INI changed since it was opened. Reload before saving")
+    if original == new_data or original.lstrip(b"\xef\xbb\xbf") == new_data:
+        return {"status": "unchanged", "backup": "", "sha256": expected_sha.casefold()}
+    state_home = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+    folder_hash = hashlib.sha256(str(ini.parent.resolve()).encode("utf-8")).hexdigest()
+    backups = state_home / "amdnr" / "config-backups" / folder_hash
+    backups.mkdir(parents=True, exist_ok=True)
+    import datetime
+    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    with tempfile.NamedTemporaryFile(dir=backups, prefix=timestamp + "-",
+                                     suffix=".ini", delete=False) as copy:
+        backup = Path(copy.name)
+        os.chmod(backup, 0o600)
+        copy.write(original)
+        copy.flush()
+        os.fsync(copy.fileno())
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=ini.parent, prefix=".amdnr-ini-",
+                                         delete=False) as stream:
+            temporary = Path(stream.name)
+            os.chmod(temporary, ini.stat().st_mode & 0o777)
+            stream.write(new_data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Do not silently overwrite another process's more recent edit.
+        if hashlib.sha256(ini.read_bytes()).hexdigest() != expected_sha.casefold():
+            raise ValueError("INI changed while saving. Backup kept; reload first")
+        os.replace(temporary, ini)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return {"status": "saved", "backup": str(backup),
+            "sha256": hashlib.sha256(new_data).hexdigest()}
 
 
 def _preferred_exe_path(directory: Path) -> Path:
@@ -1515,6 +1683,11 @@ def main() -> int:
     parser.add_argument("--doctor-json", action="store_true", help="Read-only launcher and installation diagnostics")
     parser.add_argument("--installation-json", action="store_true", help="Inspect installed files, backups and archive origin")
     parser.add_argument("--installed-games-json", action="store_true", help="Read cached installation records without scanning game files")
+    parser.add_argument("--settings-json", action="store_true", help="Read persistent launcher preferences")
+    parser.add_argument("--save-settings-base64", metavar="JSON_B64", help="Save validated launcher preferences")
+    parser.add_argument("--ini-json", action="store_true", help="Read OptiScaler.ini beside --exe")
+    parser.add_argument("--save-ini-base64", metavar="TEXT_B64", help="Save OptiScaler.ini with backup")
+    parser.add_argument("--ini-expected-sha", metavar="SHA256", help="Checksum from previous --ini-json read")
     parser.add_argument("--exes-json", type=Path, metavar="GAME_DIR", help="Find game executable candidates")
     parser.add_argument("--exe-scan-json", type=Path, metavar="GAME_DIR", help="Scan Windows executables and report Linux-native builds")
     parser.add_argument("--steam-launch-json", type=Path, metavar="GAME_DIR", help="Read cached Steam launch configuration for game")
@@ -1564,6 +1737,37 @@ def main() -> int:
         try:
             print(json.dumps(installed_games_overview(), ensure_ascii=False))
         except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.settings_json or args.save_settings_base64 is not None:
+        try:
+            if args.settings_json:
+                print(json.dumps(launcher_settings(), ensure_ascii=False))
+            else:
+                import base64
+                payload = base64.b64decode(args.save_settings_base64, validate=True)
+                if len(payload) > 64 * 1024:
+                    raise ValueError("Settings payload too large")
+                print(json.dumps(save_launcher_settings(json.loads(payload)), ensure_ascii=False))
+        except (OSError, ValueError, TypeError, UnicodeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.ini_json or args.save_ini_base64 is not None:
+        if args.exe is None:
+            parser.error("--ini-json/--save-ini-base64 require --exe")
+        try:
+            if args.ini_json:
+                print(json.dumps(ini_snapshot(args.exe), ensure_ascii=False))
+            else:
+                if not args.ini_expected_sha:
+                    parser.error("--save-ini-base64 requires --ini-expected-sha")
+                import base64
+                payload = base64.b64decode(args.save_ini_base64, validate=True)
+                if len(payload) > 512 * 1024:
+                    raise ValueError("INI payload too large")
+                print(json.dumps(save_game_ini(args.exe, args.ini_expected_sha,
+                    payload.decode("utf-8")), ensure_ascii=False))
+        except (OSError, ValueError, TypeError, UnicodeError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     elif args.installation_json:
