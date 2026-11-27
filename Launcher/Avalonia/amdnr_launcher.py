@@ -2355,6 +2355,8 @@ def install(archive: Path, executable: Path, alias: str) -> str:
         raise ValueError("Choose the game's actual Windows .exe file")
     root = executable.resolve().parent
     state_file = root / STATE_NAME
+    if (root / ".amdnr-linux-transaction.json").exists() or (root / ".amdnr-linux-transaction.json").is_symlink():
+        raise ValueError("Interrupted AMDNR update exists; recover it before installing")
     if state_file.exists():
         raise ValueError("An installation is already recorded here; uninstall it first")
     with tempfile.TemporaryDirectory(prefix="amdnr-linux-") as work:
@@ -2415,6 +2417,8 @@ def install(archive: Path, executable: Path, alias: str) -> str:
 
 def uninstall(executable: Path) -> tuple[int, list[str]]:
     root = executable.resolve().parent
+    if (root / ".amdnr-linux-transaction.json").exists() or (root / ".amdnr-linux-transaction.json").is_symlink():
+        raise ValueError("Interrupted AMDNR update exists; recover it before uninstalling")
     state_file = root / STATE_NAME
     state = json.loads(state_file.read_text(encoding="utf-8"))
     if state.get("format") != 1 or not isinstance(state.get("files"), list):
