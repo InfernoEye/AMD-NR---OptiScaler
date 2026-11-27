@@ -260,6 +260,8 @@ public sealed class Backend
             root.GetProperty("file_count").GetInt32(),
             root.GetProperty("conflict_count").GetInt32(),
             root.GetProperty("too_many_files").GetBoolean(),
+            root.GetProperty("identical_count").GetInt32(),
+            root.GetProperty("new_file_count").GetInt32(),
             root.GetProperty("largest_files").EnumerateArray()
                 .Select(x => new ComponentFileSize(
                     x.GetProperty("name").GetString() ?? "",
@@ -537,7 +539,7 @@ public sealed record ComponentFileSize(string Name, long Bytes);
 public sealed record ComponentPreview(string Asset, IReadOnlyList<string> Files,
     IReadOnlyList<string> Conflicts, bool Installable, long ExtractedBytes,
     bool SafetyLimitExceeded, int FileCount, int ConflictCount, bool TooManyFiles,
-    IReadOnlyList<ComponentFileSize> LargestFiles);
+    int IdenticalCount, int NewFileCount, IReadOnlyList<ComponentFileSize> LargestFiles);
 
 public sealed record ExtensionEntry(string Name, long Bytes, bool Managed, bool Modified);
 public sealed record ExtensionInventory(string Folder,
