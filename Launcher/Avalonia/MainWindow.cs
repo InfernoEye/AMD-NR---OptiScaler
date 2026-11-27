@@ -2100,8 +2100,17 @@ public sealed class MainWindow : Window
                 _status.Text = "Component files installed: " + chosen.Asset +
                     ". Neural runtime detection is checked separately.";
                 runtimeReport.Children.Clear();
-                runtimeReport.Children.Add(Text(
-                    await _backend.RuntimeDiagnosticsAsync(selected), 12, MutedBrush));
+                try
+                {
+                    runtimeReport.Children.Add(Text(
+                        await _backend.RuntimeDiagnosticsAsync(selected), 12, MutedBrush));
+                }
+                catch (Exception ex)
+                {
+                    runtimeReport.Children.Add(Text(
+                        "Files installed; runtime diagnostics unavailable: " + ex.Message,
+                        12, MutedBrush));
+                }
                 previewedTag = null;
                 previewedAsset = null;
                 previewDetails.Children.Clear();
@@ -2125,8 +2134,17 @@ public sealed class MainWindow : Window
                 _status.Text = "Component files installed: " + chosen.Asset +
                     "; replaced originals backed up. Runtime presence checked below.";
                 runtimeReport.Children.Clear();
-                runtimeReport.Children.Add(Text(
-                    await _backend.RuntimeDiagnosticsAsync(selected), 12, MutedBrush));
+                try
+                {
+                    runtimeReport.Children.Add(Text(
+                        await _backend.RuntimeDiagnosticsAsync(selected), 12, MutedBrush));
+                }
+                catch (Exception ex)
+                {
+                    runtimeReport.Children.Add(Text(
+                        "Files installed; runtime diagnostics unavailable: " + ex.Message,
+                        12, MutedBrush));
+                }
                 previewedTag = null;
                 previewedAsset = null;
                 previewReplaceable = false;
