@@ -2043,6 +2043,7 @@ public sealed class MainWindow : Window
         string? compiler = null;
         string finalText = "";
         bool busy = false;
+        bool syncingInstalledRuntime = false;
         async Task LoadOptionalAddons()
         {
             if (_backend is null) return;
@@ -2162,6 +2163,13 @@ public sealed class MainWindow : Window
                 var root = doc.RootElement;
                 ready = root.GetProperty("prepared").GetBoolean();
                 bridgeInstalled = root.GetProperty("community_installed").GetBoolean();
+                if (bridgeInstalled && root.TryGetProperty("installed_runtime", out var actual) &&
+                    actual.ValueKind == JsonValueKind.String)
+                {
+                    syncingInstalledRuntime = true;
+                    try { addonDaniel.IsChecked = actual.GetString() == "0.6.0"; }
+                    finally { syncingInstalledRuntime = false; }
+                }
                 migrationPending = root.GetProperty("migration_pending").GetBoolean();
                 conflicts = root.GetProperty("conflicts").GetArrayLength() > 0;
                 replaceApproval.IsVisible = conflicts && !bridgeInstalled;
@@ -2306,7 +2314,10 @@ public sealed class MainWindow : Window
             }
             finally { busy = false; Buttons(); }
         };
-        addonDaniel.IsCheckedChanged += async (_, _) => { if (!busy) await Check(); };
+        addonDaniel.IsCheckedChanged += async (_, _) =>
+        {
+            if (!busy && !syncingInstalledRuntime) await Check();
+        };
         compilerApproval.IsCheckedChanged += (_, _) => Buttons();
         replaceApproval.IsCheckedChanged += (_, _) => Buttons();
         refresh.Click += async (_, _) => await Check();
