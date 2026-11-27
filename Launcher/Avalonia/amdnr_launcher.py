@@ -2652,6 +2652,10 @@ def main() -> int:
                         help="Read-only bounded discovery of GPU/Proton and local x64 compiler candidates")
     parser.add_argument("--bridge-status-json", action="store_true",
                         help="Read-only community ROCm bridge compatibility and conflict status")
+    parser.add_argument("--bridge-steam-preview-json", action="store_true",
+                        help="Read existing Steam launch options and compose the prepared Linux bridge wrapper")
+    parser.add_argument("--bridge-existing-options", type=str,
+                        help="Optional explicitly provided current Steam launch options for a manual preview")
     parser.add_argument("--bridge-check-updates-json", action="store_true",
                         help="Check upstream bridge releases; unknown versions require manual review")
     parser.add_argument("--bridge-runtime", choices=("lmxxf", "0.6.0", "0.5.1", "0.5.0", "0.4.3", "0.4.1", "0.4.0"),
@@ -2673,7 +2677,7 @@ def main() -> int:
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
-    if args.bridge_discover_json or args.bridge_status_json or args.bridge_check_updates_json or args.bridge_prepare is not None or args.bridge_install or args.bridge_remove or args.bridge_recover_migration:
+    if args.bridge_discover_json or args.bridge_status_json or args.bridge_steam_preview_json or args.bridge_check_updates_json or args.bridge_prepare is not None or args.bridge_install or args.bridge_remove or args.bridge_recover_migration:
         try:
             import community_bridge
             if args.bridge_discover_json:
@@ -2685,6 +2689,14 @@ def main() -> int:
                 result = community_bridge.status(args.exe, args.bridge_runtime)
             elif args.bridge_check_updates_json:
                 result = community_bridge.check_releases()
+            elif args.bridge_steam_preview_json:
+                if args.exe is None:
+                    parser.error("--bridge-steam-preview-json requires --exe")
+                from bridge_migration import game_root
+                report = steam_launch_options_for_directory(game_root(args.exe), "dxgi.dll")
+                result = community_bridge.steam_launch_preview(
+                    args.exe, steam_report=report,
+                    manual_options=args.bridge_existing_options)
             elif args.bridge_prepare is not None:
                 result = community_bridge.prepare(args.bridge_prepare, args.bridge_runtime)
             else:
