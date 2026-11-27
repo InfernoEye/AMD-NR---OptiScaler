@@ -2441,9 +2441,22 @@ public sealed class MainWindow : Window
                     "--approve-bridge-remove", "--exe", gameExe
                 });
                 if (exit != 0) throw new InvalidOperationException(result);
-                feedback.Text = "Force removal completed. Managed components removed: " +
-                    removed.Count + ". Modified files and prior AMDNR installations were " +
-                    "retained in recovery snapshots. Remove the bridge Steam launch option manually.";
+                using var report = JsonDocument.Parse(result);
+                bool prefixNeedsReview = report.RootElement.TryGetProperty(
+                    "prefix_recovery_required", out var prefix) && prefix.GetBoolean();
+                string recovery = "";
+                if (prefixNeedsReview &&
+                    report.RootElement.TryGetProperty("fallback", out var fallback) &&
+                    fallback.ValueKind == JsonValueKind.Object &&
+                    fallback.TryGetProperty("forced_quarantine", out var saved))
+                    recovery = " Recovery snapshot: " + (saved.GetString() ?? "");
+                feedback.Text = prefixNeedsReview
+                    ? "Recorded AMDNR game files quarantined; modified bytes preserved." +
+                      " The upstream manager could not finish Proton-prefix restoration." +
+                      " Review prefix recovery before another bridge install." + recovery
+                    : "Force removal completed. Managed components removed: " +
+                      removed.Count + ". Modified files and prior AMDNR installations were " +
+                      "retained in recovery snapshots. Remove the bridge Steam launch option manually.";
                 steamPanel.IsVisible = false;
                 await Check();
                 await LoadOptionalAddons();
