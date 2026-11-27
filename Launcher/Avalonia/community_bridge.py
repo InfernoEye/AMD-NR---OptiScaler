@@ -486,8 +486,8 @@ def install(exe: Path, approved: bool, runtime: str = "lmxxf", *, replace_existi
     if not report["prepared"]:
         raise ValueError("Prepare the checksum-verified community package first.")
     if report["conflicts"] and not replace_existing:
-        raise ValueError("Existing game hooks require explicit backup-and-replace approval:\\n" +
-                         "\\n".join(report["conflicts"]))
+        raise ValueError("Existing game hooks require explicit backup-and-replace approval:\n" +
+                         "\n".join(report["conflicts"]))
     manager = source_path() / "linux/manage.py"
     if not manager.is_file():
         raise ValueError("Verified community management tool is missing.")
@@ -504,8 +504,8 @@ def install(exe: Path, approved: bool, runtime: str = "lmxxf", *, replace_existi
         finished = subprocess.run(command, cwd=source_path(), text=True,
                                   capture_output=True, timeout=300, check=False)
         if finished.returncode:
-            raise ValueError("Community manager refused installation:\\n" +
-                             (finished.stdout + "\\n" + finished.stderr)[-4000:])
+            raise ValueError("Community manager refused installation:\n" +
+                             (finished.stdout + "\n" + finished.stderr)[-4000:])
     except Exception as error:
         if snapshot is not None:
             from bridge_migration import restore_snapshot
