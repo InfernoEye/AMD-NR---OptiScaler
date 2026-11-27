@@ -1909,13 +1909,50 @@ public sealed class MainWindow : Window
         };
         official.Children.Add(checkRuntimes);
         var prepareMochi = Button("PREPARE MOCHI MODEL (LOCAL NVIDIA DLL)");
+        var fetchMochi = Button("USE UNOFFICIAL MIRROR & PREPARE MOCHI");
         official.Children.Add(Text(
             "Mochi 0.0.9 needs a locally prepared model. Select your own " +
             "nvngx_dlssnr.dll 310.9.16 or 310.8.0 (or a ZIP containing it). " +
             "The Linux extractor verifies source and model weights; NVIDIA files are never downloaded by this action.",
             12, MutedBrush));
         official.Children.Add(prepareMochi);
+        official.Children.Add(Text(
+            "Optional third-party source: RankFTW/rhi-repo. Not operated by NVIDIA or AMDNR; " +
+            "redistribution authorization has not been verified. By choosing the button below, " +
+            "you request a temporary download of that community mirror's pinned ZIP. " +
+            "The ZIP and NVIDIA DLL must BOTH match fixed SHA-256 values before local model preparation. " +
+            "No NVIDIA binary is installed or kept. Manual import above remains available.",
+            12, MutedBrush));
+        official.Children.Add(fetchMochi);
         official.Children.Add(runtimeReport);
+        fetchMochi.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null) return;
+            _busy = true;
+            fetchMochi.IsEnabled = false;
+            prepareMochi.IsEnabled = false;
+            _status.Text = "Verifying optional community ZIP + NVIDIA DLL, preparing local Mochi model…";
+            try
+            {
+                var report = await _backend.PrepareMochiFromCommunityAsync(selected);
+                if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                runtimeReport.Children.Clear();
+                runtimeReport.Children.Add(Text(report, 12, ForegroundBrush));
+                runtimeReport.Children.Add(Text(
+                    await _backend.RuntimeDiagnosticsAsync(selected), 12, MutedBrush));
+                _status.Text = "Verified Mochi model prepared. Restart Deadlock to test runtime availability.";
+            }
+            catch (Exception ex)
+            {
+                _status.Text = "Community model preparation refused: " + ex.Message;
+            }
+            finally
+            {
+                _busy = false;
+                fetchMochi.IsEnabled = true;
+                prepareMochi.IsEnabled = true;
+            }
+        };
         prepareMochi.Click += async (_, _) =>
         {
             if (_busy || _backend is null) return;
