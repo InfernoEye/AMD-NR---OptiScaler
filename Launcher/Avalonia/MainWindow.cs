@@ -33,6 +33,9 @@ public sealed class MainWindow : Window
     private string _currentSection = "Library";
     private GameEntry? _selectedGame;
     private IReadOnlyList<ExecutableEntry> _exeCandidates = Array.Empty<ExecutableEntry>();
+    private IReadOnlyList<string> _nativeExecutables = Array.Empty<string>();
+    private string _exeScanReason = "";
+    private bool _exeScanPartial;
     private bool _showAlternativeExecutables;
     private readonly Dictionary<string, Button> _navigation = new();
     private Backend? _backend;
@@ -395,6 +398,9 @@ public sealed class MainWindow : Window
         _selectedFolder = game.Folder;
         _exe = null;
         _exeCandidates = Array.Empty<ExecutableEntry>();
+        _nativeExecutables = Array.Empty<string>();
+        _exeScanReason = "";
+        _exeScanPartial = false;
         _showAlternativeExecutables = false;
         ShowGameDetails();
         await FindExecutablesAsync(game);
@@ -407,10 +413,14 @@ public sealed class MainWindow : Window
         _status.Text = "Finding game executable candidates…";
         try
         {
-            var results = await _backend.ExecutablesAsync(game.Folder);
+            var scan = await _backend.ScanExecutablesAsync(game.Folder);
+            var results = scan.Candidates;
             // Do not navigate to a different game after an asynchronous scan.
             if (_selectedGame?.Folder != game.Folder) return;
             _exeCandidates = results;
+            _nativeExecutables = scan.NativeFiles;
+            _exeScanReason = scan.Reason;
+            _exeScanPartial = scan.Partial;
             var saved = await _backend.SavedExecutableAsync(game.Folder);
             if (_selectedGame?.Folder != game.Folder) return;
             var chosen = saved ?? results.FirstOrDefault(e => e.AutoSelect)?.Path;
@@ -420,7 +430,11 @@ public sealed class MainWindow : Window
                 : chosen is not null
                     ? "Automatically selected likely game executable: " + Path.GetFileName(chosen)
                     : results.Count == 0
-                        ? "No Windows executable detected. Choose one manually."
+                        ? scan.Reason == "native_linux_files"
+                            ? "Native Linux executables found; no Windows .exe detected."
+                            : scan.Partial
+                                ? "No Windows EXE found; some folders could not be scanned."
+                                : "No Windows executable detected. Choose one manually."
                         : "Several possible executables found. Select the correct one.";
             ShowGameDetails();
         }
@@ -539,11 +553,19 @@ public sealed class MainWindow : Window
         else
         {
             detail.Children.Add(Text(_busy ? "Scanning game folder for Windows executables…"
-                : "No executable confirmed. Find or browse to the game EXE.",
-                14, MutedBrush));
+                : _exeScanReason == "native_linux_files"
+                    ? "This installation appears to be a native Linux game. No Windows .exe was found. " +
+                      "AMDNR's Windows DLL cannot be installed into a native Linux executable."
+                    : _exeScanPartial
+                        ? "No Windows EXE found. The scan was incomplete; browse manually or check permissions."
+                        : "No Windows executable detected. This may be a Linux-native build or a game " +
+                          "with files located outside the scanned folder.", 14, MutedBrush));
+            if (_nativeExecutables.Count > 0)
+                detail.Children.Add(Text("Linux executable examples: " +
+                    string.Join(", ", _nativeExecutables.Take(3)), 12, MutedBrush));
         }
 
-        detail.Children.Add(Text("Likely game executables are selected automatically. " +
+        detail.Children.Add(Text("Likely Windows game executables are selected automatically. " +
             "Your manual choice is remembered per game. Check the path before installing.", 12, MutedBrush));
 
         var exeActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
