@@ -2242,7 +2242,6 @@ public sealed class MainWindow : Window
                 return;
             _busy = true;
             previewDaniel.IsEnabled = false;
-            installDaniel.IsEnabled = false;
             replaceDaniel.IsEnabled = false;
             danielCanReplace = false;
             previewedDanielTag = null;
@@ -2261,7 +2260,7 @@ public sealed class MainWindow : Window
                         "The launcher will support this version once the required " +
                         "Proton GPU bridge exists; no files were changed.",
                         12, MutedBrush));
-                    _status.Text = "Daniel 0.8.0 requires the NeuralHub-specific installation workflow.";
+                    _status.Text = "Daniel 0.8.0 cannot initialize under current Proton GPU bridge.";
                 }
                 else
                 {
