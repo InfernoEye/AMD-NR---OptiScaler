@@ -48,6 +48,8 @@ public sealed class MainWindow : Window
     private string? _exe;
     private string? _archive;
     private string _alias = "dxgi.dll";
+    private LauncherSettings? _launcherSettings;
+    private bool _launcherSettingsLoaded;
     private TextBox? _exeBox;
     private TextBox? _archiveBox;
     private TextBlock? _installationStatus;
@@ -104,7 +106,11 @@ public sealed class MainWindow : Window
         try { _backend = new Backend(); }
         catch (Exception ex) { _status.Text = ex.Message; }
         ShowLibrary();
-        Opened += async (_, _) => await RefreshGamesAsync();
+        Opened += async (_, _) =>
+        {
+            await LoadLauncherSettingsAsync();
+            await RefreshGamesAsync();
+        };
     }
 
     private static IBrush Brush(string hex) => new SolidColorBrush(Color.Parse(hex));
@@ -999,6 +1005,12 @@ public sealed class MainWindow : Window
         doctor.Click += (_, _) => ShowDoctor();
         actions.Children.Add(doctor);
         summary.Children.Add(actions);
+        if (_exe is not null && File.Exists(_exe))
+        {
+            var configure = Button("CONFIGURE AMDNR");
+            configure.Click += (_, _) => ShowGameConfiguration();
+            summary.Children.Add(configure);
+        }
         var coverButton = Button("CHANGE COVER ART");
         coverButton.Click += async (_, _) =>
         {
@@ -1359,11 +1371,13 @@ public sealed class MainWindow : Window
             try
             {
                 var entries = await _backend.ReleasesAsync();
-                releases.ItemsSource = entries;
-                releases.SelectedIndex = entries.Count > 0 ? 0 : -1;
-                download.IsEnabled = entries.Count > 0;
-                _status.Text = entries.Count > 0
-                    ? $"Found {entries.Count} upstream AMDNR ZIP builds."
+                var visible = _launcherSettings?.ShowPrereleases == true
+                    ? entries : entries.Where(e => !e.Prerelease).ToList();
+                releases.ItemsSource = visible;
+                releases.SelectedIndex = visible.Count > 0 ? 0 : -1;
+                download.IsEnabled = visible.Count > 0;
+                _status.Text = visible.Count > 0
+                    ? $"Found {visible.Count} upstream AMDNR ZIP builds."
                     : "No verified upstream release ZIPs found.";
             }
             catch (Exception ex) { _status.Text = "Release lookup failed: " + ex.Message; }
@@ -1683,18 +1697,192 @@ public sealed class MainWindow : Window
             13, MutedBrush));
     }
 
-    private void ShowSettings()
+    private async Task LoadLauncherSettingsAsync()
+    {
+        if (_backend is null || _launcherSettingsLoaded) return;
+        try
+        {
+            _launcherSettings = await _backend.SettingsAsync();
+            _alias = _launcherSettings.DefaultAlias;
+            _launcherSettingsLoaded = true;
+        }
+        catch (Exception ex) { _status.Text = "Launcher preferences unavailable: " + ex.Message; }
+    }
+
+    private async void ShowGameConfiguration()
+    {
+        Clear("Library");
+        _breadcrumb.Text = "AMDNR  /  Game Configuration";
+        _content.Children.Add(Text("AMDNR Configuration", 30, ForegroundBrush, FontWeight.Bold));
+        var back = Button("←  BACK TO GAME");
+        back.Click += (_, _) => ShowGameDetails();
+        _content.Children.Add(back);
+        if (_backend is null || string.IsNullOrWhiteSpace(_exe) || !File.Exists(_exe))
+        {
+            _content.Children.Add(Text("Select a Windows executable first.", 14, MutedBrush));
+            return;
+        }
+        var exe = _exe;
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(Text("Loading OptiScaler.ini…", 14, MutedBrush));
+        _content.Children.Add(Panel(panel));
+        try
+        {
+            var snapshot = await _backend.ReadIniAsync(exe);
+            if (_selectedGame is null || _exe != exe) return;
+            panel.Children.Clear();
+            panel.Children.Add(Text("CONFIGURATION SECTIONS", 12, AccentBrush, FontWeight.Bold));
+            var sections = snapshot.Sections
+                .Where(s => s.Keys.Count > 0 || s.Name != "General (before sections)")
+                .Select(s => s.Name + $" ({s.Keys.Count} settings)")
+                .ToArray();
+            panel.Children.Add(Text(sections.Length == 0 ? "No named settings found." :
+                string.Join("  ·  ", sections), 12, MutedBrush));
+            panel.Children.Add(Text("Edit the original INI text below. Comments and unknown " +
+                "settings are preserved. Save creates an independent backup and refuses " +
+                "to overwrite changes made by another application.", 13, MutedBrush));
+            var editor = new TextBox
+            {
+                Text = snapshot.Text,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.NoWrap,
+                MinHeight = 340,
+                MaxHeight = 560,
+                FontFamily = new FontFamily("monospace"),
+                Background = BackgroundBrush,
+                Foreground = ForegroundBrush,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            };
+            panel.Children.Add(editor);
+            var outcome = Text("No changes saved.", 12, MutedBrush);
+            var buttons = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+            var save = Button("SAVE CONFIGURATION", true);
+            save.Click += async (_, _) =>
+            {
+                if (_backend is null || _busy) return;
+                _busy = true;
+                save.IsEnabled = false;
+                try
+                {
+                    var result = await _backend.SaveIniAsync(exe, snapshot.Sha256,
+                        editor.Text ?? "");
+                    _status.Text = result.Status == "saved"
+                        ? "INI saved. Backup: " + result.Backup
+                        : "INI unchanged.";
+                    outcome.Text = _status.Text;
+                    if (result.Status == "saved")
+                    {
+                        // A fresh checksum is required for subsequent edits.
+                        var latest = await _backend.ReadIniAsync(exe);
+                        snapshot = latest;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    outcome.Text = "Save refused: " + ex.Message;
+                    _status.Text = outcome.Text;
+                }
+                finally { _busy = false; save.IsEnabled = true; }
+            };
+            buttons.Children.Add(save);
+            var reload = Button("RELOAD FROM DISK");
+            reload.Click += async (_, _) =>
+            {
+                if (_backend is null) return;
+                try
+                {
+                    snapshot = await _backend.ReadIniAsync(exe);
+                    editor.Text = snapshot.Text;
+                    outcome.Text = "Reloaded configuration from disk.";
+                }
+                catch (Exception ex) { outcome.Text = "Reload failed: " + ex.Message; }
+            };
+            buttons.Children.Add(reload);
+            panel.Children.Add(buttons);
+            panel.Children.Add(outcome);
+        }
+        catch (Exception ex)
+        {
+            panel.Children.Clear();
+            panel.Children.Add(Text("Unable to open configuration: " + ex.Message, 14, MutedBrush));
+            panel.Children.Add(Text("The editor requires a regular UTF-8 OptiScaler.ini " +
+                "beside the selected game executable.", 13, MutedBrush));
+        }
+    }
+
+    private async void ShowSettings()
     {
         Clear("Settings");
         _content.Children.Add(Text("Settings", 30, ForegroundBrush, FontWeight.Bold));
-        var details = new StackPanel { Spacing = 10 };
-        details.Children.Add(Text("Linux integration", 18, ForegroundBrush, FontWeight.Bold));
-        details.Children.Add(Text("The native desktop interface uses the independent Python " +
-            "installation backend. Use AMDNR_LINUX_BACKEND to set a custom backend path.",
-            14, MutedBrush));
-        details.Children.Add(Text("Downloads and updates are intentionally manual in this build. " +
-            "Use a trusted AMDNR release archive.", 14, MutedBrush));
-        _content.Children.Add(Panel(details));
+        _content.Children.Add(Text("Persistent Linux launcher preferences. " +
+            "Nothing here changes the original Windows launcher.", 14, MutedBrush));
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(Text("Loading preferences…", 14, MutedBrush));
+        _content.Children.Add(Panel(panel));
+        if (_backend is null) return;
+        try
+        {
+            var config = await _backend.SettingsAsync();
+            if (_currentSection != "Settings") return;
+            _launcherSettings = config;
+            _launcherSettingsLoaded = true;
+            panel.Children.Clear();
+            panel.Children.Add(Text("DEFAULT PROXY DLL", 12, AccentBrush, FontWeight.Bold));
+            var aliases = new[] { "dxgi.dll", "version.dll", "winmm.dll", "winhttp.dll",
+                "wininet.dll", "dbghelp.dll", "d3d12.dll", "OptiScaler.asi" };
+            var choice = new ComboBox
+            {
+                ItemsSource = aliases,
+                SelectedItem = config.DefaultAlias,
+                Width = 235,
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            panel.Children.Add(choice);
+            panel.Children.Add(Text("RELEASE DOWNLOAD DIRECTORY", 12, AccentBrush, FontWeight.Bold));
+            var download = new TextBox
+            {
+                Text = config.DownloadDirectory,
+                Background = BackgroundBrush,
+                Foreground = ForegroundBrush,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            panel.Children.Add(download);
+            var prerelease = new CheckBox
+            {
+                Content = "Show prerelease builds in the release picker",
+                IsChecked = config.ShowPrereleases,
+                Foreground = ForegroundBrush,
+            };
+            panel.Children.Add(prerelease);
+            panel.Children.Add(Text("Downloads remain manual and checksum-verified. " +
+                "Settings are saved under your XDG configuration directory.", 12, MutedBrush));
+            var save = Button("SAVE PREFERENCES", true);
+            save.Click += async (_, _) =>
+            {
+                if (_busy || _backend is null) return;
+                _busy = true;
+                save.IsEnabled = false;
+                try
+                {
+                    _launcherSettings = await _backend.SaveSettingsAsync(new LauncherSettings(
+                        choice.SelectedItem?.ToString() ?? config.DefaultAlias,
+                        download.Text ?? "",
+                        prerelease.IsChecked == true));
+                    _alias = _launcherSettings.DefaultAlias;
+                    _status.Text = "Launcher preferences saved.";
+                }
+                catch (Exception ex) { _status.Text = "Preferences not saved: " + ex.Message; }
+                finally { _busy = false; save.IsEnabled = true; }
+            };
+            panel.Children.Add(save);
+        }
+        catch (Exception ex)
+        {
+            panel.Children.Clear();
+            panel.Children.Add(Text("Preferences unavailable: " + ex.Message, 13, MutedBrush));
+        }
     }
 
     private async Task ReloadGamesAsync()
