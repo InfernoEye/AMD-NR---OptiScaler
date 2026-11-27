@@ -55,6 +55,40 @@ public sealed class Backend
             ? text.Trim() : (text + Environment.NewLine + errorText).Trim());
     }
 
+    public async Task<IReadOnlyList<IndexedGameEntry>> DifferentialGamesAsync(
+        CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] { "--library-differential-json" }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var games = new List<IndexedGameEntry>();
+        foreach (var item in document.RootElement.EnumerateArray())
+        {
+            var name = item.GetProperty("name").GetString();
+            var folder = item.GetProperty("folder").GetString();
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(folder))
+                continue;
+            var artwork = item.TryGetProperty("artwork", out var art) &&
+                art.ValueKind == JsonValueKind.String ? art.GetString() : null;
+            var executable = item.TryGetProperty("executable", out var exe) &&
+                exe.ValueKind == JsonValueKind.String ? exe.GetString() : null;
+            games.Add(new IndexedGameEntry(
+                new GameEntry(name, folder,
+                    artwork is not null && File.Exists(artwork) ? artwork : null,
+                    item.GetProperty("custom").GetBoolean()),
+                executable is not null && File.Exists(executable) ? executable : null));
+        }
+        return games;
+    }
+
+    public async Task IndexLibraryExecutableAsync(string folder, string executable,
+        CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(
+            new[] { "--library-index-exe", folder, "--exe", executable }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+    }
+
     public async Task<IReadOnlyList<GameEntry>> GamesAsync(CancellationToken token = default)
     {
         var result = await RunAsync(new[] { "--list-json", "--download-artwork" }, token);
@@ -247,6 +281,8 @@ public sealed class Backend
 }
 
 public sealed record GameEntry(string Name, string Folder, string? Artwork, bool Custom = false);
+
+public sealed record IndexedGameEntry(GameEntry Game, string? Executable);
 
 public sealed record LibraryAuditEntry(string Folder, string Status, string? Executable,
     bool InstalledRecord, bool Custom, string? Source);
