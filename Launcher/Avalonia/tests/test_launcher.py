@@ -45,7 +45,8 @@ class LauncherTests(unittest.TestCase):
         with patch.object(launcher, "steam_games", return_value=[
             ("WindowsGame", steam_folder), ("LinuxGame", native_folder)
         ]), patch.object(launcher, "custom_games", return_value=custom), \
-                patch.object(launcher, "steam_launch_for_directory", return_value=metadata), \
+                patch.object(launcher, "steam_launch_for_directory", side_effect=lambda folder:
+                             metadata if folder == steam_folder else {"selected": None}), \
                 patch.object(launcher, "saved_executable", side_effect=lambda folder:
                              str(custom_exe) if folder == custom_folder else None):
             audit = launcher.library_audit()
