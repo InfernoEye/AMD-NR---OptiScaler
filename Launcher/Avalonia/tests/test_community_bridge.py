@@ -47,7 +47,7 @@ class BridgeTests(unittest.TestCase):
         fake = bytearray(70000)
         fake[:2] = b"MZ"
         struct.pack_into("<I", fake, 0x3c, 128)
-        fake[128:132] = b"PE\\x00\\x00".replace(b"\\x00", b"\\0")
+        fake[128:132] = b"PE" + bytes([0, 0])
         struct.pack_into("<H", fake, 132, 0x8664 if x64 else 0x14c)
         struct.pack_into("<H", fake, 152, 0x20b if x64 else 0x10b)
         path.write_bytes(fake)
