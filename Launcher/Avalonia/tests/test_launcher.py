@@ -400,6 +400,58 @@ class LauncherTests(unittest.TestCase):
             self.assertFalse((self.game / "components" / "LICENSE.txt").exists())
             self.assertEqual(launcher.installed_components(self.exe), [])
 
+    def test_approved_modified_component_removal_preserves_changed_bytes(self):
+        tag, asset = "Alpha1", "AMDNR-lmxxf-test.zip"
+        archive = self.root / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("components/runtime.dll", b"official runtime")
+        state = self.root / "state"
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}),
+              patch.object(launcher, "download_release", return_value=archive)):
+            launcher.install_component(self.exe, tag, asset)
+            changed = self.game / "components/runtime.dll"
+            changed.write_bytes(b"modified by user")
+            with self.assertRaisesRegex(ValueError, "approval"):
+                launcher.remove_component(self.exe, asset)
+            result = launcher.remove_component(self.exe, asset, backup_modified=True)
+            self.assertFalse(changed.exists())
+            self.assertEqual(launcher.installed_components(self.exe), [])
+            backup = Path(result["preserved_modified"])
+            self.assertTrue(backup.is_dir())
+            self.assertEqual((backup / "components/runtime.dll").read_bytes(),
+                             b"modified by user")
+            self.assertEqual(json.loads((backup / "manifest.json").read_text())["asset"], asset)
+
+    def test_approved_missing_managed_file_can_remove_record(self):
+        tag, asset = "Alpha1", "AMDNR-WrongGPU-test.zip"
+        archive = self.root / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("components/runtime.dll", b"official")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive)):
+            launcher.install_component(self.exe, tag, asset)
+            (self.game / "components/runtime.dll").unlink()
+            outcome = launcher.remove_component(self.exe, asset, backup_modified=True)
+            self.assertEqual(launcher.installed_components(self.exe), [])
+            receipt = json.loads((Path(outcome["preserved_modified"]) / "manifest.json").read_text())
+            self.assertTrue(receipt["files"][0]["missing"])
+
+    def test_approved_modified_replacement_restores_original(self):
+        tag, asset = "Alpha1", "AMDNR-WrongGPU-test.zip"
+        archive = self.root / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("runtime.dll", b"component")
+        dest = self.game / "runtime.dll"
+        dest.write_bytes(b"old game file")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive)):
+            launcher.install_component(self.exe, tag, asset, replace_conflicts=True)
+            dest.write_bytes(b"later modification")
+            outcome = launcher.remove_component(self.exe, asset, backup_modified=True)
+            self.assertEqual(dest.read_bytes(), b"old game file")
+            self.assertEqual((Path(outcome["preserved_modified"]) / "runtime.dll").read_bytes(),
+                             b"later modification")
+
     def test_large_file_count_archive_is_installable_within_limit(self):
         tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
         archive = self.root / asset
