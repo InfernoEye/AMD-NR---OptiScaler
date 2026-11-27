@@ -1307,31 +1307,78 @@ public sealed class MainWindow : Window
 
     private Control BuildGameTile(GameEntry game)
     {
-        var stack = new StackPanel { Width = 246, Spacing = 8 };
-        stack.Children.Add(GameArtwork(game, 161, fill: true));
+        // Artwork first, like the official launcher; all actions remain
+        // keyboard/controller accessible and never install on selection.
+        var stack = new StackPanel { Width = 292, Spacing = 7 };
+        var artFrame = new Grid { Height = 178, ClipToBounds = true };
+        artFrame.Children.Add(GameArtwork(game, 178, fill: true));
+        var artHeader = new Border
+        {
+            Background = Brush("#DB161418"),
+            Padding = new Thickness(9, 5),
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+                Children =
+                {
+                    Text("●  AMDNR LINUX", 10, AccentBrush, FontWeight.Bold),
+                },
+            },
+        };
+        var platformText = Text(game.Custom ? "CUSTOM" : "STEAM", 10, MutedBrush);
+        Grid.SetColumn(platformText, 1);
+        ((Grid)artHeader.Child!).Children.Add(platformText);
+        artFrame.Children.Add(artHeader);
+        stack.Children.Add(artFrame);
+
+        var info = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            ColumnSpacing = 8, Margin = new Thickness(3, 0, 3, 0) };
+        var details = new StackPanel { Spacing = 3 };
         var title = Text(game.Name, 15, ForegroundBrush, FontWeight.SemiBold);
         title.MaxLines = 2;
-        stack.Children.Add(title);
+        details.Children.Add(title);
         if (_libraryAudit.TryGetValue(Path.GetFullPath(game.Folder), out var audit))
         {
-            stack.Children.Add(Text(audit.InstalledRecord ? "● AMDNR recorded" :
+            details.Children.Add(Text(audit.InstalledRecord ? "● AMDNR recorded" :
                 audit.Status == "windows_ready" ? "● Windows game ready" :
                 audit.Status == "native_linux" ? "● Native Linux" :
                 "○ Needs review", 11, audit.InstalledRecord ? AccentBrush : MutedBrush));
         }
         else
-        {
-            stack.Children.Add(Text(game.Custom ? "CUSTOM GAME" : "STEAM GAME",
+            details.Children.Add(Text(game.Custom ? "Custom game" : "Steam game",
                 11, MutedBrush));
-        }
-        var choose = Button(UiLanguage.Translate("Select game").ToUpperInvariant() + " →");
-        choose.HorizontalAlignment = HorizontalAlignment.Stretch;
-        choose.HorizontalContentAlignment = HorizontalAlignment.Center;
+        info.Children.Add(details);
+        var choose = Button("→", true);
+        choose.VerticalAlignment = VerticalAlignment.Center;
+        choose.Padding = new Thickness(13, 9);
+        choose.ToolTip = null;
         choose.Click += (_, _) => SelectGame(game);
-        stack.Children.Add(choose);
-        var tile = Panel(stack, new Thickness(11));
-        tile.PointerEntered += (_, _) => tile.BorderBrush = AccentBrush;
-        tile.PointerExited += (_, _) => tile.BorderBrush = LineBrush;
+        Grid.SetColumn(choose, 1);
+        info.Children.Add(choose);
+        stack.Children.Add(info);
+
+        var tile = Panel(stack, new Thickness(9));
+        tile.PointerEntered += (_, _) =>
+        {
+            tile.BorderBrush = AccentBrush;
+            choose.Content = UiLanguage.Current == "pl" ? "WYBIERZ →" : "SELECT →";
+        };
+        tile.PointerExited += (_, _) =>
+        {
+            tile.BorderBrush = LineBrush;
+            if (!choose.IsFocused) choose.Content = "→";
+        };
+        choose.GotFocus += (_, _) =>
+        {
+            tile.BorderBrush = AccentBrush;
+            choose.Content = UiLanguage.Current == "pl" ? "WYBIERZ →" : "SELECT →";
+        };
+        choose.LostFocus += (_, _) =>
+        {
+            tile.BorderBrush = LineBrush;
+            choose.Content = "→";
+        };
         return tile;
     }
 
