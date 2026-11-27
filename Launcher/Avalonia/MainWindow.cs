@@ -42,6 +42,9 @@ public sealed class MainWindow : Window
     private string _alias = "dxgi.dll";
     private TextBox? _exeBox;
     private TextBox? _archiveBox;
+    private TextBlock? _installationStatus;
+    private Button? _installAction;
+    private Button? _uninstallAction;
     private ComboBox? _aliasBox;
     private bool _busy;
     private string _libraryQuery = "";
@@ -639,7 +642,11 @@ public sealed class MainWindow : Window
             Text = _exe ?? "", Watermark = "/path/to/game/Binaries/Win64/Game.exe",
             Background = BackgroundBrush, Foreground = ForegroundBrush,
         };
-        _exeBox.TextChanged += (_, _) => _exe = _exeBox.Text;
+        _exeBox.TextChanged += (_, _) =>
+        {
+            _exe = _exeBox.Text;
+            RefreshInstallStatus();
+        };
         exeRow.Children.Add(_exeBox);
         var browseExe = Button("Browse");
         browseExe.Click += async (_, _) =>
@@ -740,6 +747,13 @@ public sealed class MainWindow : Window
         archiveRow.Children.Add(browseZip);
         section.Children.Add(archiveRow);
 
+        var installStatus = new StackPanel { Spacing = 6 };
+        installStatus.Children.Add(Text("INSTALLATION STATUS", 11, AccentBrush, FontWeight.Bold));
+        _installationStatus = Text("", 14, ForegroundBrush);
+        installStatus.Children.Add(_installationStatus);
+        section.Children.Add(Panel(installStatus, new Thickness(14)));
+        RefreshInstallStatus();
+
         section.Children.Add(Text("PROXY DLL NAME", 11, MutedBrush, FontWeight.Bold));
         var aliases = new[] { "dxgi.dll", "version.dll", "winmm.dll", "winhttp.dll",
             "wininet.dll", "dbghelp.dll", "d3d12.dll", "OptiScaler.asi" };
@@ -754,13 +768,16 @@ public sealed class MainWindow : Window
         section.Children.Add(_aliasBox);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         var installButton = Button("Install AMDNR", true);
+        _installAction = installButton;
         installButton.Click += async (_, _) => await ExecuteAsync(true);
         var uninstallButton = Button("Uninstall / restore");
+        _uninstallAction = uninstallButton;
         uninstallButton.Click += async (_, _) => await ExecuteAsync(false);
         buttons.Children.Add(installButton);
         buttons.Children.Add(uninstallButton);
         section.Children.Add(buttons);
         _content.Children.Add(Panel(section));
+        RefreshInstallStatus();
 
         var help = new StackPanel { Spacing = 8 };
         help.Children.Add(Text("Proton launch options", 18, ForegroundBrush, FontWeight.Bold));
@@ -796,6 +813,48 @@ public sealed class MainWindow : Window
         return files.FirstOrDefault()?.TryGetLocalPath();
     }
 
+    private void RefreshInstallStatus()
+    {
+        if (_installationStatus is null) return;
+        bool validExe = !string.IsNullOrWhiteSpace(_exe) && File.Exists(_exe);
+        bool hasRecord = validExe && HasInstallRecord();
+        if (!validExe)
+            _installationStatus.Text = "No game executable selected.";
+        else if (!hasRecord)
+            _installationStatus.Text = "Not installed by this Linux launcher for the selected executable.";
+        else
+        {
+            try
+            {
+                var path = Path.Combine(Path.GetDirectoryName(_exe!)!,
+                    ".amdnr-linux-install.json");
+                using var record = JsonDocument.Parse(File.ReadAllText(path));
+                var state = record.RootElement;
+                if (!state.TryGetProperty("format", out var version) ||
+                    version.GetInt32() != 1 ||
+                    !state.TryGetProperty("files", out var files) ||
+                    files.ValueKind != JsonValueKind.Array)
+                    throw new JsonException("Invalid installation format");
+                var alias = state.TryGetProperty("alias", out var dll)
+                    ? dll.GetString() ?? "unknown" : "unknown";
+                _installationStatus.Text = $"Installation recorded · {alias} · " +
+                    $"{files.GetArrayLength()} tracked files. Use Doctor to verify integrity.";
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                _installationStatus.Text = "Installation record found but cannot be read. " +
+                    "Run Doctor before making changes.";
+            }
+        }
+        if (_installAction is not null)
+        {
+            _installAction.IsEnabled = validExe && !hasRecord && !_busy;
+            _installAction.Content = hasRecord ? "Already installed" : "Install AMDNR";
+        }
+        if (_uninstallAction is not null)
+            _uninstallAction.IsEnabled = validExe && hasRecord && !_busy;
+    }
+
     private async Task ExecuteAsync(bool install)
     {
         if (_busy) return;
@@ -822,10 +881,12 @@ public sealed class MainWindow : Window
                 ? new[] { "--install", _archive!, "--exe", _exe!, "--alias", _alias }
                 : new[] { "--uninstall", "--exe", _exe! };
             var (exit, output) = await _backend.RunAsync(args);
-            _status.Text = exit == 0 ? output : $"Operation returned {exit}: {output}";
+            _status.Text = exit == 0
+                ? (install ? "Installation completed. " : "Uninstall completed. ") + output
+                : $"Operation returned {exit}: {output}";
         }
         catch (Exception ex) { _status.Text = $"Operation failed: {ex.Message}"; }
-        finally { _busy = false; }
+        finally { _busy = false; RefreshInstallStatus(); }
     }
 
     private void ShowDoctor()
