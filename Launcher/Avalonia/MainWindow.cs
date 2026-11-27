@@ -2380,13 +2380,16 @@ public sealed class MainWindow : Window
                 }
                 var (exit, result) = await _backend.RunAsync(new[]
                 {
-                    "--bridge-remove", "--approve-bridge-remove", "--exe", gameExe
+                    "--bridge-remove", "--bridge-remove-all",
+                    "--approve-bridge-remove", "--exe", gameExe
                 });
                 if (exit != 0) throw new InvalidOperationException(result);
-                feedback.Text = "AMDNR Linux bridge removed, managed add-ons restored (" +
-                    removed.Count + "). Remove the old wrapper from Steam launch options.";
+                feedback.Text = "AMDNR Linux bridge and " + removed.Count +
+                    " managed components removed. Earlier installations remain only " +
+                    "in recovery snapshots. Remove the old wrapper from Steam launch options.";
                 steamPanel.IsVisible = false;
                 await Check();
+                await LoadOptionalAddons();
             }
             catch (Exception ex)
             {
