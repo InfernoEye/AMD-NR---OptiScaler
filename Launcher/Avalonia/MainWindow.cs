@@ -315,7 +315,8 @@ public sealed class MainWindow : Window
         };
 
     private static Button Button(string label, bool primary = false)
-        => new()
+    {
+        var control = new Button
         {
             Content = label,
             Padding = new Thickness(18, 10),
@@ -326,6 +327,19 @@ public sealed class MainWindow : Window
             CornerRadius = new CornerRadius(7),
             HorizontalAlignment = HorizontalAlignment.Left,
         };
+        control.GotFocus += (_, _) =>
+        {
+            control.BorderBrush = ForegroundBrush;
+            control.BorderThickness = new Thickness(2);
+        };
+        control.LostFocus += (_, _) =>
+        {
+            control.BorderBrush = control.Background == AccentDarkBrush
+                ? AccentBrush : (primary ? AccentBrush : LineBrush);
+            control.BorderThickness = new Thickness(1);
+        };
+        return control;
+    }
 
     private Control BuildSidebar()
     {
@@ -1097,7 +1111,7 @@ public sealed class MainWindow : Window
         return Panel(row, new Thickness(15));
     }
 
-    private Control GameArtwork(GameEntry game, double height)
+    private Control GameArtwork(GameEntry game, double height, bool fill = false)
     {
         var illustration = new Grid { Height = height };
         // Always have useful artwork, even when Steam has no published capsule.
@@ -1146,7 +1160,7 @@ public sealed class MainWindow : Window
                     Child = new Image
                     {
                         Source = bitmap,
-                        Stretch = Stretch.Uniform,
+                        Stretch = fill ? Stretch.UniformToFill : Stretch.Uniform,
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                         VerticalAlignment = VerticalAlignment.Stretch,
                     },
@@ -1384,9 +1398,21 @@ public sealed class MainWindow : Window
         back.Click += (_, _) => ShowLibrary();
         _content.Children.Add(back);
 
-        var hero = new Grid { ColumnDefinitions = new ColumnDefinitions("205,*"), ColumnSpacing = 20 };
-        hero.Children.Add(GameArtwork(game, 190));
-        var summary = new StackPanel { Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
+        // Artwork remains decorative; game modifications always require explicit action.
+        var hero = new Grid { MinHeight = 265, ClipToBounds = true };
+        hero.Children.Add(GameArtwork(game, 310, fill: true));
+        hero.Children.Add(new Border
+        {
+            Background = Brush("#DB111113"),
+            IsHitTestVisible = false,
+        });
+        var summary = new StackPanel
+        {
+            Spacing = 10,
+            Margin = new Thickness(22, 18),
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
         var nativeOnly = _exeScanReason == "native_linux_files" && _exe is null;
         summary.Children.Add(Text(game.Custom ? "CUSTOM GAME  /  LOCAL" :
             nativeOnly ? "STEAM  /  NATIVE LINUX" : "STEAM  /  PROTON",
@@ -1446,9 +1472,15 @@ public sealed class MainWindow : Window
             edit.Click += (_, _) => ShowEditCustomGame(game);
             summary.Children.Add(edit);
         }
-        Grid.SetColumn(summary, 1);
         hero.Children.Add(summary);
-        _content.Children.Add(Panel(hero, new Thickness(22)));
+        _content.Children.Add(new Border
+        {
+            Child = hero,
+            BorderBrush = LineBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            ClipToBounds = true,
+        });
 
         var detail = new StackPanel { Spacing = 13 };
         detail.Children.Add(Text("GAME EXECUTABLE", 12, AccentBrush, FontWeight.Bold));
