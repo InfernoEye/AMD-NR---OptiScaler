@@ -22,10 +22,14 @@ public sealed class MainWindow : Window
     private static readonly IBrush LineBrush = Brush("#29384C");
     private static readonly IBrush MutedBrush = Brush("#98A9BF");
     private static readonly IBrush ForegroundBrush = Brush("#F3F7FC");
-    private static readonly IBrush AccentBrush = Brush("#53BEEC");
+    private static readonly IBrush AccentBrush = Brush("#E04B54");
+    private static readonly IBrush AccentDarkBrush = Brush("#59252D");
 
     private readonly StackPanel _content = new() { Spacing = 16 };
     private readonly TextBlock _status = new() { Text = "Ready", Foreground = MutedBrush };
+    private readonly TextBlock _breadcrumb = Text("AMDNR  /  Library", 15, MutedBrush, FontWeight.SemiBold);
+    private string _currentSection = "Library";
+    private GameEntry? _selectedGame;
     private readonly Dictionary<string, Button> _navigation = new();
     private Backend? _backend;
     private List<GameEntry> _games = new();
@@ -114,7 +118,7 @@ public sealed class MainWindow : Window
             Content = label,
             Padding = new Thickness(18, 10),
             Background = primary ? AccentBrush : SurfaceBrush,
-            Foreground = primary ? Brush("#09131D") : ForegroundBrush,
+            Foreground = ForegroundBrush,
             BorderBrush = primary ? AccentBrush : LineBrush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(7),
@@ -173,7 +177,7 @@ public sealed class MainWindow : Window
     private Control BuildHeader()
     {
         var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(28, 20, 28, 10) };
-        header.Children.Add(Text("AMDNR  /  Game library", 15, MutedBrush, FontWeight.SemiBold));
+        header.Children.Add(_breadcrumb);
         var refresh = Button("↻  Refresh");
         refresh.Click += async (_, _) => await RefreshGamesAsync();
         Grid.SetColumn(refresh, 1);
@@ -184,6 +188,8 @@ public sealed class MainWindow : Window
     private void Clear(string section)
     {
         _content.Children.Clear();
+        _currentSection = section;
+        _breadcrumb.Text = "AMDNR  /  " + section;
         Highlight(section);
     }
 
@@ -249,30 +255,37 @@ public sealed class MainWindow : Window
             return;
         }
 
-        // Two-column artwork-style cards instead of plain single-line game rows.
-        // Art assets are deliberately not fetched from third parties without consent.
-        for (var index = 0; index < filtered.Count; index += 2)
-        {
-            var row = new Grid
-            {
-                ColumnDefinitions = new ColumnDefinitions("*,*"),
-                ColumnSpacing = 14,
-            };
-            for (var column = 0; column < 2 && index + column < filtered.Count; column++)
-            {
-                var game = filtered[index + column];
-                var card = BuildGameCard(game);
-                Grid.SetColumn(card, column);
-                row.Children.Add(card);
-            }
-            _libraryResults.Children.Add(row);
-        }
+        // Windows-style, game-focused single-column rows with full-width action area.
+        foreach (var game in filtered)
+            _libraryResults.Children.Add(BuildGameCard(game));
     }
 
     private Control BuildGameCard(GameEntry game)
     {
-        var card = new StackPanel { Spacing = 12 };
-        var illustration = new Grid { Height = 96 };
+        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("138,*,Auto"), ColumnSpacing = 18 };
+        var illustration = GameArtwork(game, 110);
+        row.Children.Add(illustration);
+
+        var detail = new StackPanel { Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
+        detail.Children.Add(Text(game.Name, 19, ForegroundBrush, FontWeight.SemiBold));
+        detail.Children.Add(Text("STEAM  ·  PROTON / WINE", 11, MutedBrush, FontWeight.SemiBold));
+        var location = Text(game.Folder, 12, MutedBrush);
+        location.MaxLines = 2;
+        detail.Children.Add(location);
+        Grid.SetColumn(detail, 1);
+        row.Children.Add(detail);
+
+        var manage = Button("SELECT GAME  →", true);
+        manage.VerticalAlignment = VerticalAlignment.Center;
+        manage.Click += (_, _) => SelectGame(game);
+        Grid.SetColumn(manage, 2);
+        row.Children.Add(manage);
+        return Panel(row, new Thickness(15));
+    }
+
+    private Control GameArtwork(GameEntry game, double height)
+    {
+        var illustration = new Grid { Height = height };
         illustration.Children.Add(new Border
         {
             Background = SidebarBrush,
@@ -308,28 +321,85 @@ public sealed class MainWindow : Window
             catch (Exception ex) when (ex is IOException or ArgumentException or
                                        UnauthorizedAccessException or NotSupportedException)
             {
-                // Steam may remove a cached thumbnail while the launcher is open.
-                // Keep the readable placeholder instead of failing the library view.
+                // Steam can remove its cached image during a session.
             }
         }
-        card.Children.Add(illustration);
-        card.Children.Add(Text(game.Name, 18, ForegroundBrush, FontWeight.SemiBold));
-        card.Children.Add(Text("STEAM  ·  WINDOWS / PROTON", 11, MutedBrush, FontWeight.SemiBold));
-        card.Children.Add(Text(game.Folder, 11, MutedBrush));
-        var button = Button("Manage game  →", true);
-        button.Click += (_, _) => SelectGame(game);
-        card.Children.Add(button);
-        return Panel(card, new Thickness(18));
+        return illustration;
     }
 
     private void SelectGame(GameEntry game)
     {
+        _selectedGame = game;
         _selectedFolder = game.Folder;
         _exe = GuessExecutable(game.Folder);
         _status.Text = _exe is null
-            ? $"Selected {game.Name}; select its game EXE manually."
+            ? $"Selected {game.Name}; choose the Windows executable manually."
             : $"Selected {game.Name}: {_exe}";
-        ShowInstall();
+        ShowGameDetails();
+    }
+
+    private bool HasInstallRecord()
+        => !string.IsNullOrWhiteSpace(_exe) &&
+           File.Exists(Path.Combine(Path.GetDirectoryName(_exe)!, ".amdnr-linux-install.json"));
+
+    private void ShowGameDetails()
+    {
+        if (_selectedGame is not { } game) { ShowLibrary(); return; }
+        Clear("Library");
+        _breadcrumb.Text = "AMDNR  /  Library  /  " + game.Name;
+
+        var back = Button("←  ALL GAMES");
+        back.Click += (_, _) => ShowLibrary();
+        _content.Children.Add(back);
+
+        var hero = new Grid { ColumnDefinitions = new ColumnDefinitions("240,*"), ColumnSpacing = 24 };
+        hero.Children.Add(GameArtwork(game, 245));
+        var summary = new StackPanel { Spacing = 14, VerticalAlignment = VerticalAlignment.Center };
+        summary.Children.Add(Text("STEAM  /  PROTON", 12, AccentBrush, FontWeight.SemiBold));
+        summary.Children.Add(Text(game.Name, 31, ForegroundBrush, FontWeight.Bold));
+        bool installed = HasInstallRecord();
+        summary.Children.Add(Text(installed ? "●  AMDNR installation recorded" :
+            "○  No AMDNR installation recorded for selected executable", 13,
+            installed ? AccentBrush : MutedBrush));
+        summary.Children.Add(Text(game.Folder, 12, MutedBrush));
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        var install = Button(installed ? "MANAGE INSTALLATION" : "INSTALL AMDNR", true);
+        install.Click += (_, _) => ShowInstall();
+        actions.Children.Add(install);
+        var doctor = Button("DOCTOR");
+        doctor.Click += (_, _) => ShowDoctor();
+        actions.Children.Add(doctor);
+        summary.Children.Add(actions);
+        Grid.SetColumn(summary, 1);
+        hero.Children.Add(summary);
+        _content.Children.Add(Panel(hero, new Thickness(22)));
+
+        var detail = new StackPanel { Spacing = 13 };
+        detail.Children.Add(Text("GAME CONFIGURATION", 12, AccentBrush, FontWeight.Bold));
+        detail.Children.Add(Text("Executable", 12, MutedBrush));
+        var exeLine = new TextBox
+        {
+            Text = _exe ?? "", Watermark = "Select the game EXE to enable installation",
+            Background = BackgroundBrush, Foreground = ForegroundBrush,
+        };
+        exeLine.TextChanged += (_, _) => _exe = exeLine.Text;
+        detail.Children.Add(exeLine);
+        var selectExe = Button("CHANGE EXECUTABLE");
+        selectExe.Click += async (_, _) =>
+        {
+            var selected = await PickFileAsync("Select game executable",
+                new FilePickerFileType("Windows executable") { Patterns = new[] { "*.exe" } });
+            if (selected is not null)
+            {
+                exeLine.Text = selected;
+                ShowGameDetails();
+            }
+        };
+        detail.Children.Add(selectExe);
+        detail.Children.Add(Text("Install status is based on the Linux launcher's installation " +
+            "record beside the selected executable. Existing installations made by other tools " +
+            "may not be detected.", 12, MutedBrush));
+        _content.Children.Add(Panel(detail));
     }
 
     private static string? GuessExecutable(string folder)
@@ -434,7 +504,7 @@ public sealed class MainWindow : Window
                 _status.Text = "ASI plugins require a compatible loader; no DLL override to copy.";
                 return;
             }
-            var value = $"WINEDLLOVERRIDES=\\\"{Path.GetFileNameWithoutExtension(_alias).ToLowerInvariant()}=n,b\\\" %command%";
+            var value = $"WINEDLLOVERRIDES=\\"{Path.GetFileNameWithoutExtension(_alias).ToLowerInvariant()}=n,b\\" %command%";
             await Clipboard.SetTextAsync(value);
             _status.Text = "Steam launch options copied to clipboard.";
         };
@@ -538,9 +608,15 @@ public sealed class MainWindow : Window
         {
             _games = (await _backend.GamesAsync()).ToList();
             _status.Text = $"Detected {_games.Count} Steam games";
-            if (_navigation.TryGetValue("Library", out var selected) &&
-                selected.Background == SurfaceBrush)
-                ShowLibrary();
+            if (_currentSection == "Library")
+            {
+                if (_selectedGame is not null && _games.Any(g => g.Folder == _selectedGame.Folder))
+                {
+                    _selectedGame = _games.First(g => g.Folder == _selectedGame.Folder);
+                    ShowGameDetails();
+                }
+                else ShowLibrary();
+            }
         }
         catch (Exception ex) { _status.Text = $"Steam scan failed: {ex.Message}"; }
         finally { _busy = false; }
