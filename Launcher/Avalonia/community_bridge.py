@@ -477,7 +477,7 @@ def prepare(compiler: Path, runtime: str = "lmxxf") -> dict:
             "output": finished.stdout[-1500:]}
 
 
-def install(exe: Path, approved: bool, runtime: str = "lmxxf") -> dict:
+def install(exe: Path, approved: bool, runtime: str = "lmxxf", *, replace_existing: bool = False) -> dict:
     runtime = validate_runtime(runtime)
     if not approved:
         raise ValueError("Bridge installation requires explicit user approval.")
@@ -485,24 +485,44 @@ def install(exe: Path, approved: bool, runtime: str = "lmxxf") -> dict:
     report = status(exe, runtime)
     if not report["prepared"]:
         raise ValueError("Prepare the checksum-verified community package first.")
-    if report["conflicts"]:
-        raise ValueError("Refusing to overwrite an existing AMDNR/ReShade setup:\n" +
-                         "\n".join(report["conflicts"]))
+    if report["conflicts"] and not replace_existing:
+        raise ValueError("Existing game hooks require explicit backup-and-replace approval:\\n" +
+                         "\\n".join(report["conflicts"]))
     manager = source_path() / "linux/manage.py"
     if not manager.is_file():
         raise ValueError("Verified community management tool is missing.")
-    # Recheck just before writing, preventing stale UI decisions.
-    if game_conflicts(exe):
+    # Recheck just before writing; deliberate replacement is a separate action.
+    if game_conflicts(exe) and not replace_existing:
         raise ValueError("Files changed since preview. Reopen compatibility checks.")
+    snapshot = None
+    if replace_existing:
+        from bridge_migration import snapshot_existing
+        snapshot = snapshot_existing(exe).get("snapshot")
     command = [sys.executable, str(manager), "install", str(prepared_path(runtime)),
                str(folder), "--exe", str(exe.resolve()), "--proxy", "auto"]
-    finished = subprocess.run(command, cwd=source_path(), text=True,
-                              capture_output=True, timeout=300, check=False)
-    if finished.returncode:
-        raise ValueError("Community manager refused installation:\n" +
-                         (finished.stdout + "\n" + finished.stderr)[-4000:])
+    try:
+        finished = subprocess.run(command, cwd=source_path(), text=True,
+                                  capture_output=True, timeout=300, check=False)
+        if finished.returncode:
+            raise ValueError("Community manager refused installation:\\n" +
+                             (finished.stdout + "\\n" + finished.stderr)[-4000:])
+    except Exception as error:
+        if snapshot is not None:
+            from bridge_migration import restore_snapshot
+            restored = restore_snapshot(Path(snapshot))
+            if restored["blocked"]:
+                raise ValueError(
+                    f"Installation failed; original files retained in {snapshot}. "
+                    "Bridge files occupy some original paths. Review managed uninstall "
+                    "and recover the migration before retrying. " +
+                    "; ".join(restored["blocked"])) from error
+        raise
+    if snapshot is not None:
+        from bridge_migration import mark_installed
+        mark_installed(Path(snapshot))
     wrapper = folder / "amdnr-linux/run.sh"
     return {"installed": True, "exe": str(exe), "manager": PROJECT,
+            "migration_snapshot": snapshot,
             "launch_option_preview": f'"{wrapper}" %command%',
             "steam_modified": False,
             "warning": "Copy launch option manually. On first game launch the wrapper "
