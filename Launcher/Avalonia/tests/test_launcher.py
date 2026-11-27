@@ -105,9 +105,9 @@ class LauncherTests(unittest.TestCase):
             stream.writestr("components/MochizukiNrRuntime.dll", b"official runtime")
             stream.writestr("components/LICENSE.txt", b"license")
         state = self.root / "state"
-        with patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}), \\
-                patch.object(launcher, "download_release", return_value=archive), \\
-                patch.object(launcher, "_release_cache_dir", return_value=cache.parent):
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}),
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=cache.parent)):
             preview = launcher.component_preview(self.exe, tag, asset)
             self.assertTrue(preview["installable"])
             self.assertEqual(len(preview["files"]), 2)
