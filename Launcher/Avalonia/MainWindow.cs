@@ -3396,6 +3396,59 @@ public sealed class MainWindow : Window
                 HorizontalAlignment = HorizontalAlignment.Stretch,
 
             };
+            var guidePanel = new StackPanel { Spacing = 11 };
+            void RenderGuided()
+            {
+                guidePanel.Children.Clear();
+                guidePanel.Children.Add(Text(UiLanguage.Translate("Guided settings").ToUpperInvariant(),
+                    12, AccentBrush, FontWeight.Bold));
+                guidePanel.Children.Add(Text(
+                    "Only supported keys already present under [DlssNr] appear here. " +
+                    "Changes update the preview below; nothing is written until SAVE CONFIGURATION. " +
+                    "Unknown INI lines and comments are preserved.",
+                    12, MutedBrush));
+                var known = GuidedIniEditor.Read(editor.Text ?? "");
+                if (known.Count == 0)
+                {
+                    guidePanel.Children.Add(Text(
+                        "No supported existing neural settings detected in this INI. " +
+                        "The raw editor remains available. No unsupported settings will be inserted.",
+                        13, MutedBrush));
+                }
+                foreach (var setting in known)
+                {
+                    var settingRow = new StackPanel { Spacing = 6 };
+                    settingRow.Children.Add(Text(setting.Key, 14, ForegroundBrush, FontWeight.SemiBold));
+                    settingRow.Children.Add(Text(setting.Description, 12, MutedBrush));
+                    var choices = new ComboBox
+                    {
+                        ItemsSource = setting.Choices,
+                        SelectedItem = setting.Value,
+                        MinWidth = 160,
+                        HorizontalAlignment = HorizontalAlignment.Left,
+                    };
+                    settingRow.Children.Add(choices);
+                    var apply = Button("PREVIEW THIS CHANGE");
+                    apply.Click += (_, _) =>
+                    {
+                        try
+                        {
+                            var updated = GuidedIniEditor.PreviewChange(editor.Text ?? "",
+                                setting, choices.SelectedItem?.ToString() ?? setting.Value);
+                            editor.Text = updated;
+                            _status.Text = "Preview updated. Review the INI and press Save to write with backup.";
+                            RenderGuided();
+                        }
+                        catch (Exception ex) { _status.Text = "Guided edit refused: " + ex.Message; }
+                    };
+                    settingRow.Children.Add(apply);
+                    guidePanel.Children.Add(Panel(settingRow, new Thickness(12)));
+                }
+            }
+            RenderGuided();
+            panel.Children.Add(guidePanel);
+            panel.Children.Add(Text(UiLanguage.Translate("Raw INI editor").ToUpperInvariant(),
+                12, AccentBrush, FontWeight.Bold));
             panel.Children.Add(editor);
             var outcome = Text("No changes saved.", 12, MutedBrush);
             var buttons = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
@@ -3436,6 +3489,7 @@ public sealed class MainWindow : Window
                 {
                     snapshot = await _backend.ReadIniAsync(exe);
                     editor.Text = snapshot.Text;
+                    RenderGuided();
                     outcome.Text = "Reloaded configuration from disk.";
                 }
                 catch (Exception ex) { outcome.Text = "Reload failed: " + ex.Message; }
