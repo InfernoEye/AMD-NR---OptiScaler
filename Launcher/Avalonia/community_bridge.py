@@ -621,6 +621,8 @@ def remove(exe: Path, approved: bool, *, restore_previous: bool = True,
            force: bool = False) -> dict:
     if not approved:
         raise ValueError("Community bridge removal requires explicit consent.")
+    if force and restore_previous:
+        raise ValueError("Force removal cannot automatically restore a previous AMDNR installation.")
     folder = _game_directory(exe)
     if not (folder / "amdnr-linux/run.sh").is_file():
         raise ValueError("No community bridge wrapper; refusing removal.")
@@ -645,9 +647,13 @@ def remove(exe: Path, approved: bool, *, restore_previous: bool = True,
         command.append("--force")  # reviewed v0.3.7 manager's explicit force mode
     finished = subprocess.run(command,
                               cwd=source_path(), text=True, capture_output=True, timeout=300)
+    fallback = None
     if finished.returncode:
-        raise ValueError("Uninstall stopped; inspect changed files before retrying: " +
-                         (finished.stdout + "\n" + finished.stderr)[-4000:])
+        if not force:
+            raise ValueError("Uninstall stopped; inspect changed files before retrying: " +
+                             (finished.stdout + "\n" + finished.stderr)[-4000:])
+        from bridge_force_remove import quarantine_recorded_bridge
+        fallback = quarantine_recorded_bridge(folder, data)
     migration = None
     from bridge_migration import (latest_installed_snapshot, restore_snapshot,
                                   retain_after_full_uninstall)
@@ -661,6 +667,9 @@ def remove(exe: Path, approved: bool, *, restore_previous: bool = True,
                              ", ".join(migration["blocked"]))
     return {"removed": True, "migration_restoration": migration, "steam_modified": False,
             "preserved_bridge": preserved_bridge, "forced": force,
+            "fallback": fallback, "prefix_recovery_required": bool(fallback),
             "previous_install_restored": restore_previous,
-            "warning": "Remove the bridge wrapper from your Steam launch options manually.",
+            "warning": ("Remove the bridge wrapper from Steam launch options manually. " +
+                        ("Upstream force removal failed; owned files were quarantined, but Proton "
+                         "prefix recovery requires manual review." if fallback else "")),
             "output": finished.stdout[-1000:]}
