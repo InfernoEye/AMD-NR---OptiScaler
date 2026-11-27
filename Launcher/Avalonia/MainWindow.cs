@@ -60,6 +60,7 @@ public sealed class MainWindow : Window
     private TextBox? _librarySearch;
     private readonly Dictionary<string, LibraryAuditEntry> _libraryAudit = new(StringComparer.Ordinal);
     private string _auditFilter = "All games";
+    private bool _auditSnapshotLoaded;
 
     public MainWindow()
     {
@@ -268,8 +269,8 @@ public sealed class MainWindow : Window
 
         var auditBar = new StackPanel { Spacing = 10 };
         auditBar.Children.Add(Text("GAME READINESS  /  LIBRARY AUDIT", 12, AccentBrush, FontWeight.Bold));
-        auditBar.Children.Add(Text("Check executable detection across Steam and custom installations. " +
-            "Read-only; scans are run only when requested. An AMDNR record does not verify its files.",
+        auditBar.Children.Add(Text("Results are saved across restarts. Refresh updates the game list without reanalyzing; " +
+            "only Analyze / Rescan Library rebuilds this snapshot. AMDNR records do not verify file integrity.",
             12, MutedBrush));
         var auditControls = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 10,
             LineSpacing = 8 };
@@ -1387,8 +1388,8 @@ public sealed class MainWindow : Window
             StringComparer.Ordinal);
         _games = steam.Concat(custom.Where(g => seen.Add(Path.GetFullPath(g.Folder))))
             .OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToList();
-        _libraryAudit.Clear(); // Never retain readiness information after library refresh.
-        _auditFilter = "All games";
+        // Preserve the saved audit snapshot across ordinary Library refreshes.
+        // Newly discovered games simply show no readiness label until Rescan.
     }
 
     private async Task RefreshGamesAsync()
@@ -1399,7 +1400,22 @@ public sealed class MainWindow : Window
         try
         {
             await ReloadGamesAsync();
-            _status.Text = $"Loaded {_games.Count} entries ({_games.Count(g => g.Custom)} custom)";
+            if (!_auditSnapshotLoaded)
+            {
+                _auditSnapshotLoaded = true;
+                try
+                {
+                    var saved = await _backend.SavedLibraryAuditAsync();
+                    foreach (var item in saved)
+                        _libraryAudit[Path.GetFullPath(item.Folder)] = item;
+                }
+                catch (Exception ex)
+                {
+                    _status.Text = "Saved audit unavailable: " + ex.Message;
+                }
+            }
+            _status.Text = $"Loaded {_games.Count} entries ({_games.Count(g => g.Custom)} custom)" +
+                (_libraryAudit.Count > 0 ? $" · {_libraryAudit.Count} saved audit results" : "");
             // Scan changes should update the list, not navigate to a selected game.
             // Keep this deterministic even if the previous page was Game Details.
             if (_currentSection == "Library")
