@@ -577,6 +577,52 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("--force", run.call_args.args[0])
         self.assertFalse(outcome["previous_install_restored"])
 
+    def test_force_bridge_fallback_quarantines_only_recorded_hooks(self):
+        exe = self.exe()
+        game = exe.parent
+        existing = game / "dxgi.dll"
+        existing.write_bytes(b"bridge hook")
+        unrelated = game / "my-other-mod.dll"
+        unrelated.write_bytes(b"keep me")
+        runtime = game / "amdnr-linux/run.sh"
+        runtime.parent.mkdir(parents=True)
+        runtime.write_text("wrapper")
+        backup = game / ".amdnr-linux-backup"
+        backup.mkdir()
+        (backup / "dxgi.dll").write_bytes(b"old dxgi")
+        entries = [
+            {"path": "dxgi.dll", "sha256": hashlib.sha256(b"bridge hook").hexdigest(),
+             "existed": True},
+            {"path": "amdnr-linux/run.sh", "sha256": hashlib.sha256(b"wrapper").hexdigest(),
+             "existed": False},
+        ]
+        record = {"version": 1, "launcher": {"proxy_name": "dxgi.dll"},
+                  "files": entries, "installed": [x["path"] for x in entries]}
+        (game / bridge.OWN_RECORD).write_text(json.dumps(record))
+        src = self.root / "source"
+        manager = src / "linux/manage.py"
+        manager.parent.mkdir(parents=True)
+        manager.write_text("# fake")
+        failed = subprocess.CompletedProcess(args=["manage"], returncode=1, stdout="",
+                                             stderr="missing prefix backups")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(bridge, "source_path", return_value=src),
+              patch("launcher_maintenance._ensure_not_running"),
+              patch.object(bridge.subprocess, "run", return_value=failed)):
+            result = bridge.remove(exe, True, restore_previous=False, force=True)
+        self.assertTrue(result["prefix_recovery_required"])
+        self.assertFalse(runtime.exists())
+        self.assertEqual(existing.read_bytes(), b"old dxgi")
+        self.assertEqual(unrelated.read_bytes(), b"keep me")
+        self.assertFalse((game / bridge.OWN_RECORD).exists())
+        self.assertTrue(Path(result["fallback"]["forced_quarantine"]).is_dir())
+        self.assertIn("dxgi.dll", result["fallback"]["restored_originals"])
+
+    def test_bridge_force_rejects_restoring_old_install(self):
+        exe = self.exe()
+        with self.assertRaisesRegex(ValueError, "previous AMDNR"):
+            bridge.remove(exe, True, restore_previous=True, force=True)
+
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
         self.assertEqual(bridge.VERSION, "0.3.7")
