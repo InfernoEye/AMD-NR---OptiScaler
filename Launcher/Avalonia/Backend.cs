@@ -205,6 +205,26 @@ public sealed class Backend
             root.GetProperty("ini_present").GetBoolean());
     }
 
+    public async Task<string> PrepareMochiModelAsync(string executable, string localSource,
+        CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] {
+            "--prepare-mochi-model", localSource, "--exe", executable }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var doc = JsonDocument.Parse(output);
+        var models = doc.RootElement.GetProperty("models");
+        var report = new StringBuilder("Verified Mochi model preparation completed.");
+        foreach (var model in models.EnumerateObject())
+        {
+            var bytes = model.Value.GetProperty("bytes").GetInt64();
+            report.AppendLine();
+            report.Append(model.Name).Append(": ")
+                .Append((bytes / (1024.0 * 1024)).ToString("F1"))
+                .Append(" MiB (SHA-256 verified per model weight)");
+        }
+        return report.ToString();
+    }
+
     public async Task<string> RuntimeDiagnosticsAsync(string executable,
         CancellationToken token = default)
     {
