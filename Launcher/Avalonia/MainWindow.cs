@@ -3295,7 +3295,35 @@ public sealed class MainWindow : Window
             _launcherSettings = config;
             _launcherSettingsLoaded = true;
             panel.Children.Clear();
-            panel.Children.Add(Text("DEFAULT PROXY DLL", 12, AccentBrush, FontWeight.Bold));
+            var general = new StackPanel { Spacing = 13 };
+            var credits = new StackPanel { Spacing = 12 };
+            var updates = new StackPanel { Spacing = 12 };
+            var columns = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("*,*"),
+                RowDefinitions = new RowDefinitions("Auto,Auto"),
+                ColumnSpacing = 16,
+                RowSpacing = 16,
+            };
+            var leftColumn = new StackPanel { Spacing = 16 };
+            leftColumn.Children.Add(Panel(general));
+            leftColumn.Children.Add(Panel(credits));
+            var rightColumn = new StackPanel { Spacing = 16 };
+            rightColumn.Children.Add(Panel(updates));
+            columns.Children.Add(leftColumn);
+            Grid.SetColumn(rightColumn, 1);
+            columns.Children.Add(rightColumn);
+            columns.SizeChanged += (_, e) =>
+            {
+                var compact = e.NewSize.Width < 790;
+                columns.ColumnDefinitions[1].Width = compact
+                    ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+                Grid.SetColumn(rightColumn, compact ? 0 : 1);
+                Grid.SetRow(rightColumn, compact ? 1 : 0);
+            };
+            panel.Children.Add(columns);
+            general.Children.Add(Text("GENERAL / DOWNLOADS", 12, AccentBrush, FontWeight.Bold));
+            general.Children.Add(Text("DEFAULT PROXY DLL", 12, AccentBrush, FontWeight.Bold));
             var aliases = new[] { "dxgi.dll", "version.dll", "winmm.dll", "winhttp.dll",
                 "wininet.dll", "dbghelp.dll", "d3d12.dll", "OptiScaler.asi" };
             var choice = new ComboBox
@@ -3305,8 +3333,8 @@ public sealed class MainWindow : Window
                 Width = 235,
                 HorizontalAlignment = HorizontalAlignment.Left,
             };
-            panel.Children.Add(choice);
-            panel.Children.Add(Text("RELEASE DOWNLOAD DIRECTORY", 12, AccentBrush, FontWeight.Bold));
+            general.Children.Add(choice);
+            general.Children.Add(Text("RELEASE DOWNLOAD DIRECTORY", 12, AccentBrush, FontWeight.Bold));
             var download = new TextBox
             {
                 Text = config.DownloadDirectory,
@@ -3314,15 +3342,15 @@ public sealed class MainWindow : Window
                 Foreground = ForegroundBrush,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             };
-            panel.Children.Add(download);
+            general.Children.Add(download);
             var prerelease = new CheckBox
             {
                 Content = "Show prerelease builds in the release picker",
                 IsChecked = config.ShowPrereleases,
                 Foreground = ForegroundBrush,
             };
-            panel.Children.Add(prerelease);
-            panel.Children.Add(Text("Downloads remain manual and checksum-verified. " +
+            general.Children.Add(prerelease);
+            general.Children.Add(Text("Downloads remain manual and checksum-verified. " +
                 "Settings are saved under your XDG configuration directory.", 12, MutedBrush));
             var save = Button("SAVE PREFERENCES", true);
             save.Click += async (_, _) =>
@@ -3342,10 +3370,10 @@ public sealed class MainWindow : Window
                 catch (Exception ex) { _status.Text = "Preferences not saved: " + ex.Message; }
                 finally { _busy = false; save.IsEnabled = true; }
             };
-            panel.Children.Add(save);
-            panel.Children.Add(Text("OPEN SOURCE & ACKNOWLEDGEMENTS",
+            general.Children.Add(save);
+            credits.Children.Add(Text("OPEN SOURCE & ACKNOWLEDGEMENTS",
                 12, AccentBrush, FontWeight.Bold));
-            panel.Children.Add(Text(
+            credits.Children.Add(Text(
                 "Thanks to hassanm0301 and AMDNR-Linux contributors for their public ROCm/HIP " +
                 "bridge research and Proton compatibility findings. This project has informed " +
                 "our Linux investigation; no AMDNR-Linux code or bridge binaries are " +
@@ -3366,9 +3394,9 @@ public sealed class MainWindow : Window
                 }
                 catch (Exception ex) { _status.Text = "Could not open credits: " + ex.Message; }
             };
-            panel.Children.Add(researchCredits);
-            panel.Children.Add(Text("LINUX LAUNCHER UPDATES", 12, AccentBrush, FontWeight.Bold));
-            panel.Children.Add(Text(
+            credits.Children.Add(researchCredits);
+            updates.Children.Add(Text("LINUX LAUNCHER UPDATES", 12, AccentBrush, FontWeight.Bold));
+            updates.Children.Add(Text(
                 "Checks independent Linux launcher releases from your fork. AMDNR game files still " +
                 "download exclusively from official upstream. Packages are SHA-256 verified; " +
                 "AppImage replacement is opt-in and preserves a previous launcher copy.",
@@ -3383,8 +3411,8 @@ public sealed class MainWindow : Window
             updateActions.Children.Add(checkUpdate);
             updateActions.Children.Add(getUpdate);
             updateActions.Children.Add(applyUpdate);
-            panel.Children.Add(updateActions);
-            panel.Children.Add(updateSummary);
+            updates.Children.Add(updateActions);
+            updates.Children.Add(updateSummary);
             string? verifiedDownloaded = null;
             checkUpdate.Click += async (_, _) =>
             {
