@@ -2696,7 +2696,6 @@ def main() -> int:
     parser.add_argument("--profile-json", type=str, metavar="JSON", help="Proton profile JSON content")
     parser.add_argument("--proton-options-json", type=Path, metavar="FOLDER", help="Show safe combined Steam launch preview")
     parser.add_argument("--support-bundle", action="store_true", help="Create a redacted local diagnostic ZIP")
-    parser.add_argument("--analyze-performance", type=Path, metavar="CSV", help="Read-only MangoHud frame-time statistics")
     parser.add_argument("--recover-transaction", action="store_true", help="Restore crash-recovery snapshot with strict hash checks")
     parser.add_argument("--try-next-proxy", action="store_true", help="Switch clean managed proxy to next unoccupied DLL alias")
     parser.add_argument("--uninstall", action="store_true", help="Uninstall and restore backups")
@@ -2887,7 +2886,7 @@ def main() -> int:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     elif (args.compatibility_json or args.proton_profile_json or args.save_proton_profile or
-          args.proton_options_json or args.support_bundle or args.analyze_performance):
+          args.proton_options_json or args.support_bundle):
         try:
             import linux_environment as environment
             if args.compatibility_json:
@@ -2907,8 +2906,6 @@ def main() -> int:
                 if args.exe is None:
                     parser.error("--support-bundle requires --exe")
                 result = environment.support_bundle(args.exe)
-            else:
-                result = environment.analyze_mangohud_csv(args.analyze_performance)
             print(json.dumps(result, ensure_ascii=False))
         except (OSError, ValueError, TypeError, KeyError, zipfile.BadZipFile) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
