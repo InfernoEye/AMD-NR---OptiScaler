@@ -77,6 +77,17 @@ class LauncherTests(unittest.TestCase):
             }])
             self.assertEqual(launcher.installed_games_overview(), [])
 
+    def test_community_source_is_pinned_to_original_nvidia_release(self):
+        # The unqualified release is a community-modified build, not the
+        # exact NVIDIA original needed by Mochi's strict source hash.
+        self.assertEqual(launcher.MOCHI_COMMUNITY_TAG, "dlssnr-310.9.16-nvidia")
+        self.assertEqual(launcher.MOCHI_COMMUNITY_ASSET,
+                         "nvngx_dlssnr_310.9.16-nvidia.zip")
+        self.assertEqual(launcher.MOCHI_COMMUNITY_ZIP_SHA256,
+                         "5277355f0578d36f2a25413d8c7ff4c6f9966cea5bad714305f23b20173e09f6")
+        self.assertEqual(launcher.MOCHI_EXPECTED_DLL_SHA256,
+                         "2bc19bc09a7b89dd44f73e2ac0108fcc586e2154bdd0830f242f4f040e28789f")
+
     def test_community_mochi_requires_explicit_opt_in(self):
         with patch.object(launcher, "_github_json") as metadata:
             with self.assertRaisesRegex(ValueError, "explicit user opt-in"):
