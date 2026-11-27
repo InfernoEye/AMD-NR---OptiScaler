@@ -1,10 +1,12 @@
 # Avalonia launcher
 
-> **Acknowledgements:** [AMDNR-Linux by hassanm0301 and contributors](https://github.com/hassanm0301/AMDNR-Linux)
-> has provided valuable public ROCm/HIP bridge research and Proton runtime findings.
-> We have not incorporated its code or binaries; future reuse must comply with its GPL-3.0
-> license and any applicable third-party notices. See
-> [third-party acknowledgements](THIRD_PARTY_ACKNOWLEDGEMENTS.md).
+> **Community ROCm bridge (experimental):** The optional **Experimental Linux ROCm Bridge**
+> screen can now download and verify AMDNR-Linux v0.3.7 by hassanm0301 and
+> invoke its original GPL setup/installation scripts after separate approvals.
+> Neither its source nor binaries are copied into our repository or bundled in
+> this AppImage. The bridge remains separately managed and unverified by us in
+> Subnautica 2. See [third-party acknowledgements](THIRD_PARTY_ACKNOWLEDGEMENTS.md)
+> for its license, exact release and authorship.
 >
 > **Scope:** This is the Linux/Proton edition of the AMDNR launcher,
 > not a general gaming utility. Follow the official Windows launcher's
@@ -32,6 +34,60 @@
 > information and potential anti-cheat warnings without claiming the
 > Windows DLL will run. Doctor can create a locally stored, redacted
 > AMDNR support bundle; it is not a separate benchmarking tool.
+
+## Experimental AMDNR-Linux ROCm bridge
+
+The **Experimental Linux ROCm Bridge** action on the selected game's details page
+(or the Compatibility page) is an opt-in adapter for the *separately maintained*
+[hassanm0301/AMDNR-Linux](https://github.com/hassanm0301/AMDNR-Linux)
+project. It is not equivalent to the original AMDNR ZIP installer, and the
+rendering bridge is not authored or shipped by this repository.
+
+The adapter uses the pinned **linux-v0.3.7** archive with SHA-256
+`7e4ddb01a352a824bbf6009cfd8a1c0728267679e4a170d33fc8e01f91b84423`.
+It verifies the archive, extracts safe entries to a user-local cache, calls the
+unmodified release's `linux/setup.py prepare`, and uses the same release's
+`linux/manage.py` for explicitly approved installation and removal. The
+staged package and original source remain under
+`${XDG_CACHE_HOME:-~/.cache}/amdnr-linux/community-bridge/0.3.7/`.
+
+**Requirements:** Python 3.12+ with `zstandard` installed (or Python 3.14+
+with built-in zstd), a native x64 Microsoft `d3dcompiler_47.dll` obtained
+from the user's own game, AMD Vulkan and ROCm-capable GPU permissions, a
+Wine 11-based Proton such as GE-Proton11-9, multiple GB of disk space, and the
+separately downloaded dependencies. AMDNR-Linux's reported game testing used
+RX 9070 XT and does not establish support for RX 6000, Steam Deck or Subnautica 2.
+The community release's exact requirements and license notices control the
+preparation; neither the optional adapter nor our CI proves the GPU bridge works.
+
+**Safety:** The adapter does not modify Steam options, change Proton choice,
+or change game files as part of read-only status or package preparation. An
+explicit install action can write the selected game folder using the community
+installer's own journal and backups. It refuses recorded AMDNR installs, ReShade
+configuration and occupied proxy/D3D12 DLL slots. Close the game first and use
+the original manager to restore an existing installation rather than deleting
+DLLs by hand. The resulting wrapper option is a **copy-only preview**. On the
+next game launch, that wrapper can change files inside the current Proton
+prefix, with the community installer keeping its own recovery journal.
+Inspect the instructions before copying it into Steam yourself.
+
+The Subnautica 2 experimental branch shown in user screenshots contains a
+`Subnautica2-Win64-Test.exe` under `Subnautica2/Binaries/Win64/`, and
+existing ReShade and `dxgi.dll` files. Its top-level `Subnautica2.exe`
+is not necessarily the rendering process. Confirm the inner executable,
+preserve existing mods and backups, and resolve conflicts through the
+appropriate uninstaller before attempting this separate bridge. The
+adapter deliberately does not auto-clean conflicts or override hooks.
+
+For advanced **read-only** status, run:
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --bridge-status-json --exe "/path/to/Game-Win64-Test.exe"
+```
+
+All community files are downloaded separately after consent; users distributing
+a prepared combined installation must comply with the original GPL/LGPL,
+upstream AMDNR, Microsoft compiler and ROCm asset terms.
 
 ## Windows-inspired Linux UI (in progress)
 
