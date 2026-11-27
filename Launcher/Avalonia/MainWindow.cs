@@ -71,6 +71,16 @@ public sealed class MainWindow : Window
     private readonly Dictionary<string, string> _indexedExecutables = new(StringComparer.Ordinal);
     private string _auditFilter = "All games";
     private bool _auditSnapshotLoaded;
+    private readonly Grid _shell = new() { RowDefinitions = new RowDefinitions("Auto,*") };
+    private Grid? _workspace;
+    private Control? _sideNavigation;
+    private Control? _topNavigation;
+    private readonly Dictionary<string, Button> _horizontalNavigation = new();
+    private bool _gridView = true;
+    private readonly string _viewStateFile = Path.Combine(
+        Environment.GetEnvironmentVariable("XDG_CONFIG_HOME")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"),
+        "amdnr-linux", "view-preference.txt");
 
     public MainWindow()
     {
@@ -85,13 +95,19 @@ public sealed class MainWindow : Window
         FontFamily = new FontFamily("Inter, Noto Sans, sans-serif");
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
+        _gridView = ReadViewPreference();
         var app = new Grid { ColumnDefinitions = new ColumnDefinitions("232,*") };
+        _workspace = app;
+        _sideNavigation = BuildSidebar();
+        _topNavigation = BuildTopNavigation();
+        _shell.Children.Add(_topNavigation);
+        Grid.SetRow(app, 1);
+        _shell.Children.Add(app);
         // Steam Deck compact mode: keep navigation available at 800 px
         // logical width and let long sections wrap/scroll.
         SizeChanged += (_, e) =>
         {
-            app.ColumnDefinitions[0].Width = new GridLength(
-                e.NewSize.Width < 980 ? 178 : 232);
+            UpdateNavigationLayout(e.NewSize.Width);
         };
         KeyDown += (_, e) =>
         {
@@ -124,7 +140,7 @@ public sealed class MainWindow : Window
                 }
             }
         };
-        app.Children.Add(BuildSidebar());
+        app.Children.Add(_sideNavigation);
         // Status lives in the header; the content viewport must never sit behind a footer.
         var main = new Grid { RowDefinitions = new RowDefinitions("90,*") };
         Grid.SetColumn(main, 1);
@@ -144,7 +160,8 @@ public sealed class MainWindow : Window
         Grid.SetRow(_pageScroller, 1);
         main.Children.Add(_pageScroller);
         app.Children.Add(main);
-        Content = app;
+        Content = _shell;
+        UpdateNavigationLayout(Width);
         try { _backend = new Backend(); }
         catch (Exception ex) { _status.Text = ex.Message; }
         ShowLibrary();
@@ -155,6 +172,85 @@ public sealed class MainWindow : Window
             await LoadLauncherSettingsAsync();
             await RefreshGamesAsync();
         };
+    }
+
+    private bool ReadViewPreference()
+    {
+        try
+        {
+            return !File.Exists(_viewStateFile) ||
+                File.ReadAllText(_viewStateFile).Trim() != "list";
+        }
+        catch (IOException) { return true; }
+        catch (UnauthorizedAccessException) { return true; }
+    }
+
+    private void SaveViewPreference()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(_viewStateFile)!;
+            Directory.CreateDirectory(directory);
+            var temp = _viewStateFile + ".tmp";
+            File.WriteAllText(temp, _gridView ? "grid\n" : "list\n");
+            File.Move(temp, _viewStateFile, overwrite: true);
+        }
+        catch (IOException) { _status.Text = "View preference couldn't be saved."; }
+        catch (UnauthorizedAccessException) { _status.Text = "View preference couldn't be saved."; }
+    }
+
+    private void SwitchLibraryView(bool grid)
+    {
+        if (_gridView == grid) return;
+        _gridView = grid;
+        SaveViewPreference();
+        UpdateNavigationLayout(Bounds.Width > 0 ? Bounds.Width : Width);
+        if (_currentSection == "Library" && _selectedGame is null)
+            ShowLibrary();
+    }
+
+    private void UpdateNavigationLayout(double windowWidth)
+    {
+        if (_workspace is null || _sideNavigation is null || _topNavigation is null)
+            return;
+        var horizontal = !_gridView || windowWidth < 860;
+        _sideNavigation.IsVisible = !horizontal;
+        _topNavigation.IsVisible = horizontal;
+        _workspace.ColumnDefinitions[0].Width = horizontal ? new GridLength(0)
+            : new GridLength(windowWidth < 1040 ? 188 : 232);
+    }
+
+    private Control BuildTopNavigation()
+    {
+        var buttons = new WrapPanel
+        {
+            Orientation = Orientation.Horizontal,
+            ItemSpacing = 6, LineSpacing = 5,
+            Margin = new Thickness(12, 8),
+        };
+        buttons.Children.Add(Text("AMDNR", 21, AccentBrush, FontWeight.Bold));
+        AddTopNav(buttons, "Library", ShowLibrary);
+        AddTopNav(buttons, "Installed", ShowInstalledGames);
+        AddTopNav(buttons, "Install", ShowInstall);
+        AddTopNav(buttons, "Doctor", ShowDoctor);
+        AddTopNav(buttons, "Compatibility", ShowCompatibility);
+        AddTopNav(buttons, "Settings", ShowSettings);
+        return new Border
+        {
+            Background = SidebarBrush,
+            BorderBrush = LineBrush,
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            Child = buttons,
+        };
+    }
+
+    private void AddTopNav(WrapPanel panel, string name, Action action)
+    {
+        var button = Button(name);
+        button.Padding = new Thickness(10, 7);
+        button.Click += (_, _) => action();
+        _horizontalNavigation[name] = button;
+        panel.Children.Add(button);
     }
 
     private void OnControllerAction(JoystickNavigation.Action action)
@@ -278,8 +374,14 @@ public sealed class MainWindow : Window
     {
         foreach (var (name, button) in _navigation)
         {
-            button.Background = name == selected ? SurfaceBrush : Brushes.Transparent;
-            button.Foreground = name == selected ? AccentBrush : ForegroundBrush;
+            button.Background = name == selected ? AccentDarkBrush : Brushes.Transparent;
+            button.Foreground = name == selected ? ForegroundBrush : MutedBrush;
+        }
+        foreach (var (name, button) in _horizontalNavigation)
+        {
+            button.Background = name == selected ? AccentDarkBrush : SurfaceBrush;
+            button.Foreground = name == selected ? ForegroundBrush : MutedBrush;
+            button.BorderBrush = name == selected ? AccentBrush : LineBrush;
         }
     }
 
@@ -299,6 +401,28 @@ public sealed class MainWindow : Window
         _status.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetRow(_status, 1);
         header.Children.Add(_status);
+        var headerActions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var gridView = Button("▦ Grid");
+        var listView = Button("☰ List");
+        gridView.Padding = new Thickness(11, 8);
+        listView.Padding = new Thickness(11, 8);
+        gridView.Click += (_, _) => SwitchLibraryView(true);
+        listView.Click += (_, _) => SwitchLibraryView(false);
+        void SetViewColors()
+        {
+            gridView.Background = _gridView ? AccentBrush : SurfaceBrush;
+            listView.Background = !_gridView ? AccentBrush : SurfaceBrush;
+        }
+        SetViewColors();
+        gridView.Click += (_, _) => SetViewColors();
+        listView.Click += (_, _) => SetViewColors();
+        headerActions.Children.Add(gridView);
+        headerActions.Children.Add(listView);
         var refresh = Button("↻  Refresh");
         refresh.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetRowSpan(refresh, 2);
@@ -308,8 +432,11 @@ public sealed class MainWindow : Window
             _selectedGame = null;
             await RefreshGamesAsync();
         };
-        Grid.SetColumn(refresh, 1);
-        header.Children.Add(refresh);
+        refresh.Padding = new Thickness(11, 8);
+        headerActions.Children.Add(refresh);
+        Grid.SetColumn(headerActions, 1);
+        Grid.SetRowSpan(headerActions, 2);
+        header.Children.Add(headerActions);
         return header;
     }
 
@@ -883,9 +1010,50 @@ public sealed class MainWindow : Window
             return;
         }
 
-        // Windows-style, game-focused single-column rows with full-width action area.
-        foreach (var game in filtered)
-            _libraryResults.Children.Add(BuildGameCard(game));
+        if (_gridView)
+        {
+            var tiles = new WrapPanel
+            {
+                Orientation = Orientation.Horizontal,
+                ItemSpacing = 14,
+                LineSpacing = 14,
+            };
+            foreach (var game in filtered)
+                tiles.Children.Add(BuildGameTile(game));
+            _libraryResults.Children.Add(tiles);
+        }
+        else
+        {
+            foreach (var game in filtered)
+                _libraryResults.Children.Add(BuildGameCard(game));
+        }
+    }
+
+    private Control BuildGameTile(GameEntry game)
+    {
+        var stack = new StackPanel { Width = 202, Spacing = 7 };
+        stack.Children.Add(GameArtwork(game, 155));
+        var title = Text(game.Name, 15, ForegroundBrush, FontWeight.SemiBold);
+        title.MaxLines = 2;
+        stack.Children.Add(title);
+        if (_libraryAudit.TryGetValue(Path.GetFullPath(game.Folder), out var audit))
+        {
+            stack.Children.Add(Text(audit.InstalledRecord ? "● AMDNR recorded" :
+                audit.Status == "windows_ready" ? "● Windows game ready" :
+                audit.Status == "native_linux" ? "● Native Linux" :
+                "○ Needs review", 11, audit.InstalledRecord ? AccentBrush : MutedBrush));
+        }
+        else
+        {
+            stack.Children.Add(Text(game.Custom ? "CUSTOM GAME" : "STEAM GAME",
+                11, MutedBrush));
+        }
+        var choose = Button("SELECT GAME →", true);
+        choose.HorizontalAlignment = HorizontalAlignment.Stretch;
+        choose.HorizontalContentAlignment = HorizontalAlignment.Center;
+        choose.Click += (_, _) => SelectGame(game);
+        stack.Children.Add(choose);
+        return Panel(stack, new Thickness(11));
     }
 
     private Control BuildGameCard(GameEntry game)
