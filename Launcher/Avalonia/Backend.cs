@@ -205,6 +205,41 @@ public sealed class Backend
             root.GetProperty("ini_present").GetBoolean());
     }
 
+    public async Task<string> RuntimeDiagnosticsAsync(string executable,
+        CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(
+            new[] { "--runtime-diagnostics-json", "--exe", executable }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var doc = JsonDocument.Parse(output);
+        var root = doc.RootElement;
+        var files = root.GetProperty("files");
+        bool Exists(string name) => files.GetProperty(name).GetProperty("exists").GetBoolean();
+        var report = new StringBuilder();
+        report.AppendLine("Game runtime folder: " +
+            root.GetProperty("folder").GetString());
+        foreach (var name in new[] {
+            "MochizukiNrRuntime.dll", "dlssnr-amd.asi",
+            "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll",
+            "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin",
+            "LmxxfNrRuntime.dll", "LmxxfNrRuntime.pak" })
+            report.AppendLine((Exists(name) ? "FOUND  " : "MISSING  ") + name);
+        report.AppendLine("Mochi detected at expected DLL path: " +
+            (root.GetProperty("mochi_runtime_present").GetBoolean() ? "yes" : "no"));
+        report.AppendLine("Daniel pass DLL set complete: " +
+            (root.GetProperty("daniel_pass_present").GetBoolean() ? "yes" : "no"));
+        report.AppendLine("Daniel weights present: " +
+            (root.GetProperty("daniel_weights_present").GetBoolean() ? "yes" : "no"));
+        foreach (var component in root.GetProperty("components").EnumerateArray())
+        {
+            report.AppendLine("Installed record: " + component.GetProperty("asset").GetString());
+            foreach (var path in component.GetProperty("runtime_paths").EnumerateArray())
+                report.AppendLine("  - " + path.GetString());
+        }
+        report.AppendLine("File presence does not guarantee Proton runtime compatibility.");
+        return report.ToString();
+    }
+
     public async Task<IReadOnlyList<ReleaseEntry>> ComponentsAsync(
         CancellationToken token = default)
     {
