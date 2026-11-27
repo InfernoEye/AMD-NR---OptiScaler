@@ -13,6 +13,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import community_bridge as bridge
 import bridge_discovery as discovery
+import bridge_deps as deps
+import hashlib
 
 
 class BridgeTests(unittest.TestCase):
@@ -109,6 +111,58 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(json.loads(completed.stdout)["selected_executable"], str(exe))
         self.assertNotIn("Tkinter", completed.stderr)
+
+    def test_ubuntu_pin_reuses_distro_package_cache_without_downloading(self):
+        blob = b"example pinned distro archive for unit test"
+        name = "libelf1_fake_amd64.deb"
+        expected = hashlib.sha256(blob).hexdigest()
+        pkg = self.root / "apt-cache" / name
+        pkg.parent.mkdir(parents=True)
+        pkg.write_bytes(blob)
+        cached = self.root / "upstream-cache"
+        with patch.object(deps, "UBUNTU_PACKAGES", ((name, expected, "e/elfutils"),)):
+            result = deps.reuse_or_fetch_pinned_ubuntu_packages(
+                cached, self.root / "apt-cache",
+                opener=lambda *args, **kwargs: self.fail("unexpected download"))
+        self.assertIn("Reused verified", result[0])
+        self.assertEqual((cached / name).read_bytes(), blob)
+
+    def test_ubuntu_pin_mirror_recovery_checks_hash(self):
+        blob = b"fake exact pinned Ubuntu package"
+        name = "libelf1_fake_amd64.deb"
+        expected = hashlib.sha256(blob).hexdigest()
+        urls = []
+        class Response(io.BytesIO):
+            def geturl(self):
+                return "https://security.ubuntu.com/ubuntu/pool/main/e/elfutils/" + name
+        def opener(url, timeout):
+            urls.append(url)
+            return Response(blob)
+        with patch.object(deps, "UBUNTU_PACKAGES", ((name, expected, "e/elfutils"),)):
+            result = deps.reuse_or_fetch_pinned_ubuntu_packages(
+                self.root / "verified", self.root / "missing", opener=opener)
+        self.assertIn("SHA-256 verified", result[0])
+        self.assertIn("security.ubuntu.com", urls[0])
+        self.assertEqual((self.root / "verified" / name).read_bytes(), blob)
+
+    def test_ubuntu_pin_refuses_bad_archive_even_when_name_matches(self):
+        name = "libelf1_fake_amd64.deb"
+        cache = self.root / "verified"
+        cache.mkdir()
+        (cache / name).write_bytes(b"modified")
+        with patch.object(deps, "UBUNTU_PACKAGES",
+                          ((name, hashlib.sha256(b"original").hexdigest(), "e/elfutils"),)):
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                deps.reuse_or_fetch_pinned_ubuntu_packages(cache)
+
+    def test_distro_dependency_prompt_is_read_only(self):
+        with patch.object(deps, "distro_info", return_value={"ID": "arch", "PRETTY_NAME": "Arch Linux"}), \\
+                patch.object(deps.ctypes.util, "find_library", return_value=None):
+            report = deps.host_library_status()
+        self.assertEqual(len(report["missing_system_libraries"]), 2)
+        self.assertIn("sudo pacman", report["install_command_preview"])
+        self.assertFalse(report["system_packages_will_be_installed"])
+        self.assertTrue(report["private_rocm_required"])
 
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
