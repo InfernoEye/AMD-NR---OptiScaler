@@ -101,6 +101,38 @@ python3 Launcher/Avalonia/amdnr_launcher.py --bridge-discover-json --exe "/path/
 All changes for this wizard are limited to `Launcher/Avalonia/`, including
 `bridge_discovery.py` and regression tests in `tests/test_community_bridge.py`.
 
+## Primary Linux/Proton installation and existing-file migration
+
+On Linux, the game page's main **Install Linux Bridge** action opens the
+experimental ROCm/HIP bridge wizard, not the legacy Windows-DLL-only installer.
+That installer remains accessible under **Advanced: Legacy DLL Install /
+Repair**. The bridge's preparation step fetches, verifies and stages the
+selected AMDNR native lmxxf or Daniel (through 0.6.0) package. If a valid
+package is already prepared, no second preparation is required.
+
+The **Install Prepared Linux Bridge** action detects conflicting existing
+AMDNR/ReShade hooks and installation records. With a *separate* explicit
+backup-and-replace checkbox, it moves named DLL/configuration entries and
+installation records/backups from the selected executable's folder and its
+Steam game ancestors into a private
+`.amdnr-bridge-migrations/<id>/original` snapshot **on the same drive**
+before invoking AMDNR-Linux's managed installer. It refuses symbolic links,
+unknown paths, and an unresolved earlier migration. The old snapshots are not
+deleted. Normal installations without conflicts still use the strict path.
+
+On failure, the launcher attempts to put original files back, never
+overwriting partially installed bridge files. Any collision remains in the
+snapshot and is shown as a recovery error. The **Advanced** panel includes
+explicit interrupted-migration recovery, which refuses to run while the
+bridge is installed. Managed bridge uninstall restores the previous snapshot
+after upstream uninstall succeeds. The existing Proton prefix and Steam
+launch options are not edited during migration; the wrapper is still copied
+manually into Steam. Do not remove hidden snapshot folders by hand.
+
+This is a user-approved replacement of game hooks, not an assurance of
+runtime compatibility or a bypass for anti-cheat restrictions. Close games
+before installation and keep a separate copy of saves/mod configurations.
+
 ## Current AMDNR host with native lmxxf (no NeuralHub)
 
 The experimental Linux ROCm Bridge now targets the independently published
