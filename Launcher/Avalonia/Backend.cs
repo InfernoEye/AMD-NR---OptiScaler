@@ -205,6 +205,75 @@ public sealed class Backend
             root.GetProperty("ini_present").GetBoolean());
     }
 
+    public async Task<IReadOnlyList<ReleaseEntry>> ComponentsAsync(
+        CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] { "--components-json" }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var results = new List<ReleaseEntry>();
+        foreach (var item in document.RootElement.EnumerateArray())
+            results.Add(new ReleaseEntry(
+                item.GetProperty("tag").GetString() ?? "",
+                item.GetProperty("name").GetString() ?? "",
+                item.GetProperty("asset").GetString() ?? "",
+                item.GetProperty("bytes").GetInt64(),
+                item.GetProperty("prerelease").GetBoolean()));
+        return results;
+    }
+
+    public async Task<IReadOnlyList<ManagedComponent>> InstalledComponentsAsync(
+        string executable, CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(
+            new[] { "--installed-components-json", "--exe", executable }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        return document.RootElement.EnumerateArray()
+            .Select(item => new ManagedComponent(
+                item.GetProperty("asset").GetString() ?? "",
+                item.GetProperty("tag").GetString() ?? "",
+                item.GetProperty("files").GetInt32(),
+                item.GetProperty("modified").EnumerateArray()
+                    .Select(x => x.GetString() ?? "").ToArray()))
+            .ToArray();
+    }
+
+    public async Task<ComponentPreview> PreviewComponentAsync(string executable,
+        string tag, string asset, CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] {
+            "--component-preview", tag, "--component-asset", asset,
+            "--exe", executable }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
+        return new ComponentPreview(
+            root.GetProperty("asset").GetString() ?? "",
+            root.GetProperty("files").EnumerateArray()
+                .Select(x => x.GetString() ?? "").ToArray(),
+            root.GetProperty("conflicts").EnumerateArray()
+                .Select(x => x.GetString() ?? "").ToArray(),
+            root.GetProperty("installable").GetBoolean());
+    }
+
+    public async Task InstallComponentAsync(string executable, string tag,
+        string asset, CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] {
+            "--install-component", tag, "--component-asset", asset,
+            "--exe", executable }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+    }
+
+    public async Task RemoveComponentAsync(string executable, string asset,
+        CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] {
+            "--remove-component", asset, "--exe", executable }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+    }
+
     public async Task<IniSaveResult> SetExtensionLoaderAsync(string exe, string previousSha,
         bool enabled, CancellationToken token = default)
     {
@@ -452,6 +521,11 @@ public sealed record SteamUserOptions(string Status, string? Existing,
 public sealed record InstalledGameSummary(string Name, string Folder,
     string Executable, string Status, string? Alias, int TrackedFiles,
     string? SourceArchive, bool Custom);
+
+public sealed record ManagedComponent(string Asset, string Tag, int FileCount,
+    IReadOnlyList<string> Modified);
+public sealed record ComponentPreview(string Asset, IReadOnlyList<string> Files,
+    IReadOnlyList<string> Conflicts, bool Installable);
 
 public sealed record ExtensionEntry(string Name, long Bytes, bool Managed, bool Modified);
 public sealed record ExtensionInventory(string Folder,
