@@ -77,6 +77,10 @@ public sealed class MainWindow : Window
     private Control? _topNavigation;
     private readonly Dictionary<string, Button> _horizontalNavigation = new();
     private bool _gridView = true;
+    private readonly string _onboardingPath = Path.Combine(
+        Environment.GetEnvironmentVariable("XDG_CONFIG_HOME")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"),
+        "amdnr-linux", "onboarding-v1.txt");
     private readonly string _viewStateFile = Path.Combine(
         Environment.GetEnvironmentVariable("XDG_CONFIG_HOME")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"),
@@ -171,7 +175,76 @@ public sealed class MainWindow : Window
             _controller ??= new JoystickNavigation(action => Dispatcher.UIThread.Post(() => OnControllerAction(action)));
             await LoadLauncherSettingsAsync();
             await RefreshGamesAsync();
+            await ShowOnboardingAsync();
         };
+    }
+
+    private async Task ShowOnboardingAsync(bool replay = false)
+    {
+        if (!replay && File.Exists(_onboardingPath)) return;
+        var pages = new (string Heading, string Description)[]
+        {
+            ("Welcome to AMDNR Linux", "This independent Linux launcher helps you find games, inspect AMDNR packages and manage game files. Steam and Proton settings are not silently changed."),
+            ("Your game library", "Use Grid for artwork cards or List for compact rows. Search, select a game, and confirm the correct Windows executable. Steam, Heroic, Lutris and custom entries can be discovered."),
+            ("Install with control", "Review the package, checksums and proxy DLL before installing. The launcher backs up replaced files. Steam launch options remain a preview for you to copy only if needed."),
+            ("Repair and diagnostics", "Installed tracks recorded files, Doctor checks integrity, and Repair/Recovery handles interrupted operations. Verify the report before changing a game."),
+            ("Linux runtime limitations", "lmxxf has community reports of working under some Proton setups, but compatibility depends on your game and GPU. Daniel is experimental; 0.8.0 is not supported on Linux."),
+        };
+        var dialog = new Window
+        {
+            Title = "AMDNR Linux · Getting started",
+            Width = 540, Height = 350,
+            MinWidth = 390, MinHeight = 310,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = BackgroundBrush,
+        };
+        var body = new StackPanel { Spacing = 16, Margin = new Thickness(28) };
+        var step = Text("", 12, AccentBrush, FontWeight.Bold);
+        var heading = Text("", 25, ForegroundBrush, FontWeight.Bold);
+        var description = Text("", 15, ForegroundBrush);
+        description.MinHeight = 118;
+        var controls = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+        var skip = Button("SKIP INTRODUCTION");
+        var back = Button("← BACK");
+        var next = Button("NEXT →", true);
+        var pageIndex = 0;
+        void Render()
+        {
+            step.Text = $"GETTING STARTED   {pageIndex + 1} / {pages.Length}";
+            heading.Text = pages[pageIndex].Heading;
+            description.Text = pages[pageIndex].Description;
+            back.IsEnabled = pageIndex > 0;
+            next.Content = pageIndex == pages.Length - 1 ? "FINISH" : "NEXT →";
+        }
+        void MarkViewed()
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_onboardingPath)!);
+                File.WriteAllText(_onboardingPath, "completed\n");
+            }
+            catch (IOException) { _status.Text = "Introduction preference couldn't be saved."; }
+            catch (UnauthorizedAccessException) { _status.Text = "Introduction preference couldn't be saved."; }
+        }
+        skip.Click += (_, _) => { MarkViewed(); dialog.Close(); };
+        back.Click += (_, _) => { if (pageIndex > 0) { pageIndex--; Render(); } };
+        next.Click += (_, _) =>
+        {
+            if (pageIndex == pages.Length - 1) { MarkViewed(); dialog.Close(); }
+            else { pageIndex++; Render(); }
+        };
+        controls.Children.Add(skip);
+        controls.Children.Add(back);
+        controls.Children.Add(next);
+        body.Children.Add(step);
+        body.Children.Add(heading);
+        body.Children.Add(description);
+        body.Children.Add(controls);
+        dialog.Content = body;
+        Render();
+        dialog.Opened += (_, _) => next.Focus();
+        await dialog.ShowDialog(this);
     }
 
     private bool ReadViewPreference()
@@ -3371,6 +3444,13 @@ public sealed class MainWindow : Window
                 finally { _busy = false; save.IsEnabled = true; }
             };
             general.Children.Add(save);
+            general.Children.Add(Text("GETTING STARTED", 12, AccentBrush, FontWeight.Bold));
+            general.Children.Add(Text(
+                "The introduction explains the library, user-confirmed setup, recovery and Linux compatibility.",
+                12, MutedBrush));
+            var introButton = Button("REPLAY INTRODUCTION");
+            introButton.Click += async (_, _) => await ShowOnboardingAsync(replay: true);
+            general.Children.Add(introButton);
             credits.Children.Add(Text("OPEN SOURCE & ACKNOWLEDGEMENTS",
                 12, AccentBrush, FontWeight.Bold));
             credits.Children.Add(Text(
