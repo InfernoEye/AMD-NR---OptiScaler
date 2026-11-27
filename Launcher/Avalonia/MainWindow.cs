@@ -2923,6 +2923,8 @@ public sealed class MainWindow : Window
         var restore = Button("RESTORE COMMUNITY INSTALLATION");
         restore.IsEnabled = false;
         restoreControls.Children.Add(restore);
+        var recoverMigration = Button("RECOVER INTERRUPTED FILE MIGRATION");
+        restoreControls.Children.Add(recoverMigration);
         installation.Children.Add(new Expander
         {
             Header = "Advanced: restore separately managed bridge",
@@ -2950,12 +2952,14 @@ public sealed class MainWindow : Window
         bool ready = false;
         bool blocked = true;
         bool communityInstalled = false;
+        bool migrationPending = false;
         string launchOptionText = "";
         void UpdateButtons()
         {
-            install.IsEnabled = !_busy && ready && !communityInstalled &&
-                (!blocked || replacementConsent.IsChecked == true);
+            install.IsEnabled = !_busy && ready && !migrationPending &&
+                (!blocked && !communityInstalled || replacementConsent.IsChecked == true);
             restore.IsEnabled = !_busy && communityInstalled;
+            recoverMigration.IsEnabled = !_busy && migrationPending;
             scan.IsEnabled = !_busy;
             prepare.IsEnabled = !_busy && !ready;
         }
@@ -2971,10 +2975,11 @@ public sealed class MainWindow : Window
                 var state = result.RootElement;
                 ready = state.GetProperty("prepared").GetBoolean();
                 communityInstalled = state.GetProperty("community_installed").GetBoolean();
+                migrationPending = state.GetProperty("migration_pending").GetBoolean();
                 var archiveVerified = state.GetProperty("release_verified").GetBoolean();
                 var conflicts = state.GetProperty("conflicts").EnumerateArray()
                     .Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToArray();
-                blocked = conflicts.Length > 0;
+                blocked = conflicts.Length > 0 || migrationPending;
                 var hostVersion = state.GetProperty("host_version").GetString() ?? "?";
                 var runtimeName = state.GetProperty("selected_runtime").GetString() ?? "lmxxf";
                 packageState.Text = $"Verified release archive: {(archiveVerified ? "ready" : "not downloaded")} · " +
@@ -2984,10 +2989,12 @@ public sealed class MainWindow : Window
                     ? "Existing hooks will be backed up if you approve replacement:\n" +
                       string.Join("\n", conflicts.Take(12))
                     : "No known conflicting hooks. Game/GPU compatibility remains unverified.";
-                installReview.Text = !ready
+                installReview.Text = migrationPending
+                    ? "Interrupted migration detected. Recover it from Advanced before continuing."
+                    : !ready
                     ? "Prepare a Linux bridge runtime before installing."
                     : blocked
-                    ? "Existing files detected. Check the backup-and-replace approval to install."
+                    ? "Existing files detected. Check backup-and-replace approval to install."
                     : "Prepared bridge ready. Review and approve installation.";
             }
             catch (Exception ex)
@@ -2995,6 +3002,7 @@ public sealed class MainWindow : Window
                 blocked = true;
                 ready = false;
                 communityInstalled = false;
+                migrationPending = true;
                 packageState.Text = "Read-only status failed: " + ex.Message;
                 problems.Text = "Installation blocked until checks complete successfully.";
             }
@@ -3108,13 +3116,14 @@ public sealed class MainWindow : Window
             {
                 // Refuse stale decisions in both the Avalonia UI and Python adapter.
                 await CheckStatusAsync();
-                if (!ready || communityInstalled || (blocked && replacementConsent.IsChecked != true))
+                if (!ready || migrationPending ||
+                    ((blocked || communityInstalled) && replacementConsent.IsChecked != true))
                     throw new InvalidOperationException("Review installation and approve replacement where needed.");
                 var command = new List<string> {
                     "--bridge-install", "--approve-bridge-install",
                     "--bridge-runtime", SelectedBridgeRuntime(), "--exe", selection
                 };
-                if (blocked && replacementConsent.IsChecked == true)
+                if ((blocked || communityInstalled) && replacementConsent.IsChecked == true)
                     command.Add("--bridge-backup-and-replace");
                 var (exit, output) = await _backend.RunAsync(command);
                 if (exit != 0) throw new InvalidOperationException(output);
@@ -3165,6 +3174,26 @@ public sealed class MainWindow : Window
                 installResult.Text = "Managed restore stopped: " + ex.Message;
                 await CheckStatusAsync();
             }
+            finally { _busy = false; UpdateButtons(); }
+        };
+        recoverMigration.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null || restoreConsent.IsChecked != true) 
+            {
+                installResult.Text = "Confirm recovery approval under Advanced.";
+                return;
+            }
+            _busy = true;
+            UpdateButtons();
+            try
+            {
+                var (exit, raw) = await _backend.RunAsync(
+                    new[] { "--bridge-recover-migration", "--approve-bridge-remove", "--exe", selection });
+                if (exit != 0) throw new InvalidOperationException(raw);
+                installResult.Text = "Migration recovery checked: " + raw;
+                await CheckStatusAsync();
+            }
+            catch (Exception ex) { installResult.Text = "Recovery needs attention: " + ex.Message; }
             finally { _busy = false; UpdateButtons(); }
         };
         await CheckStatusAsync();
