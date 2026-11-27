@@ -856,6 +856,45 @@ def remove_component(executable: Path, asset: str) -> dict:
             "files": len(rec["files"]), "restored": len(rec.get("replaced", {}))}
 
 
+def runtime_diagnostics(executable: Path) -> dict[str, object]:
+    """Read-only file-level diagnostics for the actual AMDNR proxy/runtime layout."""
+    if not executable.is_file() or executable.is_symlink() or executable.suffix.lower() != ".exe":
+        raise ValueError("Select an existing Windows executable")
+    root = executable.resolve().parent
+    filenames = (
+        "OptiScaler.dll", "dxgi.dll", "version.dll", "winmm.dll", "winhttp.dll",
+        "MochizukiNrRuntime.dll", "dlssnr-amd.asi",
+        "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll",
+        "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin",
+        "LmxxfNrRuntime.dll", "LmxxfNrRuntime.pak",
+    )
+    paths = {}
+    for filename in filenames:
+        path = root / filename
+        paths[filename] = {"exists": path.is_file() and not path.is_symlink(),
+                           "bytes": path.stat().st_size if path.is_file() and not path.is_symlink() else None}
+    plugins = root / "plugins"
+    plugin_asi = []
+    if plugins.is_dir() and not plugins.is_symlink():
+        plugin_asi = sorted(x.name for x in plugins.iterdir()
+                            if x.is_file() and not x.is_symlink() and x.suffix.lower() == ".asi")
+    records = _component_records(executable)
+    components = []
+    for asset, record in records.items():
+        names = list(record.get("files", {})) + list(record.get("replaced", {}))
+        runtime_paths = [name for name in names
+                         if name.casefold().endswith((".dll", ".asi", ".bin", ".pak"))]
+        components.append({"asset": asset, "runtime_paths": runtime_paths[:80],
+                           "managed_files": len(names)})
+    return {"folder": str(root), "files": paths, "plugins_asi": plugin_asi,
+            "components": components,
+            "mochi_runtime_present": paths["MochizukiNrRuntime.dll"]["exists"],
+            "daniel_pass_present": all(paths[f"dlssnr_amd_pass{i}.dll"]["exists"]
+                                      for i in range(1, 4)),
+            "daniel_weights_present": paths["dlssnr_on_amd_weights.bin"]["exists"],
+            "note": "File presence does not establish that a neural runtime initializes under Proton."}
+
+
 def release_catalog(limit: int = 12) -> list[dict[str, object]]:
     """Return only upstream AMDNR full-package ZIP assets from GitHub releases."""
     if not 1 <= limit <= 30:
@@ -2275,6 +2314,8 @@ def main() -> int:
     parser.add_argument("--settings-json", action="store_true", help="Read persistent launcher preferences")
     parser.add_argument("--save-settings-base64", metavar="JSON_B64", help="Save validated launcher preferences")
     parser.add_argument("--ini-json", action="store_true", help="Read OptiScaler.ini beside --exe")
+    parser.add_argument("--runtime-diagnostics-json", action="store_true",
+                        help="Read game-local neural runtime file presence without altering files")
     parser.add_argument("--components-json", action="store_true")
     parser.add_argument("--installed-components-json", action="store_true")
     parser.add_argument("--component-preview", metavar="TAG")
@@ -2351,6 +2392,14 @@ def main() -> int:
                     raise ValueError("Settings payload too large")
                 print(json.dumps(save_launcher_settings(json.loads(payload)), ensure_ascii=False))
         except (OSError, ValueError, TypeError, UnicodeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.runtime_diagnostics_json:
+        if args.exe is None:
+            parser.error("--runtime-diagnostics-json requires --exe")
+        try:
+            print(json.dumps(runtime_diagnostics(args.exe), ensure_ascii=False))
+        except (OSError, ValueError, TypeError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     elif (args.components_json or args.installed_components_json or args.component_preview
