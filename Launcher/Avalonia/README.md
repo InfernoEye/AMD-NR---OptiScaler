@@ -123,6 +123,40 @@ cannot be made, the copy action is disabled. A successful installation
 does not establish that the specific Proton-Wineland version can run the
 selected neural rendering runtime.
 
+## Apply checked add-ons and full AMDNR uninstall
+
+The per-game add-on checkboxes reflect **actual installed component records**:
+checked means installed, unchecked means absent. Uncheck an installed
+component and select **Apply Add-on Changes** to remove it with the managed
+component remover; check an absent official component to preview, verify,
+and install it. This works even if the release catalog is temporarily offline:
+already-installed components remain available for removal.
+
+Modified/missing component files are not silently discarded. If the component
+registry reports modifications, the game page shows a separate approval to
+preserve recoverable copies under
+`$XDG_STATE_HOME/amdnr/managed-components/removed-modified/` (or
+`~/.local/state/amdnr/managed-components/removed-modified/`).
+The removal refuses symlinked files and missing/corrupt original backups.
+It preserves each changed file's contents and SHA-256 manifest before
+removing recorded paths. These recovery snapshots are intentionally kept.
+
+**Uninstall AMDNR** removes recorded managed components (including managed
+lmxxf), then runs the upstream bridge uninstall. The game-page full
+uninstall **does not restore the older AMDNR installation** from the bridge
+migration snapshot, which would otherwise recreate AMDNR. Earlier AMDNR and
+ReShade files are retained privately in
+`<Steam game root>/.amdnr-bridge-migrations/` for explicit recovery and
+are not placed back into the game. Advanced bridge restore retains the
+previous restore behavior. Uninstall never blindly removes unrelated game
+files, third-party hooks or saves, and does not change Steam launch options:
+the user must remove the old wrapper text in Steam Properties.
+
+The selected bridge's native lmxxf runtime is part of the core installation
+and is removed on full uninstall, not independently toggled on/off. Switching
+the core bridge runtime (native lmxxf versus Daniel 0.6) still requires a
+managed bridge reinstall rather than in-place overwrite.
+
 ## Simplified per-game Linux installation
 
 Open **Library → Game**. The game page now contains the primary AMDNR
