@@ -589,7 +589,7 @@ public sealed class MainWindow : Window
         if (_busy) return;
         if (_backend is null)
         {
-            _status.Text = "Linux backend not found; see linux/README.md";
+            _status.Text = "Linux backend not found; see Launcher/Avalonia/README.md";
             return;
         }
         if (string.IsNullOrWhiteSpace(_exe) || !File.Exists(_exe))

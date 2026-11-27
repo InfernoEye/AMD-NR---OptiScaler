@@ -16,17 +16,18 @@ public sealed class Backend
 
     public Backend()
     {
-        var overridePath = Environment.GetEnvironmentVariable("AMDNR_LINUX_BACKEND");
+        var overridePath = Environment.GetEnvironmentVariable("AMDNR_AVALONIA_BACKEND")
+            ?? Environment.GetEnvironmentVariable("AMDNR_LINUX_BACKEND");
         var candidates = new[]
         {
             overridePath,
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../amdnr_linux_launcher.py")),
-            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "linux/amdnr_linux_launcher.py")),
-            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "../amdnr_linux_launcher.py")),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../amdnr_launcher.py")),
+            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "Launcher/Avalonia/amdnr_launcher.py")),
+            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "amdnr_launcher.py")),
         };
         _script = candidates.FirstOrDefault(p => !string.IsNullOrEmpty(p) && File.Exists(p))
             ?? throw new FileNotFoundException(
-                "Linux installer backend not found. Run from repository root or set AMDNR_LINUX_BACKEND.");
+                "Linux installer backend not found. Run from repository root or set AMDNR_AVALONIA_BACKEND.");
     }
 
     public async Task<(int ExitCode, string Output)> RunAsync(

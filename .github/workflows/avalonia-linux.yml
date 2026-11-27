@@ -3,11 +3,11 @@ name: Avalonia Linux build
 on:
   push:
     paths:
-      - "linux/**"
+      - "Launcher/Avalonia/**"
       - ".github/workflows/avalonia-linux.yml"
   pull_request:
     paths:
-      - "linux/**"
+      - "Launcher/Avalonia/**"
       - ".github/workflows/avalonia-linux.yml"
 
 jobs:
@@ -19,6 +19,6 @@ jobs:
         with:
           dotnet-version: "10.0.x"
       - name: Restore
-        run: dotnet restore linux/avalonia/Amdnr.Linux.Desktop.csproj
+        run: dotnet restore Launcher/Avalonia/Amdnr.Avalonia.csproj
       - name: Build Avalonia desktop
-        run: dotnet build linux/avalonia/Amdnr.Linux.Desktop.csproj -c Release --no-restore
+        run: dotnet build Launcher/Avalonia/Amdnr.Avalonia.csproj -c Release --no-restore

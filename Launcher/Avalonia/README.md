@@ -1,12 +1,14 @@
-# AMDNR native Linux desktop (Avalonia, in development)
+# Avalonia launcher
+
+**Platform: Linux.** This is the independent Linux desktop launcher. The original Windows launcher remains under `Launcher/OpenSource/`.
 
 **Preferred native GUI:** Avalonia / .NET 10. From the repository root:
 
 ```bash
-dotnet run --project linux/avalonia/Amdnr.Linux.Desktop.csproj
+dotnet run --project Launcher/Avalonia/Amdnr.Avalonia.csproj
 ```
 
-Install the **.NET 10 SDK** and **Python 3.10+** first. Check with `dotnet --list-sdks`. The project targets `net10.0`, so an older SDK cannot compile it; a newer SDK may work if it supports targeting .NET 10. Run `dotnet --list-runtimes` to verify that `Microsoft.NETCore.App 10.x` is installed for framework-dependent launching. `dotnet run` automatically selects an appropriate installed SDK; no `global.json` pins a specific patch. The Avalonia UI uses the Linux Python installer as its backend. Run from the repository root, or set `AMDNR_LINUX_BACKEND` to an absolute path pointing to `amdnr_linux_launcher.py`.
+Install the **.NET 10 SDK** and **Python 3.10+** first. Check with `dotnet --list-sdks`. The project targets `net10.0`, so an older SDK cannot compile it; a newer SDK may work if it supports targeting .NET 10. Run `dotnet --list-runtimes` to verify that `Microsoft.NETCore.App 10.x` is installed for framework-dependent launching. `dotnet run` automatically selects an appropriate installed SDK; no `global.json` pins a specific patch. The Avalonia UI uses the Linux Python installer as its backend. Run from the repository root, or set `AMDNR_AVALONIA_BACKEND` to an absolute path pointing to `amdnr_linux_launcher.py`.
 
 The Avalonia desktop provides a searchable Steam game library with cached artwork, selected-game details, executable selection, installation-record status, installation/uninstallation with backup restore, Wine DLL override guidance, Doctor preflight checks, and settings.
 
@@ -20,7 +22,7 @@ The Avalonia desktop provides a searchable Steam game library with cached artwor
 Run the independent Python/Tk launcher from this directory:
 
 ```bash
-python3 linux/amdnr_linux_launcher.py
+python3 Launcher/Avalonia/amdnr_launcher.py
 ```
 
 Requirements: Linux, Python **3.10+**, and `python3-tk` for the GUI (on Debian/Ubuntu: `sudo apt install python3-tk`). No .NET or Wine is required to run the manager itself. A Windows game running through **Steam Proton** or Wine is still needed for the installed Windows graphics DLLs.
@@ -33,7 +35,7 @@ The manager can detect standard Steam libraries (including Flatpak Steam), show 
 The game library now shows a **Missing Art** filter and a count of unresolved covers. For an exact list of games that remain unresolved after searching Steam caches and official artwork sources, run:
 
 ```bash
-python3 linux/amdnr_linux_launcher.py --artwork-report --download-artwork
+python3 Launcher/Avalonia/amdnr_launcher.py --artwork-report --download-artwork
 ```
 
 This produces JSON with totals and game names (no local installation paths). Some older/unlisted/removed Steam titles have no available official cover. Use **Change Cover Art** on the game's details to assign a JPG or PNG directly; the selected artwork is stored outside the game and Steam directories.
@@ -41,9 +43,9 @@ This produces JSON with totals and game names (no local installation paths). Som
 ## Command-line operation
 
 ```bash
-python3 linux/amdnr_linux_launcher.py --list
-python3 linux/amdnr_linux_launcher.py --install /path/to/AMDNR.zip --exe "/path/to/Game/Binaries/Win64/Game-Win64-Shipping.exe"
-python3 linux/amdnr_linux_launcher.py --uninstall --exe "/path/to/Game/Binaries/Win64/Game-Win64-Shipping.exe"
+python3 Launcher/Avalonia/amdnr_launcher.py --list
+python3 Launcher/Avalonia/amdnr_launcher.py --install /path/to/AMDNR.zip --exe "/path/to/Game/Binaries/Win64/Game-Win64-Shipping.exe"
+python3 Launcher/Avalonia/amdnr_launcher.py --uninstall --exe "/path/to/Game/Binaries/Win64/Game-Win64-Shipping.exe"
 ```
 
 For a different proxy name add `--alias version.dll` (see `--help`). The installer prints a Steam launch option such as:
@@ -67,4 +69,4 @@ Enter that in the game's Steam **Properties > General > Launch Options**. Keep y
 - **Installing a Windows DLL is not proof of rendering compatibility.** The GPU runtime, HIP/ROCm integration, DXVK/vkd3d-proton, Wine prefix, driver, and the particular AMD GPU all matter. AMDNR Anywhere uses a Windows capture host and is not supported by this native manager.
 - Steam games with anti-cheat may disallow injected DLLs. Avoid modifying protected online games.
 
-Run smoke tests with `python3 -m unittest discover -s linux/tests -v`. No GPU or game is required for these tests.
+Run smoke tests with `python3 -m unittest discover -s Launcher/Avalonia/tests -v`. No GPU or game is required for these tests.

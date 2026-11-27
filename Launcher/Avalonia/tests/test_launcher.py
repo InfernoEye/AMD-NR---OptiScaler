@@ -7,7 +7,7 @@ import zipfile
 from unittest.mock import patch
 
 
-MODULE = Path(__file__).resolve().parents[1] / "amdnr_linux_launcher.py"
+MODULE = Path(__file__).resolve().parents[1] / "amdnr_launcher.py"
 spec = importlib.util.spec_from_file_location("amdnr_linux_launcher", MODULE)
 launcher = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(launcher)
