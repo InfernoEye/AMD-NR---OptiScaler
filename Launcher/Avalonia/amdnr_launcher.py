@@ -2666,6 +2666,13 @@ def main() -> int:
     parser.add_argument("--update-from", type=Path, metavar="ZIP", help="Safely update installed AMDNR package")
     parser.add_argument("--backup-modified", action="store_true", help="Explicit consent to retain/replace changed tracked files")
     parser.add_argument("--recovery-status", action="store_true", help="Inspect interrupted transaction journal")
+    parser.add_argument("--compatibility-json", action="store_true", help="Linux GPU, Proton tools, game process and anti-cheat probe")
+    parser.add_argument("--proton-profile-json", type=Path, metavar="FOLDER", help="Read game-specific Proton preferences")
+    parser.add_argument("--save-proton-profile", type=Path, metavar="FOLDER", help="Save a per-game JSON profile from --profile-json")
+    parser.add_argument("--profile-json", type=str, metavar="JSON", help="Proton profile JSON content")
+    parser.add_argument("--proton-options-json", type=Path, metavar="FOLDER", help="Show safe combined Steam launch preview")
+    parser.add_argument("--support-bundle", action="store_true", help="Create a redacted local diagnostic ZIP")
+    parser.add_argument("--analyze-performance", type=Path, metavar="CSV", help="Read-only MangoHud frame-time statistics")
     parser.add_argument("--recover-transaction", action="store_true", help="Restore crash-recovery snapshot with strict hash checks")
     parser.add_argument("--try-next-proxy", action="store_true", help="Switch clean managed proxy to next unoccupied DLL alias")
     parser.add_argument("--uninstall", action="store_true", help="Uninstall and restore backups")
@@ -2827,6 +2834,33 @@ def main() -> int:
                 result = maintenance.restore_transaction(args.exe)
             else:
                 result = maintenance.next_proxy(args.exe, ALIASES)
+            print(json.dumps(result, ensure_ascii=False))
+        except (OSError, ValueError, TypeError, KeyError, zipfile.BadZipFile) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif (args.compatibility_json or args.proton_profile_json or args.save_proton_profile or
+          args.proton_options_json or args.support_bundle or args.analyze_performance):
+        try:
+            import linux_environment as environment
+            if args.compatibility_json:
+                if args.exe is None:
+                    parser.error("--compatibility-json requires --exe")
+                result = environment.compatibility(args.exe, steam_roots())
+            elif args.proton_profile_json:
+                result = environment.profile(args.proton_profile_json)
+            elif args.save_proton_profile:
+                if args.profile_json is None:
+                    parser.error("--save-proton-profile requires --profile-json")
+                result = environment.save_profile(args.save_proton_profile,
+                                                   json.loads(args.profile_json))
+            elif args.proton_options_json:
+                result = environment.launch_preview(args.proton_options_json, args.alias)
+            elif args.support_bundle:
+                if args.exe is None:
+                    parser.error("--support-bundle requires --exe")
+                result = environment.support_bundle(args.exe)
+            else:
+                result = environment.analyze_mangohud_csv(args.analyze_performance)
             print(json.dumps(result, ensure_ascii=False))
         except (OSError, ValueError, TypeError, KeyError, zipfile.BadZipFile) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
