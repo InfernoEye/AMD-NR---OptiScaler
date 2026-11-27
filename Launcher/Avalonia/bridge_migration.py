@@ -94,7 +94,7 @@ def snapshot_existing(executable: Path) -> dict:
         if not record.is_file() or record.is_symlink():
             raise ValueError("Unrecognized prior migration snapshot; inspect before replacing.")
         state = json.loads(record.read_text(encoding="utf-8")).get("status")
-        if state not in ("installed", "restored"):
+        if state not in ("installed", "restored", "retained_after_uninstall"):
             raise ValueError("Interrupted migration exists; recover it before retrying.")
     snapshot = base / uuid.uuid4().hex
     snapshot.mkdir(mode=0o700)
@@ -124,6 +124,24 @@ def mark_installed(snapshot: Path) -> None:
         raise ValueError("Unexpected migration state before bridge installation.")
     doc["status"] = "installed"
     _manifest(snapshot, doc)
+
+
+def retain_after_full_uninstall(snapshot: Path) -> dict:
+    """Keep earlier AMDNR/ReShade files recoverable but do not reinstall them.
+
+    The user requested full AMDNR uninstall: restoring prior AMDNR hooks would
+    immediately re-create an installation. No game paths are modified here.
+    """
+    if snapshot.is_symlink() or not (snapshot / MANIFEST).is_file():
+        raise ValueError("Unsafe or missing migration snapshot")
+    doc = json.loads((snapshot / MANIFEST).read_text(encoding="utf-8"))
+    root = Path(doc["root"])
+    if snapshot.parent.resolve() != (root / SNAPSHOTS).resolve() or doc.get("status") != "installed":
+        raise ValueError("Unexpected migration snapshot state")
+    doc["status"] = "retained_after_uninstall"
+    _manifest(snapshot, doc)
+    return {"snapshot": str(snapshot), "retained_files": len(doc.get("files", [])),
+            "restored_to_game": False}
 
 
 def latest_installed_snapshot(executable: Path) -> Path | None:
