@@ -2654,6 +2654,8 @@ def main() -> int:
                         help="Read-only community ROCm bridge compatibility and conflict status")
     parser.add_argument("--bridge-check-updates-json", action="store_true",
                         help="Check upstream bridge releases; unknown versions require manual review")
+    parser.add_argument("--bridge-runtime", choices=("lmxxf", "0.6.0", "0.5.1", "0.5.0", "0.4.3", "0.4.1", "0.4.0"),
+                        default="lmxxf", help="Native lmxxf or an explicitly pinned Daniel runtime up to 0.6.0")
     parser.add_argument("--bridge-prepare", type=Path, metavar="COMPILER",
                         help="Download pinned GPL community source and prepare bridge using your own shader compiler")
     parser.add_argument("--bridge-install", action="store_true",
@@ -2676,16 +2678,16 @@ def main() -> int:
                 import bridge_discovery
                 result = bridge_discovery.discover(args.exe)
             elif args.bridge_status_json:
-                result = community_bridge.status(args.exe)
+                result = community_bridge.status(args.exe, args.bridge_runtime)
             elif args.bridge_check_updates_json:
                 result = community_bridge.check_releases()
             elif args.bridge_prepare is not None:
-                result = community_bridge.prepare(args.bridge_prepare)
+                result = community_bridge.prepare(args.bridge_prepare, args.bridge_runtime)
             else:
                 if args.exe is None:
                     parser.error("--bridge-install/--bridge-remove require --exe")
                 if args.bridge_install:
-                    result = community_bridge.install(args.exe, args.approve_bridge_install)
+                    result = community_bridge.install(args.exe, args.approve_bridge_install, args.bridge_runtime)
                 else:
                     result = community_bridge.remove(args.exe, args.approve_bridge_remove)
             print(json.dumps(result, ensure_ascii=False))
