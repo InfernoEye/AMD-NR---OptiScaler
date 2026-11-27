@@ -108,14 +108,15 @@ public sealed class Backend
         if (exit != 0) throw new InvalidOperationException(output);
     }
 
-    public async Task<IReadOnlyList<ExecutableEntry>> ExecutablesAsync(
+    public async Task<ExecutableScan> ScanExecutablesAsync(
         string gameFolder, CancellationToken token = default)
     {
-        var (exit, output) = await RunAsync(new[] { "--exes-json", gameFolder }, token);
+        var (exit, output) = await RunAsync(new[] { "--exe-scan-json", gameFolder }, token);
         if (exit != 0) throw new InvalidOperationException(output);
         using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
         var results = new List<ExecutableEntry>();
-        foreach (var item in document.RootElement.EnumerateArray())
+        foreach (var item in root.GetProperty("candidates").EnumerateArray())
         {
             var path = item.GetProperty("path").GetString();
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
@@ -124,8 +125,16 @@ public sealed class Backend
                 item.GetProperty("suspicious").GetBoolean(),
                 item.GetProperty("auto_select").GetBoolean()));
         }
-        return results;
+        var native = root.GetProperty("native").EnumerateArray()
+            .Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToArray();
+        return new ExecutableScan(results, native,
+            root.GetProperty("reason").GetString() ?? "unknown",
+            root.GetProperty("partial").GetBoolean());
     }
+
+    public async Task<IReadOnlyList<ExecutableEntry>> ExecutablesAsync(
+        string gameFolder, CancellationToken token = default)
+        => (await ScanExecutablesAsync(gameFolder, token)).Candidates;
 
     public async Task<IReadOnlyList<ReleaseEntry>> ReleasesAsync(CancellationToken token = default)
     {
@@ -153,6 +162,9 @@ public sealed record InstallationReport(bool Installed, string Status, string? A
     string? SourceArchive, string? SourceSha256, int Files, int Verified,
     int Missing, int Modified, int BackupsMissing, string? Error);
 
+
+public sealed record ExecutableScan(IReadOnlyList<ExecutableEntry> Candidates,
+    IReadOnlyList<string> NativeFiles, string Reason, bool Partial);
 
 public sealed record ExecutableEntry(string Path, bool Recommended, bool Suspicious, bool AutoSelect)
 {
