@@ -118,12 +118,13 @@ public sealed class MainWindow : Window
         };
         KeyDown += (_, e) =>
         {
-            if (e.Key == Key.F5)
+            if (e.Key == Key.F5 && !_busy)
             {
                 _ = RefreshGamesAsync();
                 e.Handled = true;
             }
-            else if (e.Key == Key.Escape)
+            else if (e.Key == Key.Escape && !_busy &&
+                FocusManager?.GetFocusedElement() is not TextBox)
             {
                 ShowLibrary();
                 e.Handled = true;
@@ -350,6 +351,8 @@ public sealed class MainWindow : Window
                 combo.IsDropDownOpen = !combo.IsDropDownOpen;
             else if (focused is CheckBox checkbox && checkbox.IsEnabled)
                 checkbox.IsChecked = !(checkbox.IsChecked ?? false);
+            else if (focused is TextBox textbox && textbox.IsEnabled)
+                textbox.Focus();
             return;
         }
         // Keyboard Tab order is a stable fallback for joystick layouts on
@@ -364,6 +367,8 @@ public sealed class MainWindow : Window
         var next = index < 0 ? 0
             : (index + (backwards ? candidates.Count - 1 : 1)) % candidates.Count;
         candidates[next].Focus();
+        // Keep focused controls visible when using a gamepad on long pages.
+        candidates[next].BringIntoView();
     }
 
     private static IBrush Brush(string hex) => new SolidColorBrush(Color.Parse(hex));
