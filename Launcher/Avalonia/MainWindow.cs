@@ -35,6 +35,7 @@ public sealed class MainWindow : Window
     private GameEntry? _selectedGame;
     private IReadOnlyList<ExecutableEntry> _exeCandidates = Array.Empty<ExecutableEntry>();
     private bool _showAlternativeExecutables;
+    private bool _onGameDetails;
     private readonly Dictionary<string, Button> _navigation = new();
     private Backend? _backend;
     private List<GameEntry> _games = new();
@@ -200,7 +201,7 @@ public sealed class MainWindow : Window
         return header;
     }
 
-    private void AdjustWindowForContent(bool gameDetails)
+    private void AdjustWindowForContent(bool gameDetails, bool resetScroll = true)
     {
         if (WindowState != WindowState.Normal) return;
         // Fit game details within the usable screen where possible, and scroll
@@ -218,7 +219,7 @@ public sealed class MainWindow : Window
             SizeToContent = SizeToContent.Height;
             Dispatcher.UIThread.Post(() =>
             {
-                if (_currentSection != "Library" || _selectedGame is null ||
+                if (!_onGameDetails || _selectedGame is null ||
                     WindowState != WindowState.Normal) return;
                 _content.Measure(new Size(Math.Max(500, Bounds.Width - 290),
                     double.PositiveInfinity));
@@ -232,12 +233,14 @@ public sealed class MainWindow : Window
             SizeToContent = SizeToContent.Manual;
             Height = Math.Min(750, MaxHeight);
         }
-        _pageScroller.Offset = new Vector(0, 0);
+        if (resetScroll)
+            _pageScroller.Offset = new Vector(0, 0);
     }
 
     private void Clear(string section)
     {
         _content.Children.Clear();
+        _onGameDetails = false;
         _currentSection = section;
         _breadcrumb.Text = "AMDNR  /  " + section;
         Highlight(section);
@@ -478,6 +481,7 @@ public sealed class MainWindow : Window
         if (_selectedGame is not { } game) { ShowLibrary(); return; }
         Clear("Library");
         _breadcrumb.Text = "AMDNR  /  Library  /  " + game.Name;
+        _onGameDetails = true;
 
         var back = Button("←  ALL GAMES");
         back.Click += (_, _) => ShowLibrary();
@@ -674,7 +678,7 @@ public sealed class MainWindow : Window
                         foreach (var name in trackedFiles)
                             fileList.Children.Add(Text("•  " + name, 12, MutedBrush));
                     }
-                    AdjustWindowForContent(true);
+                    AdjustWindowForContent(true, resetScroll: false);
                 };
                 controls.Children.Add(showFiles);
             }
