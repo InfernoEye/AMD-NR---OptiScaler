@@ -77,6 +77,64 @@ class LauncherTests(unittest.TestCase):
             }])
             self.assertEqual(launcher.installed_games_overview(), [])
 
+    def test_extension_inventory_loader_toggle_and_backup(self):
+        ini = self.game / "OptiScaler.ini"
+        ini.write_text("[Other]\nKey=1\n[Plugins]\nLoadAsiPlugins=false\n")
+        plugins = self.game / "plugins"
+        plugins.mkdir()
+        (plugins / "Existing.asi").write_bytes(b"existing")
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
+            before = launcher.extension_inventory(self.exe)
+            self.assertFalse(before["enabled"])
+            self.assertFalse(before["plugins"][0]["managed"])
+            initial = launcher.ini_snapshot(self.exe)
+            changed = launcher.set_extension_loader(self.exe, initial["sha256"], True)
+            self.assertEqual(changed["status"], "saved")
+            self.assertTrue(Path(changed["backup"]).is_file())
+            self.assertTrue(launcher.extension_inventory(self.exe)["enabled"])
+            with self.assertRaisesRegex(ValueError, "changed"):
+                launcher.set_extension_loader(self.exe, initial["sha256"], False)
+            current = launcher.ini_snapshot(self.exe)
+            launcher.set_extension_loader(self.exe, current["sha256"], False)
+            self.assertFalse(launcher.extension_inventory(self.exe)["enabled"])
+            self.assertIn("Key=1", ini.read_text())
+
+    def test_extension_import_remove_hash_guard_and_external_preservation(self):
+        config = self.game / "OptiScaler.ini"
+        config.write_text("[Plugins]\nLoadAsiPlugins=true\n")
+        incoming = self.root / "MyPlugin.asi"
+        incoming.write_bytes(b"trusted input")
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
+            added = launcher.import_extension(self.exe, incoming)
+            self.assertEqual(added["status"], "installed")
+            record = launcher.extension_inventory(self.exe)
+            self.assertEqual(record["plugins"][0]["name"], "MyPlugin.asi")
+            self.assertTrue(record["plugins"][0]["managed"])
+            with self.assertRaisesRegex(ValueError, "already exists"):
+                launcher.import_extension(self.exe, incoming)
+            target = self.game / "plugins/MyPlugin.asi"
+            target.write_bytes(b"changed by another tool")
+            with self.assertRaisesRegex(ValueError, "modified"):
+                launcher.remove_managed_extension(self.exe, "MyPlugin.asi")
+            self.assertTrue(target.is_file())
+            target.write_bytes(b"trusted input")
+            launcher.remove_managed_extension(self.exe, "MyPlugin.asi")
+            self.assertFalse(target.exists())
+
+    def test_extension_refuses_symlink_and_outside_source(self):
+        (self.game / "plugins").symlink_to(self.root, target_is_directory=True)
+        incoming = self.root / "Extension.asi"
+        incoming.write_bytes(b"test")
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                launcher.import_extension(self.exe, incoming)
+            (self.game / "plugins").unlink()
+            (self.game / "plugins").mkdir()
+            (self.game / "plugins/Outside.asi").write_bytes(b"external")
+            with self.assertRaisesRegex(ValueError, "not managed"):
+                launcher.remove_managed_extension(self.exe, "Outside.asi")
+            self.assertTrue((self.game / "plugins/Outside.asi").is_file())
+
     def test_ini_editor_preserves_unknown_settings_and_backups(self):
         ini = self.game / "OptiScaler.ini"
         original = (b"\xef\xbb\xbf[Upscaling]\r\n; keep this comment\r\n"
