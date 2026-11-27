@@ -179,10 +179,10 @@ def preview_bridge_launch(existing: str | None, wrapper: str,
     current = existing.strip()
     if not wrapper.startswith("/") or any(ch in wrapper for ch in "\x00\r\n"):
         raise ValueError("Bridge wrapper path must be an absolute regular path.")
-    quoted_wrapper = shlex.quote(wrapper)
-    # Steam's command processor is shell-like. Prefer a double quoted path
-    # because the upstream preview already uses it and paths can contain spaces.
-    quoted_wrapper = '"' + wrapper.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    # Shell-special characters must not expand when pasted into Steam.
+    # Otherwise use familiar double quotes to match the upstream launcher.
+    quoted_wrapper = (shlex.quote(wrapper) if any(ch in wrapper for ch in "$" + chr(96))
+                      else '"' + wrapper.replace("\\", "\\\\").replace('"', '\\"') + '"')
     removed: list[str] = []
     kept: list[str] = []
     review: list[str] = []
