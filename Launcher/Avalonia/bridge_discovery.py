@@ -38,6 +38,12 @@ def is_x64_pe(path: Path) -> bool:
             header = stream.read(64)
             if len(header) < 64 or header[:2] != b"MZ":
                 return False
+            # The upstream bridge rejects Wine's builtin and placeholder DLLs.
+            # These are commonly present in Steam's compatdata prefix.
+            stream.seek(0)
+            first = stream.read(512)
+            if b"Wine builtin DLL" in first or b"Wine placeholder DLL" in first:
+                return False
             pe_offset = struct.unpack_from("<I", header, 0x3c)[0]
             if pe_offset < 64 or pe_offset > min(length - 26, 1024 * 1024):
                 return False
@@ -45,9 +51,13 @@ def is_x64_pe(path: Path) -> bool:
             pe = stream.read(26)
             if len(pe) < 26 or pe[:4] != b"PE\x00\x00":
                 return False
-            # 0x8664 = AMD64, 0x20b = PE32+ optional header
+            # Upstream also requires a sufficiently sized optional header
+            # and the DLL image flag; a mere x64 PE marker isn't enough.
+            optional_size, flags = struct.unpack_from("<HH", pe, 20)
             return (struct.unpack_from("<H", pe, 4)[0] == 0x8664 and
-                    struct.unpack_from("<H", pe, 24)[0] == 0x20b)
+                    struct.unpack_from("<H", pe, 24)[0] == 0x20b and
+                    optional_size >= 112 and bool(flags & 0x2000) and
+                    pe_offset + 24 + optional_size <= length)
     except (OSError, ValueError, struct.error):
         return False
 
@@ -99,6 +109,7 @@ def find_compilers(exe: Path, *, include_library: bool = True) -> list[dict]:
             dirs[:] = [item for item in dirs if not (base / item).is_symlink()
                        and item.casefold() not in {
                            ".git", "shadercache", "compatdata", "node_modules",
+                           "pfx", "dosdevices",
                            "amdnr_backup", "amdnr-linux", "download", "downloads"
                        }
                        # Proton distributions bundle Wine-provided DLLs; they
@@ -195,6 +206,6 @@ def discover(exe: Path, *, include_library: bool = True) -> dict:
         "proton_installations": _proton_candidates(exe),
         "proton_active": "unknown; Steam launch options and actual runtime were not read or modified",
         "compiler_candidates": candidates,
-        "compiler_note": "Candidates only match native x64 PE structure. Verify provenance and permission to use your own compiler before approving preparation.",
+        "compiler_note": "Candidates passed x64 DLL structure and Wine-builtin checks, but publisher is unverified. Wine/Proton compatdata DLLs are not suitable. A native Microsoft DLL from any game you own can be used without editing that game.",
         "automatic_changes": False,
     }
