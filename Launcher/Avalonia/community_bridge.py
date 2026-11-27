@@ -489,6 +489,9 @@ def install(exe: Path, approved: bool, runtime: str = "lmxxf", *, replace_existi
     report = status(exe, runtime)
     if not report["prepared"]:
         raise ValueError("Prepare the checksum-verified community package first.")
+    if report.get("community_installed"):
+        raise ValueError("An existing community bridge is installed. Restore it using its managed "
+                         "uninstaller before installing a different runtime.")
     from bridge_migration import pending_snapshot
     pending = pending_snapshot(exe)
     if pending is not None:
