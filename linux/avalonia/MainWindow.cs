@@ -42,6 +42,7 @@ public sealed class MainWindow : Window
     private ComboBox? _aliasBox;
     private bool _busy;
     private string _libraryQuery = "";
+    private bool _missingArtOnly;
     private StackPanel? _libraryResults;
     private TextBox? _librarySearch;
 
@@ -205,7 +206,7 @@ public sealed class MainWindow : Window
         _content.Children.Add(Text("Detected Steam installations. Choose a game to manage AMDNR.",
             14, MutedBrush));
 
-        var toolbar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 12 };
+        var toolbar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), ColumnSpacing = 12 };
         _librarySearch = new TextBox
         {
             Text = _libraryQuery,
@@ -220,9 +221,17 @@ public sealed class MainWindow : Window
             RenderLibraryResults();
         };
         toolbar.Children.Add(_librarySearch);
+        var missing = Button(_missingArtOnly ? "SHOW ALL" : "MISSING ART");
+        missing.Click += (_, _) =>
+        {
+            _missingArtOnly = !_missingArtOnly;
+            ShowLibrary();
+        };
+        Grid.SetColumn(missing, 1);
+        toolbar.Children.Add(missing);
         var manual = Button("+  Add manually");
         manual.Click += (_, _) => ShowInstall();
-        Grid.SetColumn(manual, 1);
+        Grid.SetColumn(manual, 2);
         toolbar.Children.Add(manual);
         _content.Children.Add(toolbar);
 
@@ -236,10 +245,13 @@ public sealed class MainWindow : Window
         if (_libraryResults is null) return;
         _libraryResults.Children.Clear();
         var filtered = _games.Where(game =>
-            game.Name.Contains(_libraryQuery, StringComparison.OrdinalIgnoreCase) ||
-            game.Folder.Contains(_libraryQuery, StringComparison.OrdinalIgnoreCase)).ToList();
+            (!_missingArtOnly || string.IsNullOrEmpty(game.Artwork)) &&
+            (game.Name.Contains(_libraryQuery, StringComparison.OrdinalIgnoreCase) ||
+             game.Folder.Contains(_libraryQuery, StringComparison.OrdinalIgnoreCase))).ToList();
+        var missingCount = _games.Count(game => string.IsNullOrEmpty(game.Artwork));
         _libraryResults.Children.Add(Text(
-            $"{filtered.Count} of {_games.Count} games", 12, AccentBrush, FontWeight.SemiBold));
+            $"{filtered.Count} of {_games.Count} games  •  {missingCount} covers missing",
+            12, AccentBrush, FontWeight.SemiBold));
 
         if (filtered.Count == 0)
         {
@@ -248,7 +260,8 @@ public sealed class MainWindow : Window
                 20, ForegroundBrush, FontWeight.SemiBold));
             empty.Children.Add(Text(_games.Count == 0
                 ? "Check Steam's library folders, refresh, or choose an executable manually."
-                : "Try searching for a shorter name or clear the search field.", 13, MutedBrush));
+                : _missingArtOnly ? "All visible games have covers. Choose SHOW ALL to return." :
+                    "Try searching for a shorter name or clear the search field.", 13, MutedBrush));
             var action = Button(_games.Count == 0 ? "Choose an executable" : "Clear search", true);
             action.Click += (_, _) =>
             {
