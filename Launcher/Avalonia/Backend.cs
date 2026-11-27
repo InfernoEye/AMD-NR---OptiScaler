@@ -219,13 +219,26 @@ public sealed class Backend
         report.AppendLine("Game runtime folder: " +
             root.GetProperty("folder").GetString());
         foreach (var name in new[] {
-            "MochizukiNrRuntime.dll", "dlssnr-amd.asi",
+            "MochizukiNrRuntime.dll", "dlssnr-amd/dlssnr.bin",
             "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll",
             "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin",
             "LmxxfNrRuntime.dll", "LmxxfNrRuntime.pak" })
             report.AppendLine((Exists(name) ? "FOUND  " : "MISSING  ") + name);
-        report.AppendLine("Mochi detected at expected DLL path: " +
-            (root.GetProperty("mochi_runtime_present").GetBoolean() ? "yes" : "no"));
+        bool mochiDll = root.GetProperty("mochi_runtime_present").GetBoolean();
+        bool mochiModel = root.GetProperty("mochi_model_present").GetBoolean();
+        bool mochiShaders = root.GetProperty("mochi_shader_dir_present").GetBoolean();
+        bool mochiAco = root.GetProperty("mochi_aco_dir_present").GetBoolean();
+        report.AppendLine("Mochi native DLL present: " + (mochiDll ? "yes" : "no"));
+        report.AppendLine("Mochi locally extracted model present: " + (mochiModel ? "yes" : "no"));
+        report.AppendLine("Mochi shader directory present: " + (mochiShaders ? "yes" : "no"));
+        report.AppendLine("Mochi ACO directory present: " + (mochiAco ? "yes" : "no"));
+        report.AppendLine("Legacy dlssnr-amd.asi is NOT required by current Mochi native DLL releases.");
+        if (mochiDll && !mochiModel)
+            report.AppendLine("MOCHI SETUP INCOMPLETE: Runtime DLL exists but dlssnr-amd/dlssnr.bin is missing. " +
+                "This model must be prepared locally from a verified user-supplied NVIDIA source. " +
+                "Installing the component ZIP alone does not provide extracted model weights.");
+        if (mochiDll && mochiModel)
+            report.AppendLine("Mochi DLL and model are present; in-game initialization is still unverified.");
         report.AppendLine("Daniel pass DLL set complete: " +
             (root.GetProperty("daniel_pass_present").GetBoolean() ? "yes" : "no"));
         report.AppendLine("Daniel weights present: " +
