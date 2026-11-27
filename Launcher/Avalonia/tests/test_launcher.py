@@ -300,6 +300,17 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(next(x for x in candidates
                              if x["path"].endswith("setup.exe"))["suspicious"])
 
+    def test_developer_console_is_ranked_below_real_game(self):
+        game_exe = self.game / "game/bin/win64/game.exe"
+        console = self.game / "game/bin/win64/vconsole2.exe"
+        game_exe.parent.mkdir(parents=True)
+        game_exe.write_bytes(b"game")
+        console.write_bytes(b"console")
+        candidates = launcher.executable_candidates(self.game)
+        self.assertEqual(candidates[0]["path"], str(game_exe))
+        self.assertTrue(next(x for x in candidates
+                             if x["path"] == str(console))["suspicious"])
+
     def test_executable_candidates_empty_for_unknown_game(self):
         self.assertEqual(launcher.executable_candidates(self.root / "missing"), [])
 
