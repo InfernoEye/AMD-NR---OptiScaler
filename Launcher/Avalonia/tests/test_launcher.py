@@ -398,6 +398,31 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(next(x for x in candidates
                              if x["path"] == str(console))["suspicious"])
 
+    def test_steam_primary_launch_overrides_ambiguous_filename_scoring(self):
+        (self.game / "Editor.exe").write_bytes(b"editor")
+        primary = self.game / "ActualGame.exe"
+        primary.write_bytes(b"target")
+        report = {"source": "steam_cache", "reason": "steam_primary",
+                  "selected": str(primary), "windows_candidates": [str(primary)],
+                  "linux_launches": 1}
+        with patch.object(launcher, "steam_launch_for_directory", return_value=report):
+            result = launcher.executable_scan(self.game)
+        self.assertEqual(result["reason"], "steam_primary")
+        self.assertEqual(result["candidates"][0]["path"], str(primary))
+        self.assertTrue(result["candidates"][0]["auto_select"])
+
+    def test_steam_tool_metadata_never_automatically_picks_exe(self):
+        report = {"source": "steam_cache", "reason": "not_a_game",
+                  "selected": None, "windows_candidates": [], "linux_launches": 0}
+        with patch.object(launcher, "steam_launch_for_directory", return_value=report):
+            result = launcher.executable_scan(self.game)
+        self.assertFalse(any(c["auto_select"] for c in result["candidates"]))
+
+    def test_custom_games_do_not_require_steam_cache(self):
+        report = launcher.steam_launch_for_directory(self.game)
+        self.assertEqual(report["reason"], "not_steam_install")
+        self.assertIsNone(report["selected"])
+
     def test_strong_executable_match_auto_selects(self):
         actual = self.game / "Binaries/Win64/Sample-Win64-Shipping.exe"
         console = self.game / "Binaries/Win64/vconsole.exe"
