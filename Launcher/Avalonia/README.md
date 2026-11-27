@@ -33,6 +33,25 @@
 > Windows DLL will run. Doctor can create a locally stored, redacted
 > AMDNR support bundle; it is not a separate benchmarking tool.
 
+## Windows-inspired Linux UI (in progress)
+
+The independent Avalonia interface now supports artwork-forward **Grid** and
+compact **List** library views. Grid uses left-hand workspace navigation;
+List moves navigation to a horizontal top bar, as in the visual reference
+provided for the official Windows launcher. On narrow windows, top navigation
+is used automatically without changing the saved Grid/List preference.
+
+The selected preference persists under the user's XDG configuration directory.
+Both views use the same library data, filters, detected executables and
+installation records; switching views never changes game files or Steam options.
+The UI is a Linux-only implementation; no Windows launcher code was copied.
+
+The screenshot-guided redesign is **not complete**. Outstanding visual work
+includes responsive game-detail artwork, improved focus/hover visibility,
+a first-run tour, language options, refined settings cards and hardware
+validation of controller navigation. Unsupported Windows-only Anywhere/Desktop
+NR features must not be presented as working Linux features.
+
 **Platform: Linux.** This is the independent Linux desktop launcher. The original Windows launcher remains under `Launcher/OpenSource/`.
 
 **Preferred native GUI:** Avalonia / .NET 10. From the repository root:
