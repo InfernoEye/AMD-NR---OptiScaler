@@ -1918,6 +1918,7 @@ public sealed class MainWindow : Window
         var componentActions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
         var loadComponents = Button("LOAD OFFICIAL COMPONENTS");
         var previewComponent = Button("DOWNLOAD & PREVIEW");
+        var getDaniel = Button("GET DANIEL 0.6.0");
         var installComponent = Button("INSTALL PREVIEWED COMPONENT", true);
         var replaceComponent = Button("BACK UP & REPLACE CONFLICTS");
         previewComponent.IsEnabled = false;
@@ -1925,6 +1926,7 @@ public sealed class MainWindow : Window
         replaceComponent.IsEnabled = false;
         componentActions.Children.Add(loadComponents);
         componentActions.Children.Add(previewComponent);
+        componentActions.Children.Add(getDaniel);
         componentActions.Children.Add(installComponent);
         componentActions.Children.Add(replaceComponent);
         official.Children.Add(componentActions);
@@ -2086,6 +2088,54 @@ public sealed class MainWindow : Window
             }
             catch (Exception ex) { _status.Text = "Component preview failed: " + ex.Message; }
             finally { _busy = false; previewComponent.IsEnabled = true; }
+        };
+        // One guided action discovers the historical official runtime and downloads
+        // a checked preview; installation is still explicit and never silent.
+        getDaniel.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null) return;
+            _busy = true;
+            getDaniel.IsEnabled = false;
+            installComponent.IsEnabled = false;
+            replaceComponent.IsEnabled = false;
+            previewedTag = null;
+            previewedAsset = null;
+            previewReplaceable = false;
+            previewDetails.Children.Clear();
+            _status.Text = "Resolving and verifying official Daniel 0.6.0 runtime…";
+            try
+            {
+                var entries = await _backend.ComponentsAsync();
+                var daniel = entries.FirstOrDefault(x =>
+                    x.Asset == "v0.6.0-Runtime.zip" && x.Tag == "Alpha0.3.5.5R4");
+                if (daniel is null)
+                    throw new InvalidOperationException("Official Daniel runtime not found.");
+                componentPicker.ItemsSource = entries.ToArray();
+                componentPicker.SelectedItem = daniel;
+                var result = await _backend.PreviewComponentAsync(selected, daniel.Tag, daniel.Asset);
+                if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                previewDetails.Children.Add(Text("Daniel 0.6.0 · " + result.FileCount +
+                    " runtime/attribution files · " + result.NewFileCount + " new · " +
+                    result.IdenticalCount + " identical · " + result.ConflictCount +
+                    " differing/unsafe files. " +
+                    string.Join(", ", result.Files.Take(8)), 12, MutedBrush));
+                if (!result.SafetyLimitExceeded &&
+                    (result.Installable ||
+                     (result.ConflictCount > 0 &&
+                      result.ConflictCount == result.ReplaceableCount)))
+                {
+                    previewedTag = daniel.Tag;
+                    previewedAsset = daniel.Asset;
+                    previewReplaceable = result.ConflictCount > 0;
+                    installComponent.IsEnabled = result.Installable;
+                    replaceComponent.IsEnabled = previewReplaceable;
+                    _status.Text = "Daniel 0.6.0 package verified. Review and choose install.";
+                }
+                else
+                    _status.Text = "Daniel runtime preview blocked; existing unsafe files or archive limits.";
+            }
+            catch (Exception ex) { _status.Text = "Daniel runtime download failed: " + ex.Message; }
+            finally { _busy = false; getDaniel.IsEnabled = true; }
         };
         installComponent.Click += async (_, _) =>
         {
