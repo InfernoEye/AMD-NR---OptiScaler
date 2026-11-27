@@ -1757,10 +1757,7 @@ public sealed class MainWindow : Window
             installed ? AccentBrush : MutedBrush));
         summary.Children.Add(Text(game.Folder, 12, MutedBrush));
         var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
-        var install = Button(installed ? "INSTALL / MIGRATE LINUX BRIDGE" : "INSTALL LINUX BRIDGE", true);
-        install.IsEnabled = _exe is not null && File.Exists(_exe);
-        install.Click += (_, _) => ShowInstall();
-        actions.Children.Add(install);
+        // Install/uninstall and add-ons now live in the single game setup panel below.
         var doctor = Button(UiLanguage.Translate("Doctor").ToUpperInvariant());
         doctor.Click += (_, _) => ShowDoctor();
         actions.Children.Add(doctor);
@@ -1772,9 +1769,7 @@ public sealed class MainWindow : Window
             var configure = Button(UiLanguage.Translate("Configure AMDNR").ToUpperInvariant());
             configure.Click += (_, _) => ShowGameConfiguration();
             summary.Children.Add(configure);
-            var extensions = Button(UiLanguage.Translate("Manage extensions").ToUpperInvariant());
-            extensions.Click += (_, _) => ShowExtensions();
-            summary.Children.Add(extensions);
+
         }
         var coverButton = Button(UiLanguage.Translate("Change cover art").ToUpperInvariant());
         coverButton.Click += async (_, _) =>
@@ -1924,160 +1919,320 @@ public sealed class MainWindow : Window
         }
         _content.Children.Add(Panel(detail));
 
-        var setup = new StackPanel { Spacing = 11 };
-        setup.Children.Add(Text("GAME SETUP  /  QUICK ACTIONS", 12, AccentBrush, FontWeight.Bold));
-        var selectedExe = !string.IsNullOrWhiteSpace(_exe) && File.Exists(_exe);
-        var savedAlias = selectedExe ? RecordedAlias(_exe!) : null;
-        var effectiveAlias = savedAlias ?? _alias;
-        setup.Children.Add(Text(selectedExe
-            ? "✓  Windows executable ready: " + Path.GetFileName(_exe!)
-            : nativeOnly ? "○  Native Linux build detected; Windows DLL setup unavailable."
-            : "○  Select a Windows game executable to continue.", 13,
-            selectedExe ? ForegroundBrush : MutedBrush));
-        setup.Children.Add(Text(HasInstallRecord()
-            ? "✓  AMDNR installation recorded (integrity not yet verified)."
-            : "○  AMDNR installation not recorded for this executable.", 13, MutedBrush));
-        if (selectedExe)
-        {
-            var steamOptions = _steamUserOptions;
-            var command = game.Custom ? ProtonOverride(effectiveAlias) :
-                steamOptions?.Preview;
-            setup.Children.Add(Text("STEAM / PROTON LAUNCH OPTIONS", 11, MutedBrush,
-                FontWeight.Bold));
-            if (game.Custom)
-                setup.Children.Add(Text("Custom game: Steam launch options cannot be read automatically.",
-                    12, MutedBrush));
-            else if (steamOptions?.Status == "multiple_profiles")
-                setup.Children.Add(Text("Multiple Steam profiles have different launch options. " +
-                    "Select the active account's options in Steam; automatic merging is disabled.",
-                    13, MutedBrush));
-            else if (steamOptions?.Status == "unavailable" ||
-                     steamOptions?.Status == "manifest_missing" ||
-                     steamOptions?.Status == "not_steam_install")
-                setup.Children.Add(Text("Steam launch options could not be read. " +
-                    "Check Steam → Properties → General before setting an override.",
-                    13, MutedBrush));
-            else if (steamOptions?.Status == "found")
-                setup.Children.Add(Text("Existing Steam options: " + steamOptions.Existing,
-                    12, MutedBrush));
-            else if (steamOptions?.Status == "empty")
-                setup.Children.Add(Text("Steam has no existing launch options for this game.",
-                    12, MutedBrush));
-            else
-                setup.Children.Add(Text("Reading Steam launch options…", 12, MutedBrush));
-            if (command is not null)
-            {
-                setup.Children.Add(Text("FINAL PREVIEW · COPY INTO STEAM", 11,
-                    AccentBrush, FontWeight.Bold));
-                setup.Children.Add(Text(command, 14, ForegroundBrush, FontWeight.SemiBold));
-            }
-            else if (steamOptions?.ComposeStatus == "complex_options")
-                setup.Children.Add(Text("Existing override is too complex to merge safely. " +
-                    "Review it manually in Steam; the launcher will not overwrite it.",
-                    13, MutedBrush));
-            else if (effectiveAlias.EndsWith(".asi", StringComparison.OrdinalIgnoreCase))
-                setup.Children.Add(Text("ASI plugins require a compatible ASI loader; " +
-                    "no WINEDLLOVERRIDES entry.", 13, MutedBrush));
-            setup.Children.Add(Text(savedAlias is not null
-                ? "Override uses the installed proxy: " + savedAlias
-                : "Preview uses the proxy selected on the Install page: " + effectiveAlias,
-                12, MutedBrush));
-            var tools = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
-            if (command is not null)
-            {
-                var copy = Button("COPY FINAL OPTIONS", true);
-                copy.Click += async (_, _) => await CopyToClipboardAsync(command,
-                    "Steam launch options copied.");
-                tools.Children.Add(copy);
-            }
-            var copyExe = Button("COPY EXE PATH");
-            copyExe.Click += async (_, _) => await CopyToClipboardAsync(_exe!,
-                "Game executable path copied.");
-            tools.Children.Add(copyExe);
-            var open = Button("OPEN GAME FOLDER");
-            open.Click += (_, _) => OpenGameFolder(game.Folder);
-            tools.Children.Add(open);
-            setup.Children.Add(tools);
-        }
-        else
-        {
-            var open = Button("OPEN GAME FOLDER");
-            open.Click += (_, _) => OpenGameFolder(game.Folder);
-            setup.Children.Add(open);
-        }
-        setup.Children.Add(Text("Set the options in Steam → Properties → General → Launch Options. " +
-            "Compatibility depends on the game, Proton, and anti-cheat restrictions.",
-            12, MutedBrush));
-        _content.Children.Add(Panel(setup));
+        AddGameInstallPanel(game);
+    }
 
-        if (HasInstallRecord())
+    private void AddGameInstallPanel(GameEntry game)
+    {
+        var selection = _exe;
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(Text("AMDNR  /  LINUX SETUP", 15, AccentBrush, FontWeight.Bold));
+        panel.Children.Add(Text(
+            "AMDNR with the ROCm/HIP bridge is the default for Linux + Proton. " +
+            "Select optional add-ons, then install or uninstall here.",
+            13, MutedBrush));
+
+        if (_backend is null || string.IsNullOrWhiteSpace(selection) || !File.Exists(selection))
         {
-            var recordPanel = new StackPanel { Spacing = 10 };
-            recordPanel.Children.Add(Text("RECORDED INSTALLATION", 12, AccentBrush, FontWeight.Bold));
-            var trackedFiles = new List<string>();
+            panel.Children.Add(Text("Select the Windows game executable above to enable setup.",
+                13, MutedBrush));
+            _content.Children.Add(Panel(panel));
+            return;
+        }
+        var gameExe = selection!;
+        var addonDaniel = new CheckBox
+        {
+            Content = "Daniel 0.6 neural runtime (optional add-on; replaces default native lmxxf)",
+            IsChecked = false, Foreground = ForegroundBrush,
+        };
+        panel.Children.Add(Text("ADD-ONS", 12, MutedBrush, FontWeight.Bold));
+        panel.Children.Add(addonDaniel);
+        panel.Children.Add(Text("Default: AMDNR 0.3.5.8.28 + Linux bridge + lmxxf. " +
+            "Daniel 0.8 / NeuralHub is not included.", 12, MutedBrush));
+        string Runtime() => addonDaniel.IsChecked == true ? "0.6.0" : "lmxxf";
+
+        var state = Text("Checking existing bridge and prepared packages…", 13, ForegroundBrush);
+        panel.Children.Add(state);
+        var compilerSource = Text("", 12, MutedBrush);
+        var compilerApproval = new CheckBox
+        {
+            Content = "I verified the detected compiler is a native x64 Microsoft DLL I own, " +
+                      "and approve verified dependency preparation if needed.",
+            IsChecked = false, Foreground = ForegroundBrush, IsVisible = false,
+        };
+        panel.Children.Add(compilerSource);
+        panel.Children.Add(compilerApproval);
+        var replaceApproval = new CheckBox
+        {
+            Content = "Back up and replace existing AMDNR/ReShade hooks if needed.",
+            Foreground = ForegroundBrush, IsChecked = false, IsVisible = false,
+        };
+        panel.Children.Add(replaceApproval);
+        var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+        var install = Button("INSTALL AMDNR", true);
+        var uninstall = Button("UNINSTALL AMDNR");
+        var refresh = Button("REFRESH STATUS");
+        actions.Children.Add(install);
+        actions.Children.Add(uninstall);
+        actions.Children.Add(refresh);
+        panel.Children.Add(actions);
+        var feedback = Text("", 13, ForegroundBrush);
+        panel.Children.Add(feedback);
+
+        var steamPanel = new StackPanel { Spacing = 8, IsVisible = false };
+        steamPanel.Children.Add(Text("STEAM LAUNCH OPTIONS", 12, AccentBrush, FontWeight.Bold));
+        var steamStatus = Text("", 12, MutedBrush);
+        steamPanel.Children.Add(steamStatus);
+        var current = new TextBox
+        {
+            Watermark = "Existing Steam launch options",
+            AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 42,
+            Background = BackgroundBrush, Foreground = ForegroundBrush,
+        };
+        steamPanel.Children.Add(current);
+        var reviewOptions = Button("REVIEW STEAM OPTIONS");
+        steamPanel.Children.Add(reviewOptions);
+        var cleaned = Text("", 12, MutedBrush);
+        steamPanel.Children.Add(cleaned);
+        var finalOptions = new TextBox
+        {
+            IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
+            MinHeight = 48, Background = BackgroundBrush, Foreground = ForegroundBrush,
+        };
+        steamPanel.Children.Add(finalOptions);
+        var copy = Button("COPY FINAL OPTIONS", true);
+        copy.IsEnabled = false;
+        steamPanel.Children.Add(copy);
+        panel.Children.Add(steamPanel);
+        var advanced = new StackPanel { Spacing = 6 };
+        var moreAddons = Button("MANAGE OTHER COMPONENTS / ADD-ONS");
+        moreAddons.Click += (_, _) => ShowExtensions();
+        advanced.Children.Add(moreAddons);
+        var details = Button("ADVANCED BRIDGE DIAGNOSTICS / RECOVERY");
+        details.Click += (_, _) => ShowCommunityBridge();
+        advanced.Children.Add(details);
+        panel.Children.Add(new Expander
+        {
+            Header = "Advanced settings and other add-ons",
+            IsExpanded = false,
+            Content = advanced,
+        });
+        _content.Children.Add(Panel(panel));
+
+        bool ready = false;
+        bool bridgeInstalled = false;
+        bool migrationPending = false;
+        bool conflicts = false;
+        string? compiler = null;
+        string finalText = "";
+        bool busy = false;
+
+        void Buttons()
+        {
+            install.IsEnabled = !busy && !bridgeInstalled && !migrationPending &&
+                (!conflicts || replaceApproval.IsChecked == true) &&
+                (ready || compilerApproval.IsChecked == true);
+            uninstall.IsEnabled = !busy && bridgeInstalled;
+            refresh.IsEnabled = !busy;
+            addonDaniel.IsEnabled = !busy && !bridgeInstalled;
+        }
+
+        async Task PreviewSteam(string? manual = null)
+        {
+            var args = new List<string> { "--bridge-steam-preview-json", "--exe", gameExe };
+            if (manual is not null)
+            {
+                if (manual.Length > 8192)
+                {
+                    steamStatus.Text = "Launch options are too long to merge automatically.";
+                    copy.IsEnabled = false;
+                    return;
+                }
+                args.Add("--bridge-existing-options");
+                args.Add(manual);
+            }
             try
             {
-                var stateFile = Path.Combine(Path.GetDirectoryName(_exe!)!,
-                    ".amdnr-linux-install.json");
-                using var record = JsonDocument.Parse(File.ReadAllText(stateFile));
-                var state = record.RootElement;
-                if (state.TryGetProperty("alias", out var alias))
-                    recordPanel.Children.Add(Text("Proxy DLL: " + alias.GetString(), 14));
-                if (state.TryGetProperty("files", out var files) &&
-                    files.ValueKind == JsonValueKind.Array)
+                var (exit, raw) = await _backend.RunAsync(args);
+                if (exit != 0) throw new InvalidOperationException(raw);
+                using var doc = JsonDocument.Parse(raw);
+                var root = doc.RootElement;
+                string Get(string key) => root.TryGetProperty(key, out var item) &&
+                    item.ValueKind == JsonValueKind.String ? item.GetString() ?? "" : "";
+                string[] GetArray(string key) =>
+                    root.TryGetProperty(key, out var item) && item.ValueKind == JsonValueKind.Array
+                    ? item.EnumerateArray().Select(x => x.GetString() ?? "").ToArray()
+                    : Array.Empty<string>();
+                string status = Get("steam_status");
+                if (manual is null && (status == "found" || status == "empty"))
+                    current.Text = Get("existing");
+                finalText = Get("preview");
+                finalOptions.Text = string.IsNullOrWhiteSpace(finalText)
+                    ? "Manual review needed — paste the active Steam options above."
+                    : finalText;
+                var removed = GetArray("removed");
+                var kept = GetArray("kept");
+                var warnings = GetArray("review");
+                cleaned.Text = (removed.Length > 0
+                    ? "REMOVE: " + string.Join("; ", removed) + "\n"
+                    : "REMOVE: nothing verified as obsolete\n") +
+                    "KEEP: " + (kept.Length > 0 ? string.Join("; ", kept) :
+                    "unrelated launch flags") +
+                    (warnings.Length > 0 ? "\nREVIEW: " + string.Join("; ", warnings) : "");
+                steamStatus.Text = status switch
                 {
-                    recordPanel.Children.Add(Text($"Tracked files: {files.GetArrayLength()}", 14));
-                    foreach (var file in files.EnumerateArray())
+                    "found" => "Loaded from Steam (read-only).",
+                    "empty" => "No Steam options found.",
+                    "manual" => "Previewing your manually entered options.",
+                    _ => "Steam options could not be read reliably. Paste the active options above."
+                };
+                copy.IsEnabled = !string.IsNullOrWhiteSpace(finalText);
+                steamPanel.IsVisible = true;
+            }
+            catch (Exception ex)
+            {
+                steamPanel.IsVisible = true;
+                steamStatus.Text = "Steam launch preview unavailable: " + ex.Message;
+                copy.IsEnabled = false;
+            }
+        }
+
+        async Task Check()
+        {
+            try
+            {
+                var (exit, raw) = await _backend.RunAsync(
+                    new[] { "--bridge-status-json", "--bridge-runtime", Runtime(), "--exe", gameExe });
+                if (exit != 0) throw new InvalidOperationException(raw);
+                using var doc = JsonDocument.Parse(raw);
+                var root = doc.RootElement;
+                ready = root.GetProperty("prepared").GetBoolean();
+                bridgeInstalled = root.GetProperty("community_installed").GetBoolean();
+                migrationPending = root.GetProperty("migration_pending").GetBoolean();
+                conflicts = root.GetProperty("conflicts").GetArrayLength() > 0;
+                replaceApproval.IsVisible = conflicts && !bridgeInstalled;
+                compilerApproval.IsVisible = !ready && !bridgeInstalled;
+                compilerSource.IsVisible = !ready && !bridgeInstalled;
+                install.Content = ready ? "INSTALL AMDNR" : "PREPARE & INSTALL AMDNR";
+                state.Text = bridgeInstalled ? "Linux ROCm Bridge installed."
+                    : migrationPending ? "Interrupted migration: recover from Advanced."
+                    : ready ? "Verified bridge is prepared. Ready to install."
+                    : "Bridge dependencies need preparation on first install.";
+                if (!ready && !bridgeInstalled && compiler is null)
+                {
+                    var (discoveryExit, discovered) = await _backend.RunAsync(
+                        new[] { "--bridge-discover-json", "--exe", gameExe });
+                    if (discoveryExit == 0)
                     {
-                        if (file.ValueKind == JsonValueKind.Object &&
-                            file.TryGetProperty("path", out var name) &&
-                            name.ValueKind == JsonValueKind.String &&
-                            name.GetString() is { } path)
-                            trackedFiles.Add(path);
+                        using var info = JsonDocument.Parse(discovered);
+                        var candidates = info.RootElement.GetProperty("compiler_candidates");
+                        if (candidates.GetArrayLength() > 0)
+                            compiler = candidates[0].GetProperty("path").GetString();
                     }
                 }
+                compilerSource.Text = compiler is null
+                    ? "No verified compiler candidate found. Use Advanced bridge diagnostics."
+                    : "Compiler to verify: " + compiler;
+                if (compiler is null && !ready) compilerApproval.IsChecked = false;
+                Buttons();
+                if (bridgeInstalled) await PreviewSteam();
             }
-            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+            catch (Exception ex)
             {
-                recordPanel.Children.Add(Text("Could not read installation record: " + ex.Message,
-                    12, MutedBrush));
+                ready = false;
+                bridgeInstalled = false;
+                migrationPending = true;
+                state.Text = "Bridge status unavailable: " + ex.Message;
+                Buttons();
             }
-
-            // Do not fill the whole game page with dozens of installed filenames.
-            // Expand on demand, with an independent capped file-list viewport.
-            var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            var fileList = new StackPanel { Spacing = 6 };
-            var fileScroller = new ScrollViewer
-            {
-                Content = fileList,
-                MaxHeight = 240,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                IsVisible = false,
-            };
-            if (trackedFiles.Count > 0)
-            {
-                var showFiles = Button($"SHOW TRACKED FILES ({trackedFiles.Count})");
-                showFiles.Click += (_, _) =>
-                {
-                    fileScroller.IsVisible = !fileScroller.IsVisible;
-                    showFiles.Content = fileScroller.IsVisible
-                        ? "HIDE TRACKED FILES" : $"SHOW TRACKED FILES ({trackedFiles.Count})";
-                    if (fileScroller.IsVisible && fileList.Children.Count == 0)
-                    {
-                        foreach (var name in trackedFiles)
-                            fileList.Children.Add(Text("•  " + name, 12, MutedBrush));
-                    }
-                };
-                controls.Children.Add(showFiles);
-            }
-            var runDoctor = Button("CHECK FILE INTEGRITY");
-            runDoctor.Click += (_, _) => ShowDoctor();
-            controls.Children.Add(runDoctor);
-            recordPanel.Children.Add(controls);
-            recordPanel.Children.Add(fileScroller);
-            _content.Children.Add(Panel(recordPanel));
         }
+
+        async Task RunInstall()
+        {
+            if (busy || migrationPending || bridgeInstalled) return;
+            if (conflicts && replaceApproval.IsChecked != true)
+            {
+                feedback.Text = "Approve backup and replacement of old hooks first.";
+                return;
+            }
+            if (!ready && (compilerApproval.IsChecked != true ||
+                           string.IsNullOrWhiteSpace(compiler) || !File.Exists(compiler)))
+            {
+                feedback.Text = "Confirm compiler provenance. If none was detected, open Advanced.";
+                return;
+            }
+            busy = true;
+            Buttons();
+            try
+            {
+                // Backend validates approvals, source hashes and conflicts again.
+                if (!ready)
+                {
+                    state.Text = "Preparing AMDNR and the Linux bridge…";
+                    var (preparedExit, prepared) = await _backend.RunAsync(new[]
+                    {
+                        "--bridge-prepare", compiler!, "--bridge-runtime", Runtime()
+                    });
+                    if (preparedExit != 0) throw new InvalidOperationException(prepared);
+                    ready = true;
+                }
+                state.Text = "Installing prepared AMDNR with ROCm Bridge…";
+                var args = new List<string>
+                {
+                    "--bridge-install", "--approve-bridge-install",
+                    "--bridge-runtime", Runtime(), "--exe", gameExe,
+                };
+                if (conflicts && replaceApproval.IsChecked == true)
+                    args.Add("--bridge-backup-and-replace");
+                var (exit, result) = await _backend.RunAsync(args);
+                if (exit != 0) throw new InvalidOperationException(result);
+                feedback.Text = "Installed successfully. Copy the final Steam launch options below.";
+                await Check();
+            }
+            catch (Exception ex)
+            {
+                feedback.Text = "Installation stopped: " + ex.Message;
+                await Check();
+            }
+            finally { busy = false; Buttons(); }
+        }
+
+        install.Click += async (_, _) => await RunInstall();
+        uninstall.Click += async (_, _) =>
+        {
+            if (busy || !bridgeInstalled) return;
+            busy = true;
+            Buttons();
+            try
+            {
+                var (exit, result) = await _backend.RunAsync(new[]
+                {
+                    "--bridge-remove", "--approve-bridge-remove", "--exe", gameExe
+                });
+                if (exit != 0) throw new InvalidOperationException(result);
+                feedback.Text = "Bridge removed; previous managed hooks restored where possible. " +
+                    "Remove the bridge wrapper from Steam launch options manually.";
+                steamPanel.IsVisible = false;
+                await Check();
+            }
+            catch (Exception ex)
+            {
+                feedback.Text = "Uninstall stopped: " + ex.Message;
+                await Check();
+            }
+            finally { busy = false; Buttons(); }
+        };
+        addonDaniel.IsCheckedChanged += async (_, _) => { if (!busy) await Check(); };
+        compilerApproval.IsCheckedChanged += (_, _) => Buttons();
+        replaceApproval.IsCheckedChanged += (_, _) => Buttons();
+        refresh.Click += async (_, _) => await Check();
+        reviewOptions.Click += async (_, _) => await PreviewSteam(current.Text ?? "");
+        copy.Click += async (_, _) =>
+        {
+            if (!string.IsNullOrWhiteSpace(finalText))
+                await CopyToClipboardAsync(finalText, "Steam launch options copied.");
+        };
+        _ = Check();
     }
 
 
