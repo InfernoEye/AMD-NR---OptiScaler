@@ -1536,6 +1536,15 @@ def main() -> int:
         try:
             entries = library_audit()
             _save_library_audit(entries)
+            # Update executable pointers in the differential index after a
+            # deliberate deep scan, without changing user EXE preferences.
+            index = _read_library_index()
+            for row in entries:
+                folder = str(row["folder"])
+                if folder in index:
+                    index[folder]["executable"] = row.get("executable")
+            if index:
+                _write_library_index(list(index.values()))
             print(json.dumps(entries, ensure_ascii=False))
         except (OSError, ValueError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
