@@ -501,7 +501,7 @@ class LauncherTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "[Ss]ymlink|[Uu]nsafe"):
                 launcher.remove_component(self.exe, asset, backup_modified=True, force=True)
             self.assertTrue(target.is_symlink())
-            self.assertTrue(launcher.installed_components(self.exe))
+            self.assertIn(asset, launcher._component_records(self.exe))
 
     def test_large_file_count_archive_is_installable_within_limit(self):
         tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
