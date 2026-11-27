@@ -535,7 +535,7 @@ MAX_COMPONENT_UNPACKED = 12 * 1024 ** 3
 MAX_COMPONENT_FILE = 8 * 1024 ** 3
 
 
-def _component_entries(archive: Path) -> list:
+def _component_entries(archive: Path, *, inspect_only: bool = False) -> list:
     with zipfile.ZipFile(archive) as source:
         entries, seen, size = [], set(), 0
         for entry in source.infolist():
@@ -549,12 +549,15 @@ def _component_entries(archive: Path) -> list:
             mode = (entry.external_attr >> 16) & 0o170000
             if mode not in (0, 0o100000):
                 raise ValueError("Archive contains links or special files")
-            if (entry.file_size > MAX_COMPONENT_FILE or
-                    entry.file_size < 0 or entry.compress_size < 0 or
+            if (entry.file_size < 0 or entry.compress_size < 0 or
                     entry.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)):
-                raise ValueError("Unsupported or oversized component file")
+                raise ValueError("Unsupported component file")
             size += entry.file_size
-            if len(entries) >= 500 or size > MAX_COMPONENT_UNPACKED:
+            if len(entries) >= 500:
+                raise ValueError("Component archive has too many files")
+            if not inspect_only and entry.file_size > MAX_COMPONENT_FILE:
+                raise ValueError("Component file exceeds 8 GiB extracted size limit")
+            if not inspect_only and size > MAX_COMPONENT_UNPACKED:
                 raise ValueError("Component exceeds 12 GiB extracted size limit")
             if name.casefold() in seen:
                 raise ValueError("Duplicate archive path")
@@ -590,7 +593,12 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
         raise ValueError("Not a component package")
     archive = download_release(tag, asset)
     root = executable.resolve().parent
-    entries = _component_entries(archive)
+    entries = _component_entries(archive, inspect_only=True)
+    total_size = sum(e.file_size for e in entries)
+    too_large = total_size > MAX_COMPONENT_UNPACKED or any(
+        e.file_size > MAX_COMPONENT_FILE for e in entries)
+    largest_files = [{"name": e.filename, "bytes": e.file_size}
+                     for e in sorted(entries, key=lambda e: e.file_size, reverse=True)[:5]]
     conflicts = []
     for entry in entries:
         try:
@@ -600,14 +608,17 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
         except ValueError:
             conflicts.append(entry.filename)
     return {"tag": tag, "asset": asset, "files": [e.filename for e in entries],
-            "extracted_bytes": sum(e.file_size for e in entries),
-            "conflicts": conflicts, "installable": not conflicts}
+            "extracted_bytes": total_size, "largest_files": largest_files,
+            "safety_limit_exceeded": too_large,
+            "conflicts": conflicts, "installable": not conflicts and not too_large}
 
 
 def install_component(executable: Path, tag: str, asset: str) -> dict:
     preview = component_preview(executable, tag, asset)
     if preview["conflicts"]:
         raise ValueError("Component would overwrite game files: " + ", ".join(preview["conflicts"][:6]))
+    if preview["safety_limit_exceeded"]:
+        raise ValueError("Component exceeds safe extraction limits; inspection only")
     records = _component_records(executable)
     if asset in records:
         raise ValueError("Component already managed")
