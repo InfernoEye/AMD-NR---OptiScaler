@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import community_bridge as bridge
 import bridge_discovery as discovery
 import bridge_deps as deps
+import bridge_migration as migration
 import hashlib
 
 
@@ -359,6 +360,60 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse(bridge.package_is_ready(daniel, "0.5.1"))
         with self.assertRaisesRegex(ValueError, "Unsupported neural runtime"):
             bridge.status(runtime="0.8.0")
+
+    def test_bridge_migration_snapshots_root_and_nested_hooks(self):
+        exe = self.exe()
+        game = self.root / "steamapps/common/TestGame"
+        (game / bridge.OWN_RECORD).write_text('{"format": 1}')
+        backup = game / "AMDNR_backup"
+        backup.mkdir()
+        (backup / "original.bin").write_bytes(b"backup")
+        (exe.parent / "dxgi.dll").write_bytes(b"old dxgi")
+        (exe.parent / "ReShade.ini").write_text("old reshade")
+        previous = game / bridge.OWN_RECORD
+        result = migration.snapshot_existing(exe)
+        snapshot = Path(result["snapshot"])
+        self.assertEqual(result["status"], "backed_up")
+        self.assertFalse(previous.exists())
+        self.assertFalse((exe.parent / "dxgi.dll").exists())
+        self.assertTrue((snapshot / "original/AMDNR_backup/original.bin").is_file())
+        self.assertTrue((snapshot / "original" /
+                         (exe.parent / "dxgi.dll").relative_to(game)).is_file())
+        self.assertEqual(migration.restore_snapshot(snapshot)["blocked"], [])
+        self.assertTrue(previous.is_file())
+        self.assertEqual((exe.parent / "dxgi.dll").read_bytes(), b"old dxgi")
+        self.assertEqual((backup / "original.bin").read_bytes(), b"backup")
+
+    def test_bridge_migration_refuses_to_overwrite_replaced_hook(self):
+        exe = self.exe()
+        original = exe.parent / "dxgi.dll"
+        original.write_bytes(b"old")
+        snapshot = Path(migration.snapshot_existing(exe)["snapshot"])
+        original.write_bytes(b"new")
+        recovery = migration.restore_snapshot(snapshot)
+        self.assertTrue(recovery["blocked"])
+        self.assertEqual(original.read_bytes(), b"new")
+        self.assertEqual((snapshot / "original" /
+                          original.relative_to(migration.game_root(exe))).read_bytes(), b"old")
+
+    def test_bridge_migration_blocks_interrupted_snapshot(self):
+        exe = self.exe()
+        hook = exe.parent / "dxgi.dll"
+        hook.write_bytes(b"old")
+        snapshot = Path(migration.snapshot_existing(exe)["snapshot"])
+        hook.write_bytes(b"another")
+        with self.assertRaisesRegex(ValueError, "Interrupted migration"):
+            migration.snapshot_existing(exe)
+        self.assertEqual((snapshot / "manifest.json").is_file(), True)
+
+    def test_bridge_migration_rejects_symlink_hook(self):
+        exe = self.exe()
+        actual = self.root / "unmanaged.dll"
+        actual.write_bytes(b"do not touch")
+        (exe.parent / "dxgi.dll").symlink_to(actual)
+        with self.assertRaisesRegex(ValueError, "Unsafe existing game path"):
+            migration.snapshot_existing(exe)
+        self.assertEqual(actual.read_bytes(), b"do not touch")
 
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
