@@ -301,6 +301,105 @@ def _steam_artwork(appid: str, roots: list[Path], download: bool = False,
     return str(downloaded) if downloaded is not None else None
 
 
+def _custom_games_path() -> Path:
+    """User-owned preferences; never writes inside any installed game folder."""
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return config / "amdnr" / "custom-games.json"
+
+
+def custom_games() -> list[dict[str, object]]:
+    """Load remembered non-Steam game directories, including temporarily missing drives."""
+    path = _custom_games_path()
+    if not path.exists():
+        return []
+    try:
+        if path.stat().st_size > 1024 * 1024:
+            raise ValueError("Custom game registry is too large")
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict) or state.get("format") != 1 or \
+                not isinstance(state.get("games"), list):
+            raise ValueError("Invalid custom game registry")
+        result = []
+        seen = set()
+        for item in state["games"][:500]:
+            if not isinstance(item, dict):
+                continue
+            name, folder = item.get("name"), item.get("folder")
+            if not isinstance(name, str) or not name.strip() or len(name) > 120 or \
+                    not isinstance(folder, str) or not Path(folder).is_absolute():
+                continue
+            if folder in seen:
+                continue
+            seen.add(folder)
+            result.append({"name": name, "folder": folder, "artwork":
+                           str(_manual_artwork(Path(folder))) if
+                           _manual_artwork(Path(folder)) else None,
+                           "exists": Path(folder).is_dir()})
+        return result
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError(f"Unable to read custom game registry: {exc}") from exc
+
+
+def _save_custom_games(items: list[dict[str, object]]) -> None:
+    path = _custom_games_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                     prefix=".custom-games-", delete=False) as out:
+        temporary = Path(out.name)
+        json.dump({"format": 1, "games": [
+            {"name": item["name"], "folder": item["folder"]} for item in items
+        ]}, out, ensure_ascii=False, indent=2)
+        out.write("\n")
+    try:
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def add_custom_game(directory: Path, name: str | None = None) -> dict[str, object]:
+    if not directory.is_dir():
+        raise ValueError("Choose an existing game folder")
+    if directory.is_symlink():
+        raise ValueError("Choose a game folder rather than a symbolic link")
+    folder = str(directory.resolve())
+    display = (name or directory.name).strip()
+    if not display or len(display) > 120 or any(ord(char) < 32 for char in display):
+        raise ValueError("Game name must contain 1–120 printable characters")
+    items = custom_games()
+    if any(item["folder"] == folder for item in items):
+        raise ValueError("That game folder is already in your custom library")
+    if len(items) >= 500:
+        raise ValueError("Custom library limit reached (500 entries)")
+    items.append({"name": display, "folder": folder})
+    _save_custom_games(items)
+    return {"name": display, "folder": folder, "artwork": None, "exists": True}
+
+
+def rename_custom_game(directory: Path, name: str) -> None:
+    display = name.strip()
+    if not display or len(display) > 120 or any(ord(char) < 32 for char in display):
+        raise ValueError("Game name must contain 1–120 printable characters")
+    key = str(directory.resolve())
+    items = custom_games()
+    for item in items:
+        if item["folder"] == key:
+            item["name"] = display
+            _save_custom_games(items)
+            return
+    raise ValueError("Custom game entry not found")
+
+
+def remove_custom_game(directory: Path) -> None:
+    """Remove only the library entry; installed games and AMDNR files are untouched."""
+    key = str(directory.resolve())
+    items = custom_games()
+    remaining = [item for item in items if item["folder"] != key]
+    if len(remaining) == len(items):
+        raise ValueError("Custom game entry not found")
+    _save_custom_games(remaining)
+
+
 def steam_game_details(download_artwork: bool = False) -> list[dict[str, str | None]]:
     """Resolve Steam IDs and local artwork; optionally fetch missing covers."""
     roots = steam_roots()
@@ -996,6 +1095,11 @@ def main() -> int:
     parser.add_argument("--download-release", metavar="TAG", help="Download and verify selected AMDNR release")
     parser.add_argument("--release-asset", metavar="ZIP", help="Archive filename for --download-release")
     parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
+    parser.add_argument("--custom-games-json", action="store_true", help="List remembered custom game entries")
+    parser.add_argument("--add-custom-game", type=Path, metavar="FOLDER", help="Add custom game directory")
+    parser.add_argument("--rename-custom-game", type=Path, metavar="FOLDER", help="Rename custom game entry")
+    parser.add_argument("--remove-custom-game", type=Path, metavar="FOLDER", help="Forget custom game entry")
+    parser.add_argument("--custom-name", type=str, help="Display name for custom game")
     parser.add_argument("--artwork-report", action="store_true", help="JSON summary of games with missing artwork")
     parser.add_argument("--download-artwork", action="store_true", help="Fetch missing cover art from Steam CDN")
     parser.add_argument("--set-artwork", type=Path, metavar="IMAGE", help="Set cover image (PNG/JPG) for a game")
@@ -1006,7 +1110,24 @@ def main() -> int:
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
-    if args.installation_json:
+    if args.custom_games_json or args.add_custom_game or args.rename_custom_game or args.remove_custom_game:
+        try:
+            if args.custom_games_json:
+                print(json.dumps(custom_games(), ensure_ascii=False))
+            elif args.add_custom_game:
+                print(json.dumps(add_custom_game(args.add_custom_game, args.custom_name), ensure_ascii=False))
+            elif args.rename_custom_game:
+                if not args.custom_name:
+                    parser.error("--rename-custom-game requires --custom-name")
+                rename_custom_game(args.rename_custom_game, args.custom_name)
+                print("Custom game renamed")
+            else:
+                remove_custom_game(args.remove_custom_game)
+                print("Custom game entry removed; game files were not changed")
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.installation_json:
         if args.exe is None:
             parser.error("--installation-json requires --exe")
         try:
