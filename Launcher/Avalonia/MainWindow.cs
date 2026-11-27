@@ -2,6 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Threading;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -59,6 +61,7 @@ public sealed class MainWindow : Window
     private TextBlock? _installOverridePreview;
     private SteamUserOptions? _steamUserOptions;
     private bool _busy;
+    private JoystickNavigation? _controller;
     private string _libraryQuery = "";
     private bool _missingArtOnly;
     private StackPanel? _libraryResults;
@@ -144,11 +147,53 @@ public sealed class MainWindow : Window
         try { _backend = new Backend(); }
         catch (Exception ex) { _status.Text = ex.Message; }
         ShowLibrary();
+        Closed += (_, _) => { _controller?.Dispose(); _controller = null; };
         Opened += async (_, _) =>
         {
+            _controller ??= new JoystickNavigation(action => Dispatcher.UIThread.Post(() => OnControllerAction(action)));
             await LoadLauncherSettingsAsync();
             await RefreshGamesAsync();
         };
+    }
+
+    private void OnControllerAction(JoystickNavigation.Action action)
+    {
+        if (!IsActive) return;
+        if (action == JoystickNavigation.Action.Back)
+        {
+            // Gamepad B returns to the library, except while a modal window
+            // owns focus; game installations never run on controller input alone.
+            if (!_busy) ShowLibrary();
+            return;
+        }
+        var focused = FocusManager?.GetFocusedElement();
+        if (action == JoystickNavigation.Action.Confirm)
+        {
+            if (_busy) return;
+            if (focused is Button button && button.IsEnabled)
+                button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            else if (focused is ComboBox combo && combo.IsEnabled)
+                combo.IsDropDownOpen = !combo.IsDropDownOpen;
+            else if (focused is CheckBox checkbox && checkbox.IsEnabled)
+                checkbox.IsChecked = !(checkbox.IsChecked ?? false);
+            return;
+        }
+        var direction = action switch
+        {
+            JoystickNavigation.Action.Up => NavigationDirection.Up,
+            JoystickNavigation.Action.Down => NavigationDirection.Down,
+            JoystickNavigation.Action.Left => NavigationDirection.Left,
+            _ => NavigationDirection.Right,
+        };
+        // Use Avalonia's own focus navigation rather than synthesizing key
+        // presses into text fields or game-installation confirmation dialogs.
+        if (FocusManager is not null &&
+            !FocusManager.TryMoveFocus(direction, new FindNextElementOptions()))
+        {
+            var alternate = action is JoystickNavigation.Action.Up or JoystickNavigation.Action.Left
+                ? NavigationDirection.Previous : NavigationDirection.Next;
+            FocusManager.TryMoveFocus(alternate, new FindNextElementOptions());
+        }
     }
 
     private static IBrush Brush(string hex) => new SolidColorBrush(Color.Parse(hex));
@@ -204,6 +249,7 @@ public sealed class MainWindow : Window
         stack.Children.Add(new Border { Height = 30 });
         stack.Children.Add(Text("LINUX / PROTON", 11, MutedBrush, FontWeight.Bold));
         stack.Children.Add(Text("Native desktop interface", 12, MutedBrush));
+        stack.Children.Add(Text("Controller: stick / D-pad navigate, A select, B back (where supported)", 11, MutedBrush));
         return new Border
         {
             Background = SidebarBrush,
