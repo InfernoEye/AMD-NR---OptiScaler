@@ -2662,6 +2662,8 @@ def main() -> int:
                         help="Install separately managed bridge beside --exe, with explicit approval")
     parser.add_argument("--approve-bridge-install", action="store_true",
                         help="Explicit consent to install the community bridge in the selected game folder")
+    parser.add_argument("--bridge-backup-and-replace", action="store_true",
+                        help="Move existing AMDNR/ReShade hooks into a recoverable snapshot before bridge install")
     parser.add_argument("--bridge-remove", action="store_true",
                         help="Use community manager to restore an installed bridge with consent")
     parser.add_argument("--approve-bridge-remove", action="store_true",
@@ -2687,7 +2689,8 @@ def main() -> int:
                 if args.exe is None:
                     parser.error("--bridge-install/--bridge-remove require --exe")
                 if args.bridge_install:
-                    result = community_bridge.install(args.exe, args.approve_bridge_install, args.bridge_runtime)
+                    result = community_bridge.install(args.exe, args.approve_bridge_install, args.bridge_runtime,
+                                                      replace_existing=args.bridge_backup_and_replace)
                 else:
                     result = community_bridge.remove(args.exe, args.approve_bridge_remove)
             print(json.dumps(result, ensure_ascii=False))
