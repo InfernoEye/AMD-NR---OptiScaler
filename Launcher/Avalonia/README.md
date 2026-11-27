@@ -84,6 +84,31 @@ python3 Launcher/Avalonia/amdnr_launcher.py --remove-custom-game "/path/to/game"
 
 The registry only stores the game's display name and local installation folder. Game installation files are never modified when adding, editing, or forgetting the entry.
 
+## Library readiness audit
+
+On the **Library** page, select **Analyze Library** to perform an on-demand,
+read-only executable audit of every detected Steam game and remembered custom
+installation. This is intentionally separate from normal Library refresh: it
+may take longer for large games, but does not touch game or Steam files.
+
+Each library row gains a readiness label. The filter can show **Windows ready**,
+**Native Linux**, **Needs attention**, and **AMDNR recorded** entries. An
+unavailable custom-game mount is marked as a missing folder without removing
+the saved game. A game with multiple possible Windows executables is marked
+**Choose Windows executable** rather than silently guessing. A saved manual
+EXE takes precedence over Steam metadata, followed by a unique Steam launch
+target, then scanner heuristics.
+
+An **AMDNR recorded** label means that an installation record exists alongside
+the selected executable. It is not a file integrity or runtime compatibility
+check; use **Install → Verify Installed Files** or Doctor for an integrity check.
+
+Read the JSON directly without starting the GUI:
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --library-audit-json
+```
+
 ## Steam launch metadata (automatic Windows EXE selection)
 
 For **Steam-managed** installations, the launcher first matches the game directory to an installed `steamapps/appmanifest_<AppID>.acf`. It then reads the matching AppID from Steam's **local, read-only** `appcache/appinfo.vdf` (v40/v41) or modern `appcache/appinfo/appinfo_XX.vdf` shards (v42). This requires no Steam credentials, no network requests, no additional Python packages, and no Steam console commands.
