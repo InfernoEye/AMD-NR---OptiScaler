@@ -190,6 +190,30 @@ public sealed class Backend
             missingWindows);
     }
 
+    public async Task<IReadOnlyList<LibraryAuditEntry>> AuditLibraryAsync(
+        CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] { "--library-audit-json" }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var entries = new List<LibraryAuditEntry>();
+        foreach (var item in document.RootElement.EnumerateArray())
+        {
+            var folder = item.GetProperty("folder").GetString();
+            if (string.IsNullOrWhiteSpace(folder)) continue;
+            entries.Add(new LibraryAuditEntry(
+                folder,
+                item.GetProperty("status").GetString() ?? "scan_error",
+                item.TryGetProperty("executable", out var exe) &&
+                    exe.ValueKind == JsonValueKind.String ? exe.GetString() : null,
+                item.GetProperty("installed_record").GetBoolean(),
+                item.GetProperty("custom").GetBoolean(),
+                item.TryGetProperty("source", out var source) &&
+                    source.ValueKind == JsonValueKind.String ? source.GetString() : null));
+        }
+        return entries;
+    }
+
     public async Task<IReadOnlyList<ExecutableEntry>> ExecutablesAsync(
         string gameFolder, CancellationToken token = default)
         => (await ScanExecutablesAsync(gameFolder, token)).Candidates;
@@ -215,6 +239,9 @@ public sealed class Backend
 }
 
 public sealed record GameEntry(string Name, string Folder, string? Artwork, bool Custom = false);
+
+public sealed record LibraryAuditEntry(string Folder, string Status, string? Executable,
+    bool InstalledRecord, bool Custom, string? Source);
 
 public sealed record InstallationReport(bool Installed, string Status, string? Alias,
     string? SourceArchive, string? SourceSha256, int Files, int Verified,
