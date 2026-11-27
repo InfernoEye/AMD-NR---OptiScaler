@@ -2190,6 +2190,11 @@ public sealed class MainWindow : Window
                         await ReviewPendingAddons();
                     };
                     extraAddonOptions.Children.Add(toggle);
+                    if (release.Asset.StartsWith("AMDNR-Mochi-", StringComparison.OrdinalIgnoreCase))
+                        extraAddonOptions.Children.Add(Text(
+                            "Mochi requires separately prepared model weights. Installing its ZIP " +
+                            "alone does not confirm the neural model can initialize.",
+                            12, MutedBrush));
                     selectedAddons.Add((release, toggle));
                 }
                 backupModifiedApproval.IsVisible = installed.Any(x =>
