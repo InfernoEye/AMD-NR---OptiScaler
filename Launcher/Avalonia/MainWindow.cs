@@ -1431,6 +1431,12 @@ public sealed class MainWindow : Window
                 _indexedExecutables[Path.GetFullPath(item.Game.Folder)] = item.Executable;
         // New / removed Steam entries are reconciled via manifests; no binary
         // scan occurs here. Temporarily missing custom folders are retained.
+        // Prune stale readiness rows even when the library changes via custom
+        // game add/remove instead of the Refresh button.
+        var currentFolders = new HashSet<string>(
+            _games.Select(g => Path.GetFullPath(g.Folder)), StringComparer.Ordinal);
+        foreach (var old in _libraryAudit.Keys.Where(p => !currentFolders.Contains(p)).ToList())
+            _libraryAudit.Remove(old);
         // Preserve the saved audit snapshot across ordinary Library refreshes.
         // Newly discovered games simply show no readiness label until Rescan.
     }
@@ -1457,11 +1463,6 @@ public sealed class MainWindow : Window
                     _status.Text = "Saved audit unavailable: " + ex.Message;
                 }
             }
-            // Do not display stale audit rows for uninstalled Steam games.
-            var present = new HashSet<string>(_games.Select(g => Path.GetFullPath(g.Folder)),
-                StringComparer.Ordinal);
-            foreach (var folder in _libraryAudit.Keys.Where(p => !present.Contains(p)).ToList())
-                _libraryAudit.Remove(folder);
             _status.Text = $"Differential update: {_games.Count} entries ({_games.Count(g => g.Custom)} custom)" +
                 (_libraryAudit.Count > 0 ? $" · {_libraryAudit.Count} saved audit results" : "");
             // Scan changes should update the list, not navigate to a selected game.
