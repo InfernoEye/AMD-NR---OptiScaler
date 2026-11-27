@@ -405,3 +405,27 @@ Existing model files are never replaced automatically. Extraction needs
 preparing the model. In-game Mochi availability still depends on GPU,
 graphics API, the installed AMDNR build and Proton behavior.
 
+
+### Opt-in community download for Mochi model preparation
+
+The Linux launcher offers **Use Unofficial Mirror & Prepare Mochi** as an
+optional alternative to choosing a local NVIDIA DLL. It currently resolves
+the immutable `dlssnr-310.9.16` GitHub release from `RankFTW/rhi-repo`.
+**This is an unofficial third-party mirror.** Neither NVIDIA nor AMDNR
+operates it, and redistribution authorization has not been independently
+established. The UI makes this distinction explicit; the user must choose
+the community-source action to start a download. This does not ship an
+NVIDIA binary within the Linux launcher or the project repository.
+
+Before the model extractor runs, the launcher pins and verifies the archive
+SHA-256 (`dbeb1f2790b5c621887db99b1a56ac8bd5cb35207e8c074cbb806710f7460cab`)
+and the internal DLL SHA-256
+(`2bc19bc09a7b89dd44f73e2ac0108fcc586e2154bdd0830f242f4f040e28789f`).
+It also checks the fixed release asset's GitHub digest, expected byte length,
+archive format and extracted member count/size. The source DLL is not loaded
+or executed, only inspected by the bundled locally verified model extractor.
+Both downloaded ZIP and DLL are deleted on completion or failure. A source
+change or hash mismatch **fails closed**; users can still choose their own
+supported local DLL/ZIP without using the community mirror. No direct
+real-world model extraction and in-game initialization has been confirmed
+by the Linux launcher CI tests.
