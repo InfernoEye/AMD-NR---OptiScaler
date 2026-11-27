@@ -2902,8 +2902,6 @@ public sealed class MainWindow : Window
         var install = Button("INSTALL PREPARED LINUX BRIDGE", true);
         install.IsEnabled = false;
         installation.Children.Add(install);
-        replacementConsent.Checked += (_, _) => UpdateButtons();
-        replacementConsent.Unchecked += (_, _) => UpdateButtons();
         var installResult = Text("", 13, ForegroundBrush);
         installation.Children.Add(installResult);
         var copy = Button("COPY MANUAL STEAM LAUNCH OPTION");
@@ -2963,6 +2961,7 @@ public sealed class MainWindow : Window
             scan.IsEnabled = !_busy;
             prepare.IsEnabled = !_busy && !ready;
         }
+        replacementConsent.IsCheckedChanged += (_, _) => UpdateButtons();
         async Task CheckStatusAsync()
         {
             if (_backend is null) return;
