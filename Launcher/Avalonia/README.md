@@ -60,7 +60,7 @@ settings are changed during this step.
 
 The pinned prerequisite archive names and checksums originate from
 `hassanm0301/AMDNR-Linux/linux/fetch-rocm.py` in the separately verified
-`linux-v0.3.7` release. Mirror recovery does not alter its source or
+`linux-v0.3.7` release. The reviewed libelf compatibility pin changes only the private extracted source, not
 license obligations. If all mirrors fail, the launcher stops with an
 actionable explanation instead of hiding an HTTP 404.
 
@@ -120,12 +120,17 @@ highest reviewed version becomes the launcher's default in a **new launcher
 release**. Existing prepared installations are not overwritten or migrated.
 
 **Dependency pins are separate:** AMDNR-Linux v0.3.7's `linux/fetch-rocm.py`
-requires its own Ubuntu and AMD checksum-pinned packages. Merely changing the
-launcher fallback package name or substituting a newer `libelf1` is not
-compatible with the unmodified upstream script. Update upstream's dependency
-recipe or review a versioned, checksummed adapter change as one tested unit;
-never bypass the original script's hash verification. No Ubuntu installation,
-system package manager or game-file changes are required for checking releases.
+originally pinned `libelf1_0.186-1ubuntu0.1_amd64.deb`, which returns 404
+on some Ubuntu archives. This launcher now pins Jammy Backports
+`libelf1_0.188-1~bpo22.04.1_amd64.deb` with the published SHA-256
+`280b71b2f310fa637e325a4923db4c634964994de1a75f5e5770ef6247179c55`.
+On the user's explicit Prepare approval, the adapter updates exactly that
+package URL and hash in the **privately extracted and verified v0.3.7 upstream
+source**, before invoking its setup script. It does not modify the downloaded
+release archive or any system files, bypass verification or alter other ROCm
+packages. An unexpected upstream script fails closed instead of being patched.
+This versioned adapter must be re-reviewed for any later upstream bridge version.
+End-to-end GPU/Proton compatibility is still unverified.
 
 ## Experimental AMDNR-Linux ROCm bridge
 
