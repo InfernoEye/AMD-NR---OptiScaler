@@ -28,6 +28,75 @@ class LauncherTests(unittest.TestCase):
             archive.writestr("release/OptiScaler.ini", b"configuration")
             archive.writestr("release/setup_windows.bat", b"not installed")
 
+    def test_differential_library_add_remove_and_reuse_executables(self):
+        first = self.root / "steamapps/common/First"
+        second = self.root / "steamapps/common/Second"
+        first.mkdir(parents=True)
+        second.mkdir(parents=True)
+        exe = first / "first.exe"
+        exe.write_bytes(b"game")
+        custom = self.root / "unmounted/MyCustom"
+        state = self.root / "state"
+        steam_entries = [("First", first)]
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}), \
+             patch.object(launcher, "steam_games", side_effect=lambda: steam_entries), \
+             patch.object(launcher, "custom_games", return_value=[
+                 {"name": "MyCustom", "folder": str(custom), "artwork": None}
+             ]), patch.object(launcher, "steam_game_details", return_value=[
+                 {"name": "First", "folder": str(first), "artwork": None},
+                 {"name": "Second", "folder": str(second), "artwork": None}
+             ]), patch.object(launcher, "executable_scan",
+                              side_effect=AssertionError("unexpected binary scan")):
+            initial = launcher.differential_library()
+            self.assertEqual(len(initial), 2)
+            self.assertEqual(next(row for row in initial if row["custom"])["folder"],
+                             str(custom))
+            launcher.index_library_executable(first, exe)
+            # A second refresh reuses the saved choice without scanning.
+            refreshed = launcher.differential_library()
+            self.assertEqual(next(row for row in refreshed if not row["custom"])
+                             ["executable"], str(exe))
+            # Discover a new game by its manifest and remove the uninstalled one.
+            steam_entries[:] = [("Second", second)]
+            changed = launcher.differential_library()
+            self.assertEqual([row["name"] for row in changed], ["MyCustom", "Second"])
+            self.assertNotIn(str(first), launcher._read_library_index())
+            # The custom entry stays indexed even when its drive is unavailable.
+            self.assertIn(str(custom), launcher._read_library_index())
+
+    def test_differential_library_clears_stale_exe_without_rescanning(self):
+        state = self.root / "state"
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}), \
+             patch.object(launcher, "steam_games", return_value=[
+                 ("Game", self.game)
+             ]), patch.object(launcher, "custom_games", return_value=[]), \
+             patch.object(launcher, "steam_game_details", return_value=[
+                 {"name": "Game", "folder": str(self.game), "artwork": None}
+             ]), patch.object(launcher, "executable_scan",
+                              side_effect=AssertionError("unexpected binary scan")):
+            launcher.differential_library()
+            launcher.index_library_executable(self.game, self.exe)
+            self.exe.unlink()
+            entry = launcher.differential_library()[0]
+            self.assertIsNone(entry["executable"])
+
+    def test_differential_library_manual_preference_overrides_index(self):
+        second = self.game / "Alternative.exe"
+        second.write_bytes(b"second")
+        state = self.root / "state"
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}), \
+             patch.object(launcher, "steam_games", return_value=[
+                 ("Game", self.game)
+             ]), patch.object(launcher, "custom_games", return_value=[]), \
+             patch.object(launcher, "steam_game_details", return_value=[
+                 {"name": "Game", "folder": str(self.game), "artwork": None}
+             ]):
+            launcher.differential_library()
+            launcher.index_library_executable(self.game, second)
+            with patch.object(launcher, "saved_executable", return_value=str(self.exe)):
+                self.assertEqual(launcher.differential_library()[0]["executable"],
+                                 str(self.exe))
+
     def test_library_audit_cache_round_trip_survives_reload(self):
         with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
             self.assertEqual(launcher.cached_library_audit(), [])
