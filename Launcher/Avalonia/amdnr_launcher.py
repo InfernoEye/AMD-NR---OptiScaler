@@ -910,12 +910,21 @@ def runtime_diagnostics(executable: Path) -> dict[str, object]:
         "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll",
         "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin",
         "LmxxfNrRuntime.dll", "LmxxfNrRuntime.pak",
+        "dlssnr-amd/dlssnr.bin",
+        "dlssnr-amd/model.bin",
+        "model-tools/dlssnr_extract_model.exe",
     )
     paths = {}
     for filename in filenames:
         path = root / filename
         paths[filename] = {"exists": path.is_file() and not path.is_symlink(),
                            "bytes": path.stat().st_size if path.is_file() and not path.is_symlink() else None}
+    # Native Mochi .dll package is not an ASI plugin. Its model is derived
+    # locally from a user's verified NVIDIA input; distribution ZIPs do not
+    # contain the proprietary extracted weights.
+    model = paths["dlssnr-amd/dlssnr.bin"]
+    shader_root = root / "dlssnr-amd" / "shaders"
+    aco_root = root / "dlssnr-amd" / "aco"
     plugins = root / "plugins"
     plugin_asi = []
     if plugins.is_dir() and not plugins.is_symlink():
@@ -945,6 +954,10 @@ def runtime_diagnostics(executable: Path) -> dict[str, object]:
     return {"folder": str(root), "files": paths, "plugins_asi": plugin_asi,
             "components": components,
             "mochi_runtime_present": paths["MochizukiNrRuntime.dll"]["exists"],
+            "mochi_model_present": model["exists"] and model["bytes"] is not None and model["bytes"] > 0,
+            "mochi_shader_dir_present": shader_root.is_dir() and not shader_root.is_symlink(),
+            "mochi_aco_dir_present": aco_root.is_dir() and not aco_root.is_symlink(),
+            "mochi_legacy_asi_required": False,
             "daniel_pass_present": all(paths[f"dlssnr_amd_pass{i}.dll"]["exists"]
                                       for i in range(1, 4)),
             "daniel_weights_present": paths["dlssnr_on_amd_weights.bin"]["exists"],
