@@ -481,7 +481,7 @@ def executable_candidates(directory: Path) -> list[dict[str, object]]:
         return []
     bad = ("unins", "setup", "crash", "redist", "vcredist",
            "unitycrash", "easyanticheat", "benchmark", "updater",
-           "anticheat", "uninstall")
+           "anticheat", "uninstall", "vconsole", "editor", "crashhandler")
     candidates: list[tuple[int, Path]] = []
     root = directory.resolve()
     try:
