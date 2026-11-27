@@ -2752,6 +2752,9 @@ def main() -> int:
                 else:
                     result = community_bridge.remove(args.exe, args.approve_bridge_remove)
             print(json.dumps(result, ensure_ascii=False))
+            # Bridge commands are complete CLI actions, not a precursor to the
+            # legacy Tkinter UI. Never fall through to gui() after success.
+            return 0
         except (OSError, ValueError, TypeError, KeyError, TimeoutError,
                 RuntimeError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
