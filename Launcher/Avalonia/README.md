@@ -79,6 +79,27 @@ python3 Launcher/Avalonia/amdnr_launcher.py --exe-scan-json "/path/to/steamapps/
 
 The JSON result contains `candidates`, `native`, `reason`, and `partial`. Suggestions use path structure, not hardcoded game names, and never verify actual Proton compatibility.
 
+## Investigate games whose Windows executable was not detected
+
+The separate, **read-only** diagnostic script `tools/analyze_executables.py` inspects installed game structures without modifying files, using the network, or hardcoding game names. It reports relative file paths, file-extension distributions, executable depth, PE/ELF/script signatures, suspicious extension mismatches, and what the launcher actually detected.
+
+From the repository root, examine all games without an automatically selected or remembered executable:
+
+```bash
+python3 Launcher/Avalonia/tools/analyze_executables.py --missing-only > /tmp/amdnr-exe-layouts.json
+```
+
+Or examine a particular game, plus a working comparison if useful:
+
+```bash
+python3 Launcher/Avalonia/tools/analyze_executables.py \
+  --game "/mnt/Games/SteamLibrary/steamapps/common/ProblemGame" \
+  --game "/mnt/Games/SteamLibrary/steamapps/common/WorkingGame" \
+  > /tmp/amdnr-exe-comparison.json
+```
+
+The script also accepts `--all` for all detected Steam installations, `--examples 40` for more candidates, and `--max-files 60000` for unusually large games. It never follows symlinks, reads only the first bytes of potential executable files, and caps traversal. **Nothing is uploaded**: the JSON is written locally. It deliberately omits absolute install paths, but game names and game-relative filenames can still be identifying; review the report before sharing. PE signatures found in files with unexpected extensions are **evidence to investigate**, not proof they are safe installation targets.
+
 ## Linux Doctor
 
 On **Doctor**, choose **Run Installation Diagnostics** to perform read-only checks of Steam libraries, the selected game EXE, the selected release ZIP and the Linux launcher's installation record. If recorded files exist, their SHA-256 hashes are compared against the installation record to identify missing or modified files.
