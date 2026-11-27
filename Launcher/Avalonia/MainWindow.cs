@@ -77,6 +77,9 @@ public sealed class MainWindow : Window
     private Control? _topNavigation;
     private readonly Dictionary<string, Button> _horizontalNavigation = new();
     private bool _gridView = true;
+    private Button? _gridViewButton;
+    private Button? _listViewButton;
+    private Button? _refreshButton;
     private readonly string _onboardingPath = Path.Combine(
         Environment.GetEnvironmentVariable("XDG_CONFIG_HOME")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"),
@@ -308,6 +311,7 @@ public sealed class MainWindow : Window
         AddTopNav(buttons, "Doctor", ShowDoctor);
         AddTopNav(buttons, "Compatibility", ShowCompatibility);
         AddTopNav(buttons, "Settings", ShowSettings);
+        AddTopNav(buttons, "Help", ShowHelp);
         return new Border
         {
             Background = SidebarBrush,
@@ -319,7 +323,7 @@ public sealed class MainWindow : Window
 
     private void AddTopNav(WrapPanel panel, string name, Action action)
     {
-        var button = Button(name);
+        var button = Button(UiLanguage.Translate(name));
         button.Padding = new Thickness(10, 7);
         button.Click += (_, _) => action();
         _horizontalNavigation[name] = button;
@@ -426,6 +430,7 @@ public sealed class MainWindow : Window
         AddNav(stack, "Doctor", ShowDoctor);
         AddNav(stack, "Compatibility", ShowCompatibility);
         AddNav(stack, "Settings", ShowSettings);
+        AddNav(stack, "Help", ShowHelp);
         stack.Children.Add(new Border { Height = 30 });
         stack.Children.Add(Text("LINUX / PROTON", 11, MutedBrush, FontWeight.Bold));
         stack.Children.Add(Text("Native desktop interface", 12, MutedBrush));
@@ -443,7 +448,7 @@ public sealed class MainWindow : Window
     {
         var button = new Button
         {
-            Content = name,
+            Content = UiLanguage.Translate(name),
             HorizontalContentAlignment = HorizontalAlignment.Left,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(18, 13),
@@ -455,6 +460,30 @@ public sealed class MainWindow : Window
         button.Click += (_, _) => { action(); Highlight(name); };
         stack.Children.Add(button);
         _navigation[name] = button;
+    }
+
+    private void ApplyLanguage()
+    {
+        foreach (var (name, button) in _navigation)
+            button.Content = UiLanguage.Translate(name);
+        foreach (var (name, button) in _horizontalNavigation)
+            button.Content = UiLanguage.Translate(name);
+        if (_gridViewButton is not null)
+            _gridViewButton.Content = "▦ " + UiLanguage.Translate("Grid");
+        if (_listViewButton is not null)
+            _listViewButton.Content = "☰ " + UiLanguage.Translate("List");
+        if (_refreshButton is not null)
+            _refreshButton.Content = "↻  " + UiLanguage.Translate("Refresh");
+        if (_currentSection == "Settings") ShowSettings();
+        else if (_currentSection == "Library")
+        {
+            if (_selectedGame is not null) ShowGameDetails();
+            else ShowLibrary();
+        }
+        else if (_currentSection == "Help") ShowHelp();
+        else _status.Text = UiLanguage.Current == "pl"
+            ? "Język zmieniony. Otwórz ponownie bieżącą stronę, aby odświeżyć etykiety."
+            : "Language changed. Reopen this page to refresh labels.";
     }
 
     private void Highlight(string selected)
@@ -494,8 +523,10 @@ public sealed class MainWindow : Window
             Spacing = 6,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        var gridView = Button("▦ Grid");
-        var listView = Button("☰ List");
+        var gridView = Button("▦ " + UiLanguage.Translate("Grid"));
+        var listView = Button("☰ " + UiLanguage.Translate("List"));
+        _gridViewButton = gridView;
+        _listViewButton = listView;
         gridView.Padding = new Thickness(11, 8);
         listView.Padding = new Thickness(11, 8);
         gridView.Click += (_, _) => SwitchLibraryView(true);
@@ -510,7 +541,8 @@ public sealed class MainWindow : Window
         listView.Click += (_, _) => SetViewColors();
         headerActions.Children.Add(gridView);
         headerActions.Children.Add(listView);
-        var refresh = Button("↻  Refresh");
+        var refresh = Button("↻  " + UiLanguage.Translate("Refresh"));
+        _refreshButton = refresh;
         refresh.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetRowSpan(refresh, 2);
         refresh.Click += async (_, _) =>
@@ -531,7 +563,7 @@ public sealed class MainWindow : Window
     {
         _content.Children.Clear();
         _currentSection = section;
-        _breadcrumb.Text = "AMDNR  /  " + section;
+        _breadcrumb.Text = "AMDNR  /  " + UiLanguage.Translate(section);
         Highlight(section);
         // Navigation returns to the beginning of the new page; user-sized
         // window dimensions are intentionally unchanged.
@@ -787,7 +819,8 @@ public sealed class MainWindow : Window
     private void ShowLibrary()
     {
         Clear("Library");
-        _content.Children.Add(Text("YOUR LIBRARY", 28, ForegroundBrush, FontWeight.Bold));
+        _content.Children.Add(Text(UiLanguage.Translate("Your library").ToUpperInvariant(),
+            28, ForegroundBrush, FontWeight.Bold));
         _content.Children.Add(Text("Steam, Heroic, Lutris and your saved games · Choose a game to manage AMDNR.",
             13, MutedBrush));
 
@@ -795,7 +828,7 @@ public sealed class MainWindow : Window
         _librarySearch = new TextBox
         {
             Text = _libraryQuery,
-            Watermark = "Search your games…",
+            Watermark = UiLanguage.Translate("Search your games…"),
             Background = SurfaceBrush,
             Foreground = ForegroundBrush,
             MinHeight = 42,
@@ -806,7 +839,7 @@ public sealed class MainWindow : Window
             RenderLibraryResults();
         };
         toolbar.Children.Add(_librarySearch);
-        var missing = Button(_missingArtOnly ? "SHOW ALL" : "MISSING ART");
+        var missing = Button(UiLanguage.Translate(_missingArtOnly ? "Show all" : "Missing art").ToUpperInvariant());
         missing.Click += (_, _) =>
         {
             _missingArtOnly = !_missingArtOnly;
@@ -814,7 +847,7 @@ public sealed class MainWindow : Window
         };
         Grid.SetColumn(missing, 1);
         toolbar.Children.Add(missing);
-        var manual = Button("+  Add manually");
+        var manual = Button("+  " + UiLanguage.Translate("Add manually"));
         manual.Click += (_, _) => ShowAddCustomGame();
         Grid.SetColumn(manual, 2);
         toolbar.Children.Add(manual);
@@ -827,20 +860,24 @@ public sealed class MainWindow : Window
             12, MutedBrush));
         var auditControls = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 10,
             LineSpacing = 8 };
-        var auditButton = Button(_libraryAudit.Count > 0 ? "RESCAN LIBRARY" : "ANALYZE LIBRARY", true);
+        var auditButton = Button(UiLanguage.Translate(_libraryAudit.Count > 0
+            ? "Rescan library" : "Analyze library").ToUpperInvariant(), true);
         auditButton.Click += async (_, _) => await AuditLibraryAsync(auditButton);
         auditControls.Children.Add(auditButton);
         var filters = new ComboBox
         {
             ItemsSource = new[] { "All games", "Windows ready", "Native Linux",
-                "Needs attention", "AMDNR recorded" },
-            SelectedItem = _auditFilter,
+                "Needs attention", "AMDNR recorded" }.Select(UiLanguage.Translate).ToArray(),
+            SelectedItem = UiLanguage.Translate(_auditFilter),
             MinWidth = 200,
             HorizontalAlignment = HorizontalAlignment.Left,
         };
         filters.SelectionChanged += (_, _) =>
         {
-            _auditFilter = filters.SelectedItem?.ToString() ?? "All games";
+            var localized = filters.SelectedItem?.ToString() ?? UiLanguage.Translate("All games");
+            _auditFilter = new[] { "All games", "Windows ready", "Native Linux",
+                "Needs attention", "AMDNR recorded" }
+                .FirstOrDefault(key => UiLanguage.Translate(key) == localized) ?? "All games";
             RenderLibraryResults();
         };
         auditControls.Children.Add(filters);
@@ -1135,7 +1172,7 @@ public sealed class MainWindow : Window
             stack.Children.Add(Text(game.Custom ? "CUSTOM GAME" : "STEAM GAME",
                 11, MutedBrush));
         }
-        var choose = Button("SELECT GAME →", true);
+        var choose = Button(UiLanguage.Translate("Select game").ToUpperInvariant() + " →", true);
         choose.HorizontalAlignment = HorizontalAlignment.Stretch;
         choose.HorizontalContentAlignment = HorizontalAlignment.Center;
         choose.Click += (_, _) => SelectGame(game);
@@ -1176,7 +1213,7 @@ public sealed class MainWindow : Window
         Grid.SetColumn(detail, 1);
         row.Children.Add(detail);
 
-        var manage = Button("SELECT GAME  →", true);
+        var manage = Button(UiLanguage.Translate("Select game").ToUpperInvariant() + "  →", true);
         manage.VerticalAlignment = VerticalAlignment.Center;
         manage.Click += (_, _) => SelectGame(game);
         Grid.SetColumn(manage, 2);
@@ -1467,7 +1504,7 @@ public sealed class MainWindow : Window
         Clear("Library");
         _breadcrumb.Text = "AMDNR  /  Library  /  " + game.Name;
 
-        var back = Button("←  ALL GAMES");
+        var back = Button("←  " + UiLanguage.Translate("All games back").ToUpperInvariant());
         back.Click += (_, _) => ShowLibrary();
         _content.Children.Add(back);
 
@@ -1499,24 +1536,25 @@ public sealed class MainWindow : Window
             installed ? AccentBrush : MutedBrush));
         summary.Children.Add(Text(game.Folder, 12, MutedBrush));
         var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
-        var install = Button(installed ? "MANAGE INSTALLATION" : "INSTALL AMDNR", true);
+        var install = Button(UiLanguage.Translate(installed
+            ? "Manage installation" : "Install AMDNR").ToUpperInvariant(), true);
         install.IsEnabled = _exe is not null && File.Exists(_exe);
         install.Click += (_, _) => ShowInstall();
         actions.Children.Add(install);
-        var doctor = Button("DOCTOR");
+        var doctor = Button(UiLanguage.Translate("Doctor").ToUpperInvariant());
         doctor.Click += (_, _) => ShowDoctor();
         actions.Children.Add(doctor);
         summary.Children.Add(actions);
         if (_exe is not null && File.Exists(_exe))
         {
-            var configure = Button("CONFIGURE AMDNR");
+            var configure = Button(UiLanguage.Translate("Configure AMDNR").ToUpperInvariant());
             configure.Click += (_, _) => ShowGameConfiguration();
             summary.Children.Add(configure);
-            var extensions = Button("MANAGE EXTENSIONS");
+            var extensions = Button(UiLanguage.Translate("Manage extensions").ToUpperInvariant());
             extensions.Click += (_, _) => ShowExtensions();
             summary.Children.Add(extensions);
         }
-        var coverButton = Button("CHANGE COVER ART");
+        var coverButton = Button(UiLanguage.Translate("Change cover art").ToUpperInvariant());
         coverButton.Click += async (_, _) =>
         {
             var image = await PickFileAsync("Select game artwork (JPG / PNG)",
@@ -3395,7 +3433,32 @@ public sealed class MainWindow : Window
                 Grid.SetRow(rightColumn, compact ? 1 : 0);
             };
             panel.Children.Add(columns);
-            general.Children.Add(Text("GENERAL / DOWNLOADS", 12, AccentBrush, FontWeight.Bold));
+            general.Children.Add(Text("GENERAL / DOWNLOADS",
+                12, AccentBrush, FontWeight.Bold));
+            var languagePicker = new ComboBox
+            {
+                ItemsSource = new[] { "English", "Polski" },
+                SelectedIndex = UiLanguage.Current == "pl" ? 1 : 0,
+                MinWidth = 210,
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            general.Children.Add(Text(UiLanguage.Translate("Language").ToUpperInvariant(),
+                12, AccentBrush, FontWeight.Bold));
+            general.Children.Add(languagePicker);
+            general.Children.Add(Text("Language choice affects launcher navigation, the library and core controls. " +
+                "Detailed diagnostics and upstream package names remain in their original language.",
+                12, MutedBrush));
+            var applyLanguage = Button("APPLY LANGUAGE");
+            applyLanguage.Click += (_, _) =>
+            {
+                try
+                {
+                    UiLanguage.Set(languagePicker.SelectedIndex == 1 ? "pl" : "en");
+                    ApplyLanguage();
+                }
+                catch (Exception ex) { _status.Text = "Language preference not saved: " + ex.Message; }
+            };
+            general.Children.Add(applyLanguage);
             general.Children.Add(Text("DEFAULT PROXY DLL", 12, AccentBrush, FontWeight.Bold));
             var aliases = new[] { "dxgi.dll", "version.dll", "winmm.dll", "winhttp.dll",
                 "wininet.dll", "dbghelp.dll", "d3d12.dll", "OptiScaler.asi" };
