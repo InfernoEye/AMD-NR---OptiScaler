@@ -178,22 +178,39 @@ Install the **.NET 10 SDK** and **Python 3.10+** first. Check with `dotnet --lis
 
 The Avalonia desktop provides a searchable Steam game library with cached artwork, selected-game details, executable selection, installation-record status, installation/uninstallation with backup restore, Wine DLL override guidance, Doctor preflight checks, and settings.
 
-**Steam cover artwork:** the refresh scan checks Steam's custom `userdata/*/config/grid` covers, standard, nested and content-hash Steam caches, then official Steam CDN/store image metadata when needed. Downloaded images are kept under `${XDG_CACHE_HOME:-~/.cache}/amdnr/steam-artwork`. Set `AMDNR_NO_ARTWORK_DOWNLOAD=1` to disable network artwork fetches. Missing art can be assigned per game using **Change Cover Art** on the game's detail screen; these JPEG/PNG overrides are stored under `${XDG_DATA_HOME:-~/.local/share}/amdnr/artwork` without touching Steam files. Refresh always returns to the game library. Not every Steam title has an official cover. When none is found, the UI generates a readable title-based placeholder rather than a blank or single-letter tile; the artwork report continues to count these as missing real images. The install status is specific to the executable selected and the Linux launcher's own install records, not all third-party AMDNR installs. The Python/Tk implementation below remains as a fallback CLI and UI.
+**Steam cover artwork:** the refresh scan checks Steam's custom `userdata/*/config/grid` covers, standard, nested and content-hash Steam caches, then official Steam CDN/store image metadata when needed. Downloaded images are kept under `${XDG_CACHE_HOME:-~/.cache}/amdnr/steam-artwork`. Set `AMDNR_NO_ARTWORK_DOWNLOAD=1` to disable network artwork fetches. Missing art can be assigned per game using **Change Cover Art** on the game's detail screen; these JPEG/PNG overrides are stored under `${XDG_DATA_HOME:-~/.local/share}/amdnr/artwork` without touching Steam files. Refresh always returns to the game library. Not every Steam title has an official cover. When none is found, the UI generates a readable title-based placeholder rather than a blank or single-letter tile; the artwork report continues to count these as missing real images. The install status is specific to the executable selected and the Linux launcher's own install records, not all third-party AMDNR installs. The Python backend remains available for **explicit command-line operations only**; its old Tkinter desktop interface has been removed. The Avalonia application is the only graphical launcher.
 
 **Parity status:** This is the foundation of an independent native implementation, **not yet a 1:1 visual or functional match** for the Windows WPF launcher. Missing pieces include pixel-perfect styling and branded assets, full Windows-equivalent build variants and model/runtime configuration, equivalent diagnostic reporting, full store integrations and persistence, and Windows-only features. The original source-available WPF launcher has restrictive reuse terms; this implementation is written independently.
 
 ---
-# Native Linux launcher (experimental)
+# Python installer backend (CLI only)
 
-Run the independent Python/Tk launcher from this directory:
+The former Python/Tkinter graphical launcher has been retired. **Use Avalonia for
+all desktop UI features**:
 
 ```bash
-python3 Launcher/Avalonia/amdnr_launcher.py
+dotnet run --project Launcher/Avalonia/Amdnr.Avalonia.csproj
 ```
 
-Requirements: Linux, Python **3.10+**, and `python3-tk` for the GUI (on Debian/Ubuntu: `sudo apt install python3-tk`). No .NET or Wine is required to run the manager itself. A Windows game running through **Steam Proton** or Wine is still needed for the installed Windows graphics DLLs.
+The Python backend is still necessary for game discovery, downloads,
+installation, recovery, diagnostics and the optional third-party bridge.
+Invoke it only with an explicit CLI flag, such as:
 
-The manager can detect standard Steam libraries (including Flatpak Steam), show installed games, select a game's Windows executable, install files from a **locally downloaded, trusted AMDNR release ZIP**, back up files it replaces, and uninstall while restoring backups. It does **not** download arbitrary runtimes, bypass anti-cheat, or guarantee that the Windows neural runtime will run under Proton.
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --list
+python3 Launcher/Avalonia/amdnr_launcher.py --doctor-json
+python3 Launcher/Avalonia/amdnr_launcher.py --bridge-status-json
+```
+
+Running the Python module **without an action** prints usage and exits with
+status 2; it never creates a window or installs anything. No `python3-tk`
+dependency is required. The normal backend needs Python 3.10+; experimental
+community bridge preparation has additional version and runtime requirements
+listed above.
+
+The CLI supports the same explicit installation and recovery operations, but
+does **not** silently configure Proton or install components. The project still
+does not guarantee Windows neural rendering compatibility under Proton.
 
 
 ## Browse and download upstream builds
