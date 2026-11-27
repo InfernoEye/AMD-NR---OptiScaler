@@ -67,6 +67,64 @@ class SteamUserLaunchTests(unittest.TestCase):
                 self.assertIsNone(launch.preview_launch_options(original, "dxgi.dll")["preview"])
         self.assertIsNone(launch.preview_launch_options("", "OptiScaler.asi")["preview"])
 
+    def test_bridge_preview_preserves_wrappers_and_game_arguments(self):
+        existing = 'MANGOHUD=1 gamemoderun %command% -novid'
+        outcome = launch.preview_bridge_launch(existing, '/mnt/Games/My Game/amdnr-linux/run.sh')
+        self.assertEqual(outcome["compose_status"], "ready")
+        self.assertEqual(outcome["preview"],
+                         'MANGOHUD=1 gamemoderun "/mnt/Games/My Game/amdnr-linux/run.sh" %command% -novid')
+        self.assertEqual(outcome["removed"], [])
+
+    def test_bridge_removes_only_recorded_old_proxy_overrides(self):
+        existing = ('PROTON_ENABLE_NVAPI=1 WINEDLLOVERRIDES="dxgi,version=n,b;msvcp140=n,b" '
+                    'mangohud %command% -launch')
+        outcome = launch.preview_bridge_launch(
+            existing, '/game/Binaries/Win64/amdnr-linux/run.sh', ('dxgi.dll',))
+        self.assertEqual(outcome["compose_status"], "review")
+        self.assertIn("Old managed DLL override: dxgi=n,b", outcome["removed"])
+        self.assertIn('WINEDLLOVERRIDES="version=n,b;msvcp140=n,b"', outcome["preview"])
+        self.assertIn('PROTON_ENABLE_NVAPI=1', outcome["preview"])
+        self.assertIn('mangohud "/game/Binaries/Win64/amdnr-linux/run.sh" %command% -launch', outcome["preview"])
+        self.assertTrue(outcome["review"])
+
+    def test_bridge_drops_empty_old_override_variable(self):
+        result = launch.preview_bridge_launch(
+            'WINEDLLOVERRIDES="dxgi=n,b" %command% -novid',
+            '/game/amdnr-linux/run.sh', ('dxgi.dll',))
+        self.assertEqual(result["compose_status"], "ready")
+        self.assertEqual(result["preview"], '"/game/amdnr-linux/run.sh" %command% -novid')
+        self.assertEqual(result["removed"], ["Old managed DLL override: dxgi=n,b"])
+
+    def test_bridge_preserves_unknown_override_and_warns(self):
+        result = launch.preview_bridge_launch(
+            'WINEDLLOVERRIDES="dxgi=n,b" %command%',
+            '/game/amdnr-linux/run.sh')
+        self.assertIn('WINEDLLOVERRIDES="dxgi=n,b"', result["preview"])
+        self.assertEqual(result["compose_status"], "review")
+        self.assertEqual(result["removed"], [])
+
+    def test_bridge_refuses_existing_wrapper_complex_or_unknown_steam_options(self):
+        for existing in (
+            '"/old/amdnr-linux/run.sh" %command%',
+            '%command% && echo hello',
+            '%command% %command%',
+            'WINEDLLOVERRIDES="x=y" WINEDLLOVERRIDES="a=b" %command%',
+        ):
+            with self.subTest(existing=existing):
+                outcome = launch.preview_bridge_launch(existing, '/game/amdnr-linux/run.sh')
+                self.assertIsNone(outcome["preview"])
+                self.assertEqual(outcome["compose_status"], "needs_review")
+        missing = launch.preview_bridge_launch(None, '/game/amdnr-linux/run.sh')
+        self.assertIsNone(missing["preview"])
+        self.assertEqual(missing["compose_status"], "unavailable")
+
+    def test_bridge_legacy_wined3d_flag_is_flagged_not_silently_removed(self):
+        outcome = launch.preview_bridge_launch(
+            'PROTON_USE_WINED3D=1 %command%', '/game/amdnr-linux/run.sh')
+        self.assertEqual(outcome["compose_status"], "review")
+        self.assertIn('PROTON_USE_WINED3D=1', outcome["preview"])
+        self.assertTrue(outcome["review"])
+
     def test_profile_disagreement_and_same_values(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
