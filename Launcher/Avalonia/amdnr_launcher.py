@@ -2723,6 +2723,8 @@ def main() -> int:
                         help="Move existing AMDNR/ReShade hooks into a recoverable snapshot before bridge install")
     parser.add_argument("--bridge-remove", action="store_true",
                         help="Use community manager to restore an installed bridge with consent")
+    parser.add_argument("--bridge-remove-all", action="store_true",
+                        help="Full uninstall: keep earlier files only in recovery snapshots; do not restore old AMDNR hooks")
     parser.add_argument("--bridge-recover-migration", action="store_true",
                         help="Recover interrupted backup-and-replace migration when no bridge is installed")
     parser.add_argument("--approve-bridge-remove", action="store_true",
@@ -2761,7 +2763,8 @@ def main() -> int:
                 elif args.bridge_recover_migration:
                     result = community_bridge.recover_migration(args.exe, args.approve_bridge_remove)
                 else:
-                    result = community_bridge.remove(args.exe, args.approve_bridge_remove)
+                    result = community_bridge.remove(args.exe, args.approve_bridge_remove,
+                                                     restore_previous=not args.bridge_remove_all)
             print(json.dumps(result, ensure_ascii=False))
             # Bridge commands are complete CLI actions, not a precursor to the
             # legacy Tkinter UI. Never fall through to gui() after success.
