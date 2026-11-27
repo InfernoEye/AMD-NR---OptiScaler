@@ -1884,6 +1884,7 @@ def main() -> int:
     parser.add_argument("--remove-managed-extension", metavar="NAME", help="Remove an unmodified launcher-managed ASI")
     parser.add_argument("--set-extension-loader", choices=("true", "false"), help="Enable/disable ASI loader with backed-up INI edit")
     parser.add_argument("--save-ini-base64", metavar="TEXT_B64", help="Save OptiScaler.ini with backup")
+    parser.add_argument("--save-ini-source", type=Path, metavar="UTF8_FILE", help="Save INI text from temporary UTF-8 input")
     parser.add_argument("--ini-expected-sha", metavar="SHA256", help="Checksum from previous --ini-json read")
     parser.add_argument("--exes-json", type=Path, metavar="GAME_DIR", help="Find game executable candidates")
     parser.add_argument("--exe-scan-json", type=Path, metavar="GAME_DIR", help="Scan Windows executables and report Linux-native builds")
@@ -1975,7 +1976,7 @@ def main() -> int:
         except (OSError, ValueError, UnicodeError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
-    elif args.ini_json or args.save_ini_base64 is not None:
+    elif args.ini_json or args.save_ini_base64 is not None or args.save_ini_source is not None:
         if args.exe is None:
             parser.error("--ini-json/--save-ini-base64 require --exe")
         try:
@@ -1984,8 +1985,15 @@ def main() -> int:
             else:
                 if not args.ini_expected_sha:
                     parser.error("--save-ini-base64 requires --ini-expected-sha")
-                import base64
-                payload = base64.b64decode(args.save_ini_base64, validate=True)
+                if args.save_ini_source is not None:
+                    source = args.save_ini_source
+                    if not source.is_file() or source.is_symlink() or \
+                            source.stat().st_size > 512 * 1024:
+                        raise ValueError("INI source must be a regular file <=512 KiB")
+                    payload = source.read_bytes()
+                else:
+                    import base64
+                    payload = base64.b64decode(args.save_ini_base64, validate=True)
                 if len(payload) > 512 * 1024:
                     raise ValueError("INI payload too large")
                 print(json.dumps(save_game_ini(args.exe, args.ini_expected_sha,
