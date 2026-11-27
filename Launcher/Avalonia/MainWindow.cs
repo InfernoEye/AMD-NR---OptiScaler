@@ -246,7 +246,7 @@ public sealed class MainWindow : Window
         stack.Children.Add(new Border { Height = 30 });
         stack.Children.Add(Text("LINUX / PROTON", 11, MutedBrush, FontWeight.Bold));
         stack.Children.Add(Text("Native desktop interface", 12, MutedBrush));
-        stack.Children.Add(Text("Controller: stick / D-pad navigate, A select, B back (where supported)", 11, MutedBrush));
+        stack.Children.Add(Text("Controller: D-pad / stick navigate · A select · B back", 11, MutedBrush));
         return new Border
         {
             Background = SidebarBrush,
@@ -294,7 +294,7 @@ public sealed class MainWindow : Window
         };
         header.Children.Add(_breadcrumb);
         _status.FontSize = 12;
-        _status.MaxLines = 1;
+        _status.MaxLines = 2;
         _status.TextTrimming = TextTrimming.CharacterEllipsis;
         _status.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetRow(_status, 1);
@@ -1231,7 +1231,7 @@ public sealed class MainWindow : Window
             "○  No AMDNR installation recorded for selected executable", 13,
             installed ? AccentBrush : MutedBrush));
         summary.Children.Add(Text(game.Folder, 12, MutedBrush));
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
         var install = Button(installed ? "MANAGE INSTALLATION" : "INSTALL AMDNR", true);
         install.IsEnabled = _exe is not null && File.Exists(_exe);
         install.Click += (_, _) => ShowInstall();
@@ -1552,8 +1552,16 @@ public sealed class MainWindow : Window
     {
         Clear("Install");
         _content.Children.Add(Text("Install & manage", 30, ForegroundBrush, FontWeight.Bold));
-        _content.Children.Add(Text("Manage AMDNR files alongside your Windows game executable. " +
-            "Select a trusted release ZIP and a proxy DLL name.", 14, MutedBrush));
+        _content.Children.Add(Text("Choose a game, review the verified package and DLL name, then confirm installation. " +
+            "Nothing changes in Steam settings automatically.", 14, MutedBrush));
+        var instructions = new StackPanel { Spacing = 7 };
+        instructions.Children.Add(Text("1  SELECT YOUR GAME", 12, AccentBrush, FontWeight.SemiBold));
+        instructions.Children.Add(Text("2  REVIEW THE DOWNLOAD AND PROXY DLL", 12, MutedBrush));
+        instructions.Children.Add(Text("3  CONFIRM CHANGES AND KEEP YOUR BACKUPS", 12, MutedBrush));
+        instructions.Children.Add(Text("Steam launch options remain a copyable preview. " +
+            "Daniel's Proton runtime is not verified; lmxxf is the preferred Linux testing option.",
+            12, MutedBrush));
+        _content.Children.Add(Panel(instructions, new Thickness(14)));
 
         var section = new StackPanel { Spacing = 14 };
         section.Children.Add(Text("GAME EXECUTABLE", 11, MutedBrush, FontWeight.Bold));
