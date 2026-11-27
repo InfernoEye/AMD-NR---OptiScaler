@@ -181,6 +181,60 @@ public sealed class Backend
         return results;
     }
 
+    public async Task<ExtensionInventory> ExtensionsAsync(string executable,
+        CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(
+            new[] { "--extensions-json", "--exe", executable }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
+        var entries = root.GetProperty("plugins").EnumerateArray()
+            .Select(item => new ExtensionEntry(
+                item.GetProperty("name").GetString() ?? "",
+                item.GetProperty("size").GetInt64(),
+                item.TryGetProperty("managed", out var managed) && managed.GetBoolean(),
+                item.TryGetProperty("modified", out var modified) && modified.GetBoolean()))
+            .ToArray();
+        bool? enabled = root.TryGetProperty("enabled", out var enabledNode) &&
+            enabledNode.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? enabledNode.GetBoolean() : null;
+        return new ExtensionInventory(
+            root.GetProperty("folder").GetString() ?? "",
+            entries, enabled,
+            root.GetProperty("ini_present").GetBoolean());
+    }
+
+    public async Task<IniSaveResult> SetExtensionLoaderAsync(string exe, string previousSha,
+        bool enabled, CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] {
+            "--set-extension-loader", enabled ? "true" : "false",
+            "--ini-expected-sha", previousSha, "--exe", exe }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
+        return new IniSaveResult(root.GetProperty("status").GetString() ?? "",
+            root.GetProperty("backup").GetString() ?? "",
+            root.GetProperty("sha256").GetString() ?? "");
+    }
+
+    public async Task ImportExtensionAsync(string exe, string source,
+        CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] {
+            "--import-extension", source, "--exe", exe }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+    }
+
+    public async Task RemoveExtensionAsync(string exe, string name,
+        CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] {
+            "--remove-managed-extension", name, "--exe", exe }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+    }
+
     public async Task<LauncherSettings> SettingsAsync(CancellationToken token = default)
     {
         var (exit, output) = await RunAsync(new[] { "--settings-json" }, token);
@@ -390,6 +444,10 @@ public sealed record SteamUserOptions(string Status, string? Existing,
 public sealed record InstalledGameSummary(string Name, string Folder,
     string Executable, string Status, string? Alias, int TrackedFiles,
     string? SourceArchive, bool Custom);
+
+public sealed record ExtensionEntry(string Name, long Bytes, bool Managed, bool Modified);
+public sealed record ExtensionInventory(string Folder,
+    IReadOnlyList<ExtensionEntry> Plugins, bool? Enabled, bool IniPresent);
 
 public sealed record LauncherSettings(string DefaultAlias, string DownloadDirectory,
     bool ShowPrereleases);
