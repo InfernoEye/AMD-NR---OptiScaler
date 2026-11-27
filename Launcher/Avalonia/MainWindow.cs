@@ -2297,13 +2297,25 @@ public sealed class MainWindow : Window
             Buttons();
             try
             {
+                // Remove only components that this installer's managed-component
+                // registry can safely restore. The backend checks hashes/backups.
+                var managed = await _backend.InstalledComponentsAsync(gameExe);
+                var removed = new List<string>();
+                foreach (var component in managed)
+                {
+                    if (component.Modified.Count > 0)
+                        throw new InvalidOperationException(
+                            component.Asset + " has modified files; managed removal requires review.");
+                    await _backend.RemoveComponentAsync(gameExe, component.Asset);
+                    removed.Add(component.Asset);
+                }
                 var (exit, result) = await _backend.RunAsync(new[]
                 {
                     "--bridge-remove", "--approve-bridge-remove", "--exe", gameExe
                 });
                 if (exit != 0) throw new InvalidOperationException(result);
-                feedback.Text = "Bridge removed; previous managed hooks restored where possible. " +
-                    "Remove the bridge wrapper from Steam launch options manually.";
+                feedback.Text = "AMDNR Linux bridge removed, managed add-ons restored (" +
+                    removed.Count + "). Remove the old wrapper from Steam launch options.";
                 steamPanel.IsVisible = false;
                 await Check();
             }
