@@ -2970,8 +2970,8 @@ public sealed class MainWindow : Window
         string launchOptionText = "";
         void UpdateButtons()
         {
-            install.IsEnabled = !_busy && ready && !migrationPending &&
-                (!blocked && !communityInstalled || replacementConsent.IsChecked == true);
+            install.IsEnabled = !_busy && ready && !migrationPending && !communityInstalled &&
+                (!blocked || replacementConsent.IsChecked == true);
             restore.IsEnabled = !_busy && communityInstalled;
             recoverMigration.IsEnabled = !_busy && migrationPending;
             scan.IsEnabled = !_busy;
@@ -3137,14 +3137,14 @@ public sealed class MainWindow : Window
             {
                 // Refuse stale decisions in both the Avalonia UI and Python adapter.
                 await CheckStatusAsync();
-                if (!ready || migrationPending ||
-                    ((blocked || communityInstalled) && replacementConsent.IsChecked != true))
+                if (!ready || migrationPending || communityInstalled ||
+                    (blocked && replacementConsent.IsChecked != true))
                     throw new InvalidOperationException("Review installation and approve replacement where needed.");
                 var command = new List<string> {
                     "--bridge-install", "--approve-bridge-install",
                     "--bridge-runtime", SelectedBridgeRuntime(), "--exe", selection
                 };
-                if ((blocked || communityInstalled) && replacementConsent.IsChecked == true)
+                if (blocked && replacementConsent.IsChecked == true)
                     command.Add("--bridge-backup-and-replace");
                 var (exit, output) = await _backend.RunAsync(command);
                 if (exit != 0) throw new InvalidOperationException(output);
