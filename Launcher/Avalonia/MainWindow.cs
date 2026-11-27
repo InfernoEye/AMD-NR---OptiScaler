@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Text.Json;
 
 namespace Amdnr.Linux.Desktop;
 
@@ -709,6 +710,50 @@ public sealed class MainWindow : Window
             checks.Children.Add(row);
         }
         _content.Children.Add(Panel(checks));
+
+        var runChecks = Button("RUN INSTALLATION DIAGNOSTICS", true);
+        var results = new StackPanel { Spacing = 12 };
+        runChecks.Click += async (_, _) =>
+        {
+            if (_backend is null || _busy) return;
+            _busy = true;
+            runChecks.IsEnabled = false;
+            _status.Text = "Checking Steam and installed files…";
+            try
+            {
+                var arguments = new List<string> { "--doctor-json" };
+                if (!string.IsNullOrWhiteSpace(_exe))
+                {
+                    arguments.Add("--exe");
+                    arguments.Add(_exe);
+                }
+                if (!string.IsNullOrWhiteSpace(_archive))
+                {
+                    arguments.Add("--archive");
+                    arguments.Add(_archive);
+                }
+                var (exit, output) = await _backend.RunAsync(arguments);
+                if (exit != 0) throw new InvalidOperationException(output);
+                using var report = JsonDocument.Parse(output);
+                results.Children.Clear();
+                foreach (var check in report.RootElement.GetProperty("checks").EnumerateArray())
+                {
+                    var name = check.GetProperty("name").GetString() ?? "Check";
+                    var detail = check.GetProperty("detail").GetString() ?? "";
+                    var okay = check.GetProperty("ok").GetBoolean();
+                    var line = new StackPanel { Spacing = 3 };
+                    line.Children.Add(Text((okay ? "✓  " : "•  ") + name, 15,
+                        okay ? AccentBrush : ForegroundBrush, FontWeight.SemiBold));
+                    line.Children.Add(Text(detail, 12, MutedBrush));
+                    results.Children.Add(line);
+                }
+                _status.Text = "Read-only diagnostics completed.";
+            }
+            catch (Exception ex) { _status.Text = "Doctor failed: " + ex.Message; }
+            finally { _busy = false; runChecks.IsEnabled = true; }
+        };
+        _content.Children.Add(runChecks);
+        _content.Children.Add(Panel(results));
         _content.Children.Add(Text("These are launcher-environment checks, not a verification of " +
             "GPU compatibility, rendering quality, or the Windows DLL runtime under Proton.",
             13, MutedBrush));
