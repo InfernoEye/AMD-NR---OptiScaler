@@ -142,6 +142,24 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].file_size, 2 * 1024 ** 3)
 
+    def test_oversized_component_preview_reports_files_without_installing(self):
+        tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
+        entry = zipfile.ZipInfo("models/huge-model.bin")
+        entry.file_size = 13 * 1024 ** 3
+        entry.compress_size = 93 * 1024 ** 2
+        fake_zip = unittest.mock.MagicMock()
+        fake_zip.__enter__.return_value = fake_zip
+        fake_zip.infolist.return_value = [entry]
+        with (patch.object(launcher, "download_release", return_value=self.root / asset),
+              patch.object(launcher.zipfile, "ZipFile", return_value=fake_zip)):
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertFalse(preview["installable"])
+            self.assertTrue(preview["safety_limit_exceeded"])
+            self.assertEqual(preview["extracted_bytes"], 13 * 1024 ** 3)
+            self.assertEqual(preview["largest_files"][0]["name"], entry.filename)
+            with self.assertRaisesRegex(ValueError, "inspection only"):
+                launcher.install_component(self.exe, tag, asset)
+
     def test_component_extracted_size_is_bounded(self):
         import unittest.mock
         entry = zipfile.ZipInfo("models/oversized.bin")
