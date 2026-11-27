@@ -53,6 +53,17 @@ LMXXF_SIZE = 794752422
 HOST_ARCHIVE = f"AMDNR-v{HOST_VERSION}.zip"
 LMXXF_ARCHIVE = f"AMDNR-lmxxf-{LMXXF_VERSION}.zip"
 HOST_RELEASE_URL = f"https://github.com/3zwr1/AMD-NR---OptiScaler/releases/download/Alpha{HOST_VERSION}"
+# Published/pinned by AMDNR-Linux v0.3.7. Every selected runtime is
+# verified again by manage.stage against the actual host's pass DLL hashes.
+DANIEL_VERSIONS = ("0.6.0", "0.5.1", "0.5.0", "0.4.3", "0.4.1", "0.4.0")
+RUNTIME_CHOICES = ("lmxxf", *DANIEL_VERSIONS)
+
+
+def validate_runtime(runtime: str) -> str:
+    if runtime not in RUNTIME_CHOICES:
+        raise ValueError(f"Unsupported neural runtime: {runtime!r}. Allowed: {', '.join(RUNTIME_CHOICES)}")
+    return runtime
+
 
 
 
@@ -137,13 +148,15 @@ def source_path() -> Path:
     return cache_dir() / "source" / SOURCE_ROOT
 
 
-def prepared_path() -> Path:
-    # Preserve the old v0.3.5.6 staged package without treating it as latest.
-    return cache_dir() / f"package-amdnr-{HOST_VERSION}"
+def prepared_path(runtime: str = "lmxxf") -> Path:
+    # Preserve the old v0.3.5.6 staged package and other runtime selections.
+    runtime = validate_runtime(runtime)
+    return cache_dir() / f"package-amdnr-{HOST_VERSION}-{runtime}"
 
 
-def package_is_ready(package: Path) -> bool:
+def package_is_ready(package: Path, runtime: str = "lmxxf") -> bool:
     """Only recognize a complete staged bundle for the chosen AMDNR host."""
+    runtime = validate_runtime(runtime)
     marker = package / "amdnr-linux/SOURCE.txt"
     components = package / "amdnr-linux/components.json"
     try:
@@ -156,7 +169,8 @@ def package_is_ready(package: Path) -> bool:
         return (f"Host/runtime: AMDNR {HOST_VERSION}," in description and
                 f"Archive SHA-256: {HOST_SHA256}" in description and
                 f"SHA-256 {LMXXF_SHA256}" in description and
-                config.get("neural_runtime") == "lmxxf")
+                config.get("neural_runtime") == ("lmxxf" if runtime == "lmxxf" else "daniel") and
+                (runtime == "lmxxf" or config.get("daniel", {}).get("version") == runtime))
     except (OSError, ValueError, UnicodeError):
         return False
 
@@ -195,9 +209,10 @@ def game_conflicts(exe: Path) -> list[str]:
     return problems
 
 
-def status(exe: Path | None = None) -> dict:
+def status(exe: Path | None = None, runtime: str = "lmxxf") -> dict:
+    runtime = validate_runtime(runtime)
     src = source_path()
-    package = prepared_path()
+    package = prepared_path(runtime)
     archive = cache_dir() / ARCHIVE
     report = {
         "provider": "hassanm0301/AMDNR-Linux",
@@ -212,7 +227,9 @@ def status(exe: Path | None = None) -> dict:
             and file_hash(archive) == SHA256,
         "source_ready": (src / "RELEASE-MANIFEST.json").is_file()
             and (src / "linux/setup.py").is_file(),
-        "prepared": package_is_ready(package),
+        "prepared": package_is_ready(package, runtime),
+        "selected_runtime": runtime,
+        "runtime_choices": RUNTIME_CHOICES,
         "host_version": HOST_VERSION,
         "lmxxf_version": LMXXF_VERSION,
         "legacy_prepared": (cache_dir() / "package/amdnr-linux/run.sh").is_file(),
@@ -411,13 +428,14 @@ def preparer_python() -> str:
         "for your system Python and retry; no system packages are installed automatically.")
 
 
-def prepare(compiler: Path) -> dict:
+def prepare(compiler: Path, runtime: str = "lmxxf") -> dict:
+    runtime = validate_runtime(runtime)
     interpreter = preparer_python()
     from bridge_discovery import compiler_is_candidate
     if not compiler_is_candidate(compiler):
         raise ValueError("The chosen d3dcompiler_47.dll is not a regular x64 PE file. "
                          "Choose a native x64 compiler from software you own.")
-    if prepared_path().exists():
+    if prepared_path(runtime).exists():
         raise ValueError("Community package already exists. Review it instead of overwriting.")
     archive = fetch_verified()
     src = source_path()
@@ -440,8 +458,10 @@ def prepare(compiler: Path) -> dict:
         dependency_actions.append(f"Selected SHA-256 pinned AMDNR {HOST_VERSION} and lmxxf {LMXXF_VERSION}")
     command = [interpreter, str(src / "linux/setup.py"), "prepare",
                "--compiler", str(compiler.resolve()),
-               "--output", str(prepared_path()),
+               "--output", str(prepared_path(runtime)),
                "--cache", str(cache_dir() / "upstream-cache")]
+    if runtime != "lmxxf":
+        command.extend(["--daniel-runtime", runtime])
     # Running third-party GPL setup code requires the user's separate Prepare
     # click. It fetches pinned upstream AMDNR/ROCm assets into our private cache.
     finished = subprocess.run(command, cwd=src, text=True, capture_output=True,
@@ -449,18 +469,20 @@ def prepare(compiler: Path) -> dict:
     if finished.returncode:
         raise ValueError("Community setup failed (exit %d): %s" %
                          (finished.returncode, (finished.stdout + "\n" + finished.stderr)[-5000:]))
-    if not package_is_ready(prepared_path()):
+    if not package_is_ready(prepared_path(runtime), runtime):
         raise ValueError("Community setup did not stage the expected current AMDNR/lmxxf package.")
-    return {"prepared": True, "package": str(prepared_path()), "host_version": HOST_VERSION,
+    return {"prepared": True, "package": str(prepared_path(runtime)), "host_version": HOST_VERSION,
+            "selected_runtime": runtime,
             "provider": PROJECT, "dependency_actions": dependency_actions,
             "output": finished.stdout[-1500:]}
 
 
-def install(exe: Path, approved: bool) -> dict:
+def install(exe: Path, approved: bool, runtime: str = "lmxxf") -> dict:
+    runtime = validate_runtime(runtime)
     if not approved:
         raise ValueError("Bridge installation requires explicit user approval.")
     folder = _game_directory(exe)
-    report = status(exe)
+    report = status(exe, runtime)
     if not report["prepared"]:
         raise ValueError("Prepare the checksum-verified community package first.")
     if report["conflicts"]:
@@ -472,7 +494,7 @@ def install(exe: Path, approved: bool) -> dict:
     # Recheck just before writing, preventing stale UI decisions.
     if game_conflicts(exe):
         raise ValueError("Files changed since preview. Reopen compatibility checks.")
-    command = [sys.executable, str(manager), "install", str(prepared_path()),
+    command = [sys.executable, str(manager), "install", str(prepared_path(runtime)),
                str(folder), "--exe", str(exe.resolve()), "--proxy", "auto"]
     finished = subprocess.run(command, cwd=source_path(), text=True,
                               capture_output=True, timeout=300, check=False)
