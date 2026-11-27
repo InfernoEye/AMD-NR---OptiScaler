@@ -1,5 +1,6 @@
 """Safety checks for the separately fetched community bridge adapter (offline)."""
 import io
+import struct
 import json
 import subprocess
 from pathlib import Path
@@ -11,6 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import community_bridge as bridge
+import bridge_discovery as discovery
 
 
 class BridgeTests(unittest.TestCase):
@@ -38,6 +40,57 @@ class BridgeTests(unittest.TestCase):
                 info.size = len(payload)
                 archive.addfile(info, io.BytesIO(payload))
         return path
+
+    def fake_compiler(self, folder, x64=True):
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / "d3dcompiler_47.dll"
+        fake = bytearray(70000)
+        fake[:2] = b"MZ"
+        struct.pack_into("<I", fake, 0x3c, 128)
+        fake[128:132] = b"PE\\x00\\x00".replace(b"\\x00", b"\\0")
+        struct.pack_into("<H", fake, 132, 0x8664 if x64 else 0x14c)
+        struct.pack_into("<H", fake, 152, 0x20b if x64 else 0x10b)
+        path.write_bytes(fake)
+        return path
+
+    def test_compiler_discovery_prefers_selected_game_and_is_read_only(self):
+        exe = self.exe()
+        game = self.root / "steamapps/common/TestGame"
+        compiler = self.fake_compiler(game / "Dependencies")
+        result = discovery.discover(exe, include_library=False)
+        self.assertEqual(len(result["compiler_candidates"]), 1)
+        self.assertEqual(result["compiler_candidates"][0]["path"], str(compiler))
+        self.assertEqual(result["compiler_candidates"][0]["source"], "selected_game")
+        self.assertFalse(result["automatic_changes"])
+        self.assertFalse((self.root / "cache").exists())
+
+    def test_compiler_discovery_rejects_non_native_and_symlink(self):
+        exe = self.exe()
+        game = self.root / "steamapps/common/TestGame"
+        invalid = self.fake_compiler(game / "Invalid", x64=False)
+        good = self.fake_compiler(game / "Good")
+        links = game / "Links"
+        links.mkdir()
+        (links / "d3dcompiler_47.dll").symlink_to(good)
+        self.assertFalse(discovery.compiler_is_candidate(invalid))
+        self.assertFalse(discovery.compiler_is_candidate(links / "d3dcompiler_47.dll"))
+        found = discovery.find_compilers(exe, include_library=False)
+        self.assertEqual([x["path"] for x in found], [str(good)])
+
+    def test_compiler_discovery_refuses_missing_executable(self):
+        with self.assertRaisesRegex(ValueError, "executable"):
+            discovery.discover(self.root / "fake.exe")
+
+    def test_discovery_cli_is_headless_and_json_only(self):
+        exe = self.exe()
+        entrypoint = Path(__file__).resolve().parents[1] / "amdnr_launcher.py"
+        completed = subprocess.run(
+            [sys.executable, str(entrypoint), "--bridge-discover-json",
+             "--exe", str(exe)], capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(completed.stdout)["selected_executable"], str(exe))
+        self.assertNotIn("Tkinter", completed.stderr)
 
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
