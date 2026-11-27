@@ -410,7 +410,7 @@ graphics API, the installed AMDNR build and Proton behavior.
 
 The Linux launcher offers **Use Unofficial Mirror & Prepare Mochi** as an
 optional alternative to choosing a local NVIDIA DLL. It currently resolves
-the immutable `dlssnr-310.9.16` GitHub release from `RankFTW/rhi-repo`.
+the separate `dlssnr-310.9.16-nvidia` GitHub release from `RankFTW/rhi-repo`, explicitly identified by its publisher as the **original NVIDIA-signed** binary. The unqualified `dlssnr-310.9.16` release contains a modified DLL that does not match the extractor’s supported source hash.
 **This is an unofficial third-party mirror.** Neither NVIDIA nor AMDNR
 operates it, and redistribution authorization has not been independently
 established. The UI makes this distinction explicit; the user must choose
@@ -418,7 +418,7 @@ the community-source action to start a download. This does not ship an
 NVIDIA binary within the Linux launcher or the project repository.
 
 Before the model extractor runs, the launcher pins and verifies the archive
-SHA-256 (`dbeb1f2790b5c621887db99b1a56ac8bd5cb35207e8c074cbb806710f7460cab`)
+SHA-256 (`5277355f0578d36f2a25413d8c7ff4c6f9966cea5bad714305f23b20173e09f6`)
 and the internal DLL SHA-256
 (`2bc19bc09a7b89dd44f73e2ac0108fcc586e2154bdd0830f242f4f040e28789f`).
 It also checks the fixed release asset's GitHub digest, expected byte length,
