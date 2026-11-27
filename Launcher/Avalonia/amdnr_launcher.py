@@ -475,6 +475,48 @@ def download_release(tag: str, asset_name: str) -> Path:
         temporary.unlink(missing_ok=True)
 
 
+def _preferred_exe_path(directory: Path) -> Path:
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    key = hashlib.sha256(str(directory.resolve()).encode("utf-8")).hexdigest()
+    return config / "amdnr" / "game-executables" / f"{key}.json"
+
+
+def saved_executable(directory: Path) -> str | None:
+    """Read a per-install-directory preference; stale paths are ignored."""
+    if not directory.is_dir():
+        return None
+    try:
+        record = json.loads(_preferred_exe_path(directory).read_text(encoding="utf-8"))
+        path = Path(record["executable"])
+        if path.is_file() and path.suffix.lower() == ".exe" and not path.is_symlink() \
+                and path.resolve().is_relative_to(directory.resolve()):
+            return str(path.resolve())
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return None
+
+
+def remember_executable(directory: Path, executable: Path) -> str:
+    """Persist explicit user choice within this game, not a global game-name mapping."""
+    if not directory.is_dir() or not executable.is_file() or \
+            executable.suffix.lower() != ".exe" or executable.is_symlink() or \
+            not executable.resolve().is_relative_to(directory.resolve()):
+        raise ValueError("Choose a Windows executable inside the selected game folder")
+    destination = _preferred_exe_path(directory)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", dir=destination.parent, prefix=".exe-choice-",
+        encoding="utf-8", delete=False
+    ) as output:
+        temporary = Path(output.name)
+        json.dump({"executable": str(executable.resolve())}, output)
+    try:
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return str(executable.resolve())
+
+
 def executable_candidates(directory: Path) -> list[dict[str, object]]:
     """Suggest likely Windows game EXEs, but never silently install to a guess."""
     if not directory.is_dir():
@@ -509,7 +551,12 @@ def executable_candidates(directory: Path) -> list[dict[str, object]]:
     except (OSError, ValueError):
         return []
     candidates.sort(key=lambda v: (-v[0], str(v[1]).casefold()))
+    best_score = candidates[0][0] if candidates else -999
+    runner_up = candidates[1][0] if len(candidates) > 1 else -999
+    confident = best_score > -50 and (
+        len(candidates) == 1 or (best_score >= 15 and best_score - runner_up >= 15))
     return [{"path": str(path), "recommended": rank == 0 and score > -50,
+             "auto_select": rank == 0 and confident,
              "suspicious": score <= -50} for rank, (score, path)
             in enumerate(candidates[:50])]
 
@@ -836,6 +883,8 @@ def main() -> int:
     parser.add_argument("--releases-json", action="store_true", help="Show upstream AMDNR release packages as JSON")
     parser.add_argument("--doctor-json", action="store_true", help="Read-only launcher and installation diagnostics")
     parser.add_argument("--exes-json", type=Path, metavar="GAME_DIR", help="Find game executable candidates")
+    parser.add_argument("--saved-exe", type=Path, metavar="GAME_DIR", help="Get a remembered executable")
+    parser.add_argument("--remember-exe", type=Path, metavar="GAME_DIR", help="Remember executable selected with --exe")
     parser.add_argument("--download-release", metavar="TAG", help="Download and verify selected AMDNR release")
     parser.add_argument("--release-asset", metavar="ZIP", help="Archive filename for --download-release")
     parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
@@ -849,7 +898,17 @@ def main() -> int:
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
-    if args.exes_json is not None:
+    if args.remember_exe is not None:
+        if args.exe is None:
+            parser.error("--remember-exe requires --exe")
+        try:
+            print(remember_executable(args.remember_exe, args.exe))
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.saved_exe is not None:
+        print(saved_executable(args.saved_exe) or "")
+    elif args.exes_json is not None:
         print(json.dumps(executable_candidates(args.exes_json), ensure_ascii=False))
     elif args.doctor_json:
         print(json.dumps(doctor_report(args.exe, args.archive), ensure_ascii=False))
