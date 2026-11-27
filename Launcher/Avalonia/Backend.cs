@@ -75,6 +75,31 @@ public sealed class Backend
         }
         return games;
     }
+
+    public async Task<IReadOnlyList<ReleaseEntry>> ReleasesAsync(CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] { "--releases-json" }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var releases = new List<ReleaseEntry>();
+        foreach (var item in document.RootElement.EnumerateArray())
+        {
+            releases.Add(new ReleaseEntry(
+                item.GetProperty("tag").GetString() ?? "",
+                item.GetProperty("name").GetString() ?? "",
+                item.GetProperty("asset").GetString() ?? "",
+                item.GetProperty("bytes").GetInt64(),
+                item.GetProperty("prerelease").GetBoolean()));
+        }
+        return releases;
+    }
+
 }
 
 public sealed record GameEntry(string Name, string Folder, string? Artwork);
+
+public sealed record ReleaseEntry(string Tag, string Name, string Asset, long Bytes, bool Prerelease)
+{
+    public override string ToString() => $"{Name}  ·  {Asset}  ({Bytes / (1024.0 * 1024):F0} MiB){(Prerelease ? " · prerelease" : "")}";
+}
+
