@@ -55,7 +55,7 @@ The CLI supports the same scan:
 python3 Launcher/Avalonia/amdnr_launcher.py --exes-json "/path/to/steamapps/common/Game"
 ```
 
-With a selected executable, the game screen shows a compact Linux installation record summary with the DLL alias and tracked-file count. **Show Tracked Files** expands an independently scrollable list so a large installation does not hide the rest of the game controls. **Check File Integrity** opens Doctor. The main view retains extra scrolling space above its bottom status bar.
+With a selected executable, the game screen shows a compact Linux installation record summary with the DLL alias and tracked-file count. **Show Tracked Files** expands an independently scrollable list. **Check File Integrity** opens Doctor. The game details window sizes itself vertically to its content, capped by the current monitor's usable height; when content is taller than the screen, the main panel scrolls above a separate status-bar row. The former duplicate installation action panel has been removed.
 
 ## Installation records and version provenance
 
