@@ -241,16 +241,56 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual((self.game / "MochizukiNrRuntime.dll").read_bytes(),
                              b"mock mochi runtime")
 
-    def test_official_daniel_runtime_discovery_uses_historical_release(self):
-        releases = [{"tag_name": "Alpha2", "assets": [{"name": "SHA256SUMS.txt"}]}]
-        daniel = {"tag_name": "Alpha0.3.5.5R4", "assets": [
-            {"name": "SHA256SUMS.txt"}, {"name": "v0.6.0-Runtime.zip", "size": 176366023}]}
-        with patch.object(launcher, "_github_json", side_effect=[releases, daniel]) as getter:
+    def test_official_daniel_runtime_discovery_uses_full_release_history(self):
+        releases = [
+            {"tag_name": "Alpha0.3.5.8", "assets": [
+                {"name": "SHA256SUMS.txt"},
+                {"name": "v0.8.0-Runtime.zip", "size": 58881730,
+                 "digest": "sha256:" + "a" * 64}]},
+            {"tag_name": "Alpha0.3.5.7", "assets": [
+                {"name": "SHA256SUMS.txt"},
+                {"name": "v0.8.0-Runtime.zip", "size": 58881730,
+                 "digest": "sha256:" + "a" * 64}]},
+            {"tag_name": "Alpha0.3.5.5R4", "assets": [
+                {"name": "SHA256SUMS.txt"},
+                {"name": "v0.6.0-Runtime.zip", "size": 176366023}]},
+            {"tag_name": "Alpha0.3.1", "assets": [
+                {"name": "v0.3.1-Runtime.zip", "size": 110992515,
+                 "digest": "sha256:" + "b" * 64}]}
+        ]
+        with patch.object(launcher, "_github_json", return_value=releases) as getter:
             found = launcher.component_catalog()
-        self.assertEqual(found[0]["asset"], "v0.6.0-Runtime.zip")
-        self.assertEqual(found[0]["tag"], "Alpha0.3.5.5R4")
+        self.assertEqual([x["asset"] for x in found], [
+            "v0.8.0-Runtime.zip", "v0.6.0-Runtime.zip", "v0.3.1-Runtime.zip"])
+        self.assertEqual(found[0]["tag"], "Alpha0.3.5.8")
+        self.assertEqual(found[2]["tag"], "Alpha0.3.1")
         self.assertIn("3zwr1", launcher.RELEASE_REPO)
-        self.assertIn("Alpha0.3.5.5R4", getter.call_args_list[1].args[0])
+        self.assertIn("per_page=100", getter.call_args.args[0])
+
+    def test_daniel_versions_are_not_confused_with_mochi_or_unknown_zips(self):
+        self.assertEqual(launcher._daniel_version("v0.8.0-Runtime.zip"), "0.8.0")
+        self.assertEqual(launcher._daniel_version("v0.6.0-Runtime.zip"), "0.6.0")
+        self.assertIsNone(launcher._daniel_version("Runtime.zip"))
+        self.assertIsNone(launcher._daniel_version("v0.8.0-other.zip"))
+        self.assertFalse(launcher._is_component_zip("v0.8.0-other.zip"))
+
+    def test_daniel_switch_requires_removing_existing_version_first(self):
+        tag = "Alpha0.3.5.8"
+        asset = "v0.8.0-Runtime.zip"
+        archive = self.root / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            for i in range(1, 4):
+                stream.writestr(f"payload/dlssnr_amd_pass{i}.dll", b"pass " + bytes([i]))
+            stream.writestr("payload/dlssnr_on_amd_weights.bin", b"weights")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive)):
+            launcher._save_component_records(self.exe, {
+                "v0.6.0-Runtime.zip": {"tag": "Alpha0.3.5.5R4", "files": {}}})
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertFalse(preview["installable"])
+            self.assertGreater(preview["conflict_count"], preview["replaceable_count"])
+            with self.assertRaisesRegex(ValueError, "Remove installed Daniel"):
+                launcher.install_component(self.exe, tag, asset, replace_conflicts=True)
 
     def test_daniel_runtime_installs_required_files_to_game_root_only(self):
         tag, asset = "Alpha0.3.5.5R4", "v0.6.0-Runtime.zip"
