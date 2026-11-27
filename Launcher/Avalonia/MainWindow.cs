@@ -411,7 +411,7 @@ public sealed class MainWindow : Window
     {
         var control = new Button
         {
-            Content = label,
+            Content = UiLanguage.TranslateButton(label),
             Padding = new Thickness(18, 10),
             Background = primary ? AccentBrush : SurfaceBrush,
             Foreground = ForegroundBrush,
