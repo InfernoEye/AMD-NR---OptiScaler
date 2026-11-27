@@ -2663,6 +2663,7 @@ def main() -> int:
     parser.add_argument("--archive", type=Path, metavar="ZIP", help="Archive path for --doctor-json")
     parser.add_argument("--install", type=Path, metavar="ZIP", help="Install an AMDNR release ZIP")
     parser.add_argument("--repair", type=Path, metavar="ZIP", help="Repair from exact recorded ZIP")
+    parser.add_argument("--repair-auto", action="store_true", help="Find and verify the original package automatically")
     parser.add_argument("--update-from", type=Path, metavar="ZIP", help="Safely update installed AMDNR package")
     parser.add_argument("--backup-modified", action="store_true", help="Explicit consent to retain/replace changed tracked files")
     parser.add_argument("--recovery-status", action="store_true", help="Inspect interrupted transaction journal")
@@ -2816,13 +2817,16 @@ def main() -> int:
         except (OSError, ValueError, TypeError, UnicodeError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
-    elif (args.repair or args.update_from or args.recovery_status or
+    elif (args.repair or args.repair_auto or args.update_from or args.recovery_status or
           args.recover_transaction or args.try_next_proxy):
         if args.exe is None:
             parser.error("Maintenance operations require --exe")
         try:
             import launcher_maintenance as maintenance
-            if args.repair:
+            if args.repair_auto:
+                result = maintenance.repair_automatically(args.exe,
+                    allow_modified=args.backup_modified)
+            elif args.repair:
                 result = maintenance.repair_or_update(args.exe, args.repair,
                     allow_modified=args.backup_modified)
             elif args.update_from:
