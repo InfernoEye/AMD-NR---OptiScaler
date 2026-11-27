@@ -166,7 +166,9 @@ def _cached_artwork(appid: str, roots: list[Path]) -> Path | None:
         except OSError:
             pass
 
-    for root in roots:
+    # Extra Steam libraries may each contain a local appcache with art.
+    candidates = list(dict.fromkeys([*roots, *steam_libraries()]))
+    for root in candidates:
         cache = root / "appcache/librarycache"
         paths = (
             cache / appid / "library_600x900.jpg",
@@ -177,6 +179,8 @@ def _cached_artwork(appid: str, roots: list[Path]) -> Path | None:
             cache / f"{appid}_header.jpg",
             cache / appid / "library_hero.jpg",
             cache / f"{appid}_library_hero.jpg",
+            cache / f"{appid}_logo.png",
+            cache / appid / "logo.png",
         )
         for path in paths:
             try:
@@ -188,7 +192,8 @@ def _cached_artwork(appid: str, roots: list[Path]) -> Path | None:
         folder = cache / appid
         if folder.is_dir():
             for pattern in ("library_600x900*.jpg", "library_600x900*.png",
-                            "header*.jpg", "library_hero*.jpg"):
+                            "header*.jpg", "header*.png", "library_hero*.jpg",
+                            "library_hero*.png", "logo*.png"):
                 for path in sorted(folder.glob(pattern)):
                     try:
                         if path.is_file() and _is_image(path.read_bytes()[:8]):
@@ -315,6 +320,15 @@ def steam_game_details(download_artwork: bool = False) -> list[dict[str, str | N
         with ThreadPoolExecutor(max_workers=8) as pool:
             return list(pool.map(resolve, pending))
     return [resolve(game) for game in pending]
+
+
+def artwork_diagnostics(download_artwork: bool = False) -> dict[str, object]:
+    """Report which games lack cover art, without exposing user filesystem paths."""
+    games = steam_game_details(download_artwork)
+    missing = [{"name": game["name"], "reason": "No usable local or official cover found"}
+               for game in games if not game["artwork"]]
+    return {"total": len(games), "with_artwork": len(games) - len(missing),
+            "missing": missing}
 
 
 def guess_executable(directory: Path) -> Path | None:
@@ -583,6 +597,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="List detected Steam games")
     parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
+    parser.add_argument("--artwork-report", action="store_true", help="JSON summary of games with missing artwork")
     parser.add_argument("--download-artwork", action="store_true", help="Fetch missing cover art from Steam CDN")
     parser.add_argument("--set-artwork", type=Path, metavar="IMAGE", help="Set cover image (PNG/JPG) for a game")
     parser.add_argument("--game-folder", type=Path, help="Game directory for --set-artwork")
@@ -615,6 +630,8 @@ def main() -> int:
         except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
+    elif args.artwork_report:
+        print(json.dumps(artwork_diagnostics(args.download_artwork), ensure_ascii=False, indent=2))
     elif args.list_json:
         print(json.dumps(steam_game_details(args.download_artwork), ensure_ascii=False))
     elif args.list:
