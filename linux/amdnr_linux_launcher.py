@@ -188,12 +188,18 @@ def _cached_artwork(appid: str, roots: list[Path]) -> Path | None:
                     return path
             except OSError:
                 continue
-        # Some Steam clients use a hashed asset suffix in the app-ID directory.
+        # New Steam clients put artwork under <app-id>/<asset-hash>/image.jpg.
+        # Search only this app's folder (never the entire library cache).
         folder = cache / appid
         if folder.is_dir():
-            for pattern in ("library_600x900*.jpg", "library_600x900*.png",
-                            "header*.jpg", "header*.png", "library_hero*.jpg",
-                            "library_hero*.png", "logo*.png"):
+            patterns = (
+                "library_600x900*.jpg", "library_600x900*.png",
+                "library_600x900_2x.jpg", "header*.jpg", "header*.png",
+                "library_hero*.jpg", "library_hero*.png", "logo*.png",
+                "*/library_600x900*.jpg", "*/library_600x900*.png",
+                "*/header*.jpg", "*/header*.png", "*/library_hero*.jpg",
+            )
+            for pattern in patterns:
                 for path in sorted(folder.glob(pattern)):
                     try:
                         if path.is_file() and _is_image(path.read_bytes()[:8]):
@@ -220,15 +226,22 @@ def _download_artwork(appid: str, destination: Path) -> Path | None:
             metadata = response.read(512 * 1024)
         data = json.loads(metadata)
         details = data.get(appid, {}).get("data", {})
-        header = details.get("header_image") if isinstance(details, dict) else None
-        if isinstance(header, str):
-            from urllib.parse import urlparse
-            parsed = urlparse(header)
-            if parsed.scheme == "https" and parsed.hostname in {
-                "shared.fastly.steamstatic.com", "shared.steamstatic.com",
-                "cdn.cloudflare.steamstatic.com", "cdn.akamai.steamstatic.com",
-            }:
-                urls.append(header)
+        # Read every image URL supplied by Steam rather than inventing game-specific
+        # filenames; releases on the newer CDN use content-hashed asset URLs.
+        from urllib.parse import urlparse
+        if isinstance(details, dict):
+            for field in ("capsule_imagev5", "capsule_image", "header_image"):
+                candidate = details.get(field)
+                if not isinstance(candidate, str):
+                    continue
+                parsed = urlparse(candidate)
+                if parsed.scheme == "https" and parsed.hostname in {
+                    "shared.fastly.steamstatic.com", "shared.steamstatic.com",
+                    "shared.cloudflare.steamstatic.com",
+                    "cdn.cloudflare.steamstatic.com", "cdn.akamai.steamstatic.com",
+                    "shared.akamai.steamstatic.com",
+                } and parsed.username is None and parsed.password is None:
+                    urls.insert(0, candidate)
     except (OSError, ValueError, KeyError, TypeError):
         pass
 
