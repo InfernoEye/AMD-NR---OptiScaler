@@ -1,6 +1,7 @@
 """Safety checks for the separately fetched community bridge adapter (offline)."""
 import io
 import json
+import subprocess
 from pathlib import Path
 import sys
 import tarfile
@@ -90,6 +91,19 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse(result["prepared"])
         self.assertFalse(result["can_install"])
         self.assertFalse((self.root / "cache").exists())
+
+    def test_bridge_status_cli_exits_without_opening_tkinter(self):
+        # Regression: --bridge-status-json previously fell through into gui(),
+        # opening a second white Python window and leaving Avalonia waiting.
+        executable = Path(__file__).resolve().parents[1] / "amdnr_launcher.py"
+        completed = subprocess.run(
+            [sys.executable, str(executable), "--bridge-status-json"],
+            capture_output=True, text=True, timeout=12, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(completed.stdout)["provider"],
+                         "hassanm0301/AMDNR-Linux")
+        self.assertNotIn("Tkinter", completed.stderr)
 
     def test_install_refuses_without_consent(self):
         exe = self.exe()
