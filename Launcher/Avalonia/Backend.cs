@@ -205,6 +205,28 @@ public sealed class Backend
             root.GetProperty("ini_present").GetBoolean());
     }
 
+    public async Task<string> PrepareMochiFromCommunityAsync(string executable,
+        CancellationToken token = default)
+    {
+        // Explicit opt-in is handled by the user's dedicated button action.
+        var (exit, output) = await RunAsync(new[] {
+            "--auto-prepare-mochi-model", "--accept-community-source",
+            "--exe", executable }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var doc = JsonDocument.Parse(output);
+        var models = doc.RootElement.GetProperty("models");
+        var report = new StringBuilder("Verified Mochi model prepared from opt-in community source.");
+        foreach (var model in models.EnumerateObject())
+        {
+            var bytes = model.Value.GetProperty("bytes").GetInt64();
+            report.AppendLine();
+            report.Append(model.Name).Append(": ")
+                .Append((bytes / (1024.0 * 1024)).ToString("F1"))
+                .Append(" MiB");
+        }
+        return report.ToString();
+    }
+
     public async Task<string> PrepareMochiModelAsync(string executable, string localSource,
         CancellationToken token = default)
     {
