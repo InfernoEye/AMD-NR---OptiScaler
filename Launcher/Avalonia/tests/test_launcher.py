@@ -28,6 +28,46 @@ class LauncherTests(unittest.TestCase):
             archive.writestr("release/OptiScaler.ini", b"configuration")
             archive.writestr("release/setup_windows.bat", b"not installed")
 
+    def test_library_audit_cache_round_trip_survives_reload(self):
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
+            self.assertEqual(launcher.cached_library_audit(), [])
+            rows = [{"name": "Game", "folder": str(self.game), "custom": False,
+                     "status": "windows_ready", "executable": str(self.exe),
+                     "source": "saved", "native": [], "steam_windows_missing": [],
+                     "installed_record": False}]
+            launcher._save_library_audit(rows)
+            path = launcher._library_audit_cache_path()
+            self.assertTrue(path.is_file())
+            self.assertEqual(launcher.cached_library_audit(), rows)
+            # Reading an old snapshot must never trigger discovery or scanning.
+            with patch.object(launcher, "steam_games",
+                              side_effect=AssertionError("unexpected rescan")), \
+                 patch.object(launcher, "executable_scan",
+                              side_effect=AssertionError("unexpected rescan")):
+                self.assertEqual(launcher.cached_library_audit(), rows)
+
+    def test_library_audit_cache_is_only_replaced_by_explicit_save(self):
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
+            old = [{"name": "Old", "folder": str(self.game),
+                    "status": "native_linux"}]
+            launcher._save_library_audit(old)
+            path = launcher._library_audit_cache_path()
+            initial = path.read_bytes()
+            self.assertEqual(launcher.cached_library_audit(), old)
+            self.assertEqual(path.read_bytes(), initial)
+            new = [{"name": "Changed", "folder": str(self.game),
+                    "status": "windows_ready"}]
+            launcher._save_library_audit(new)
+            self.assertEqual(launcher.cached_library_audit(), new)
+
+    def test_library_audit_cache_rejects_bad_snapshot(self):
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
+            path = launcher._library_audit_cache_path()
+            path.parent.mkdir(parents=True)
+            path.write_text('{"format": 99, "entries": []}')
+            with self.assertRaisesRegex(ValueError, "saved library audit"):
+                launcher.cached_library_audit()
+
     def test_library_audit_respects_steam_metadata_and_saved_custom_games(self):
         steam_folder = self.root / "steamapps/common/WindowsGame"
         steam_folder.mkdir(parents=True)
