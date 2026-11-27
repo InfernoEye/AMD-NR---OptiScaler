@@ -46,11 +46,18 @@ Both views use the same library data, filters, detected executables and
 installation records; switching views never changes game files or Steam options.
 The UI is a Linux-only implementation; no Windows launcher code was copied.
 
-The screenshot-guided redesign is **not complete**. Outstanding visual work
-includes responsive game-detail artwork, improved focus/hover visibility,
-a first-run tour, language options, refined settings cards and hardware
-validation of controller navigation. Unsupported Windows-only Anywhere/Desktop
-NR features must not be presented as working Linux features.
+The second UI pass adds artwork-backed game details, visible focus outlines
+for keyboard/controller button navigation, and responsive Settings cards for
+general preferences, upstream research credits, and verified launcher updates.
+A five-step skippable Linux-specific introduction appears on first run; it can
+be replayed from Settings. Introduction and view preferences are user-local
+under the XDG configuration directory, separate from game files.
+
+The screenshot-guided redesign is **not complete**. Remaining work includes
+real Linux desktop screenshot comparisons, localization, touch/hover polish,
+responsive testing at Steam Deck resolution, and hardware validation of
+controller navigation. Unsupported Windows-only Anywhere/Desktop NR features
+must not be presented as working Linux features.
 
 **Platform: Linux.** This is the independent Linux desktop launcher. The original Windows launcher remains under `Launcher/OpenSource/`.
 
