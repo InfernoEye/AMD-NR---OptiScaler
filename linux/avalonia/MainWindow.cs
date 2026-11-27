@@ -36,6 +36,9 @@ public sealed class MainWindow : Window
     private TextBox? _archiveBox;
     private ComboBox? _aliasBox;
     private bool _busy;
+    private string _libraryQuery = "";
+    private StackPanel? _libraryResults;
+    private TextBox? _librarySearch;
 
     public MainWindow()
     {
@@ -187,35 +190,110 @@ public sealed class MainWindow : Window
     {
         Clear("Library");
         _content.Children.Add(Text("Your games", 30, ForegroundBrush, FontWeight.Bold));
-        _content.Children.Add(Text("Detected Steam installations. Choose a game to manage its AMDNR files.",
+        _content.Children.Add(Text("Detected Steam installations. Choose a game to manage AMDNR.",
             14, MutedBrush));
-        var count = Text($"{_games.Count} games detected", 12, AccentBrush, FontWeight.SemiBold);
-        _content.Children.Add(count);
-        if (_games.Count == 0)
+
+        var toolbar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 12 };
+        _librarySearch = new TextBox
+        {
+            Text = _libraryQuery,
+            Watermark = "Search your games…",
+            Background = SurfaceBrush,
+            Foreground = ForegroundBrush,
+            MinHeight = 42,
+        };
+        _librarySearch.TextChanged += (_, _) =>
+        {
+            _libraryQuery = _librarySearch.Text ?? "";
+            RenderLibraryResults();
+        };
+        toolbar.Children.Add(_librarySearch);
+        var manual = Button("+  Add manually");
+        manual.Click += (_, _) => ShowInstall();
+        Grid.SetColumn(manual, 1);
+        toolbar.Children.Add(manual);
+        _content.Children.Add(toolbar);
+
+        _libraryResults = new StackPanel { Spacing = 12 };
+        _content.Children.Add(_libraryResults);
+        RenderLibraryResults();
+    }
+
+    private void RenderLibraryResults()
+    {
+        if (_libraryResults is null) return;
+        _libraryResults.Children.Clear();
+        var filtered = _games.Where(game =>
+            game.Name.Contains(_libraryQuery, StringComparison.OrdinalIgnoreCase) ||
+            game.Folder.Contains(_libraryQuery, StringComparison.OrdinalIgnoreCase)).ToList();
+        _libraryResults.Children.Add(Text(
+            $"{filtered.Count} of {_games.Count} games", 12, AccentBrush, FontWeight.SemiBold));
+
+        if (filtered.Count == 0)
         {
             var empty = new StackPanel { Spacing = 12 };
-            empty.Children.Add(Text("No Steam games detected", 20, ForegroundBrush, FontWeight.SemiBold));
-            empty.Children.Add(Text("Install a game in Steam, refresh, or choose an executable manually from Install.",
-                13, MutedBrush));
-            var manual = Button("Choose an executable", true);
-            manual.Click += (_, _) => ShowInstall();
-            empty.Children.Add(manual);
-            _content.Children.Add(Panel(empty));
+            empty.Children.Add(Text(_games.Count == 0 ? "No Steam games detected" : "No matching games",
+                20, ForegroundBrush, FontWeight.SemiBold));
+            empty.Children.Add(Text(_games.Count == 0
+                ? "Check Steam's library folders, refresh, or choose an executable manually."
+                : "Try searching for a shorter name or clear the search field.", 13, MutedBrush));
+            var action = Button(_games.Count == 0 ? "Choose an executable" : "Clear search", true);
+            action.Click += (_, _) =>
+            {
+                if (_games.Count == 0) ShowInstall();
+                else if (_librarySearch is not null) _librarySearch.Text = "";
+            };
+            empty.Children.Add(action);
+            _libraryResults.Children.Add(Panel(empty));
             return;
         }
-        foreach (var game in _games)
+
+        // Two-column artwork-style cards instead of plain single-line game rows.
+        // Art assets are deliberately not fetched from third parties without consent.
+        for (var index = 0; index < filtered.Count; index += 2)
         {
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 18 };
-            var details = new StackPanel { Spacing = 5 };
-            details.Children.Add(Text(game.Name, 17, ForegroundBrush, FontWeight.SemiBold));
-            details.Children.Add(Text(game.Folder, 12, MutedBrush));
-            row.Children.Add(details);
-            var manage = Button("Manage  →");
-            manage.Click += (_, _) => SelectGame(game);
-            Grid.SetColumn(manage, 1);
-            row.Children.Add(manage);
-            _content.Children.Add(Panel(row, new Thickness(20, 16)));
+            var row = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("*,*"),
+                ColumnSpacing = 14,
+            };
+            for (var column = 0; column < 2 && index + column < filtered.Count; column++)
+            {
+                var game = filtered[index + column];
+                var card = BuildGameCard(game);
+                Grid.SetColumn(card, column);
+                row.Children.Add(card);
+            }
+            _libraryResults.Children.Add(row);
         }
+    }
+
+    private Control BuildGameCard(GameEntry game)
+    {
+        var card = new StackPanel { Spacing = 12 };
+        var illustration = new Grid { Height = 96 };
+        illustration.Children.Add(new Border
+        {
+            Background = SidebarBrush,
+            CornerRadius = new CornerRadius(8),
+        });
+        illustration.Children.Add(new TextBlock
+        {
+            Text = game.Name.Length > 0 ? game.Name[..1].ToUpperInvariant() : "?",
+            FontSize = 48,
+            FontWeight = FontWeight.Bold,
+            Foreground = AccentBrush,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        card.Children.Add(illustration);
+        card.Children.Add(Text(game.Name, 18, ForegroundBrush, FontWeight.SemiBold));
+        card.Children.Add(Text("STEAM  ·  WINDOWS / PROTON", 11, MutedBrush, FontWeight.SemiBold));
+        card.Children.Add(Text(game.Folder, 11, MutedBrush));
+        var button = Button("Manage game  →", true);
+        button.Click += (_, _) => SelectGame(game);
+        card.Children.Add(button);
+        return Panel(card, new Thickness(18));
     }
 
     private void SelectGame(GameEntry game)
@@ -321,6 +399,20 @@ public sealed class MainWindow : Window
             ? "ASI plugins require a compatible ASI loader."
             : $"WINEDLLOVERRIDES=\"{Path.GetFileNameWithoutExtension(_alias).ToLowerInvariant()}=n,b\" %command%",
             14, AccentBrush));
+        var copyOverride = Button("Copy launch options");
+        copyOverride.Click += async (_, _) =>
+        {
+            if (Clipboard is null) return;
+            if (_alias.EndsWith(".asi", StringComparison.OrdinalIgnoreCase))
+            {
+                _status.Text = "ASI plugins require a compatible loader; no DLL override to copy.";
+                return;
+            }
+            var value = $"WINEDLLOVERRIDES=\\\"{Path.GetFileNameWithoutExtension(_alias).ToLowerInvariant()}=n,b\\\" %command%";
+            await Clipboard.SetTextAsync(value);
+            _status.Text = "Steam launch options copied to clipboard.";
+        };
+        help.Children.Add(copyOverride);
         help.Children.Add(Text("Set the override in Steam → Properties → General → Launch Options. " +
             "Some games or anti-cheat configurations may reject DLL injection.", 13, MutedBrush));
         _content.Children.Add(Panel(help));
