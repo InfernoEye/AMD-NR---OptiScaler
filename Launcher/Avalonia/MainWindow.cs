@@ -2770,8 +2770,10 @@ public sealed class MainWindow : Window
             "Compiler candidates are searched automatically in this Steam library. " +
             "A matching x64 PE header is not proof of Microsoft origin: review the chosen " +
             "file and use only a copy from a game you own. " +
-            "The bridge will reuse exact SHA-256 verified distro package archives from your " +
-            "local cache when available; otherwise it retries official Ubuntu mirrors.",
+            "Some upstream dependencies are distributed as Ubuntu .deb archives, regardless of " +
+            "your Linux distro. These are extracted into a PRIVATE cache, never installed " +
+            "with apt or into your system. Exact SHA-256 verified files are reused when " +
+            "available; otherwise archive mirrors are tried.",
             13, MutedBrush));
         var compilerChoices = new ComboBox
         {
@@ -2817,9 +2819,10 @@ public sealed class MainWindow : Window
         preparation.Children.Add(approval);
         var prepare = Button("DOWNLOAD & PREPARE BRIDGE", true);
         preparation.Children.Add(prepare);
-        var prepareState = Text("Requires Python 3.12+ with zstd, a compatible AMD GPU and " +
-            "several GB of storage. Reference test: RX 9070 XT / GE-Proton11-9. " +
-            "Your game and GPU are NOT yet validated.", 12, MutedBrush);
+        var prepareState = Text("Requires Python 3.12+ with zstd and several GB of storage. " +
+            "Ubuntu package archives are only PRIVATE runtime inputs; you do not need " +
+            "to use Ubuntu or install them system-wide. Reference test: RX 9070 XT / " +
+            "GE-Proton11-9. Your game and GPU are NOT yet validated.", 12, MutedBrush);
         preparation.Children.Add(prepareState);
         _content.Children.Add(Panel(preparation));
 
