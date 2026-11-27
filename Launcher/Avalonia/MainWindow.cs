@@ -467,7 +467,14 @@ public sealed class MainWindow : Window
             var entries = await _backend.AuditLibraryAsync();
             _libraryAudit.Clear();
             foreach (var item in entries)
-                _libraryAudit[Path.GetFullPath(item.Folder)] = item;
+            {
+                var folder = Path.GetFullPath(item.Folder);
+                _libraryAudit[folder] = item;
+                if (item.Executable is not null && File.Exists(item.Executable))
+                    _indexedExecutables[folder] = item.Executable;
+                else
+                    _indexedExecutables.Remove(folder);
+            }
             _status.Text = $"Analyzed {entries.Count} games · " +
                 $"{entries.Count(e => e.Status == "windows_ready")} Windows ready · " +
                 $"{entries.Count(e => e.Status == "native_linux")} native Linux · " +
@@ -1450,6 +1457,11 @@ public sealed class MainWindow : Window
                     _status.Text = "Saved audit unavailable: " + ex.Message;
                 }
             }
+            // Do not display stale audit rows for uninstalled Steam games.
+            var present = new HashSet<string>(_games.Select(g => Path.GetFullPath(g.Folder)),
+                StringComparer.Ordinal);
+            foreach (var folder in _libraryAudit.Keys.Where(p => !present.Contains(p)).ToList())
+                _libraryAudit.Remove(folder);
             _status.Text = $"Differential update: {_games.Count} entries ({_games.Count(g => g.Custom)} custom)" +
                 (_libraryAudit.Count > 0 ? $" · {_libraryAudit.Count} saved audit results" : "");
             // Scan changes should update the list, not navigate to a selected game.
