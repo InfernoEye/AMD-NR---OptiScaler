@@ -101,6 +101,33 @@ python3 Launcher/Avalonia/amdnr_launcher.py --bridge-discover-json --exe "/path/
 All changes for this wizard are limited to `Launcher/Avalonia/`, including
 `bridge_discovery.py` and regression tests in `tests/test_community_bridge.py`.
 
+## Current AMDNR host with native lmxxf (no NeuralHub)
+
+The experimental Linux ROCm Bridge now targets the independently published
+**AMDNR 0.3.5.8.28** host with its **lmxxf 0.4.6.2** component, while the
+Linux bridge backend remains v0.3.7. On an explicit Prepare click, the
+launcher retains the verified bridge archive, applies an exact versioned
+host-staging adapter in its private extracted source, and downloads the host
+and lmxxf archives from the official AMDNR GitHub release. The upstream
+manager then verifies their SHA-256 digests and stages the native lmxxf
+backend, not Daniel or NeuralHub.
+
+The release digests are recorded directly in `community_bridge.py` from
+GitHub release asset metadata. A new prepared directory named
+`package-amdnr-0.3.5.8.28` keeps the previously prepared v0.3.5.6 bundle
+intact. Installation requires a complete new bundle with matching
+`SOURCE.txt` and `components.json` receipts; old bundles must not appear
+as if they were the newest. Existing game hooks, ReShade files, backups and
+Steam launch options are not changed during preparation.
+
+**Important:** AMDNR-Linux's v0.3.7 staging logic predates this host, and
+its Linux HIP bridge has not been validated with AMDNR 0.3.5.8.28.
+If the archive's layout or runtime interface changed incompatibly, the
+preparation stage should fail and installation must remain unavailable.
+The updated pin is a testable staging integration, not proof of working
+neural rendering on Proton-Wineland or Subnautica 2. Daniel 0.8/0.9 and
+NeuralHub remain deliberately out of scope.
+
 ## Updating the community bridge safely
 
 The **CHECK UPSTREAM BRIDGE UPDATES** action in the Experimental Linux ROCm Bridge
