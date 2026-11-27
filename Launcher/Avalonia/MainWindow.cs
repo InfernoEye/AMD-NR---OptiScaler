@@ -1887,7 +1887,7 @@ public sealed class MainWindow : Window
         official.Children.Add(Text("OFFICIAL AMDNR COMPONENTS", 12, AccentBrush, FontWeight.Bold));
         official.Children.Add(Text(
             "Download from 3zwr1/AMD-NR---OptiScaler. ZIPs are SHA-256 verified. " +
-            "Preview files before installing; existing files are never overwritten.",
+            "Review files before installation. Differing files require explicit backed-up replacement.",
             12, MutedBrush));
         var componentPicker = new ComboBox
         {
@@ -1899,11 +1899,14 @@ public sealed class MainWindow : Window
         var loadComponents = Button("LOAD OFFICIAL COMPONENTS");
         var previewComponent = Button("DOWNLOAD & PREVIEW");
         var installComponent = Button("INSTALL PREVIEWED COMPONENT", true);
+        var replaceComponent = Button("BACK UP & REPLACE CONFLICTS");
         previewComponent.IsEnabled = false;
         installComponent.IsEnabled = false;
+        replaceComponent.IsEnabled = false;
         componentActions.Children.Add(loadComponents);
         componentActions.Children.Add(previewComponent);
         componentActions.Children.Add(installComponent);
+        componentActions.Children.Add(replaceComponent);
         official.Children.Add(componentActions);
         var previewDetails = new StackPanel { Spacing = 6 };
         official.Children.Add(previewDetails);
@@ -1965,11 +1968,14 @@ public sealed class MainWindow : Window
 
         string? previewedTag = null;
         string? previewedAsset = null;
+        bool previewReplaceable = false;
         componentPicker.SelectionChanged += (_, _) =>
         {
             previewedTag = null;
             previewedAsset = null;
+            previewReplaceable = false;
             installComponent.IsEnabled = false;
+            replaceComponent.IsEnabled = false;
             previewDetails.Children.Clear();
             previewComponent.IsEnabled = componentPicker.SelectedItem is ReleaseEntry;
         };
@@ -1998,8 +2004,10 @@ public sealed class MainWindow : Window
             _busy = true;
             previewComponent.IsEnabled = false;
             installComponent.IsEnabled = false;
+            replaceComponent.IsEnabled = false;
             previewedTag = null;
             previewedAsset = null;
+            previewReplaceable = false;
             previewDetails.Children.Clear();
             _status.Text = "Downloading and verifying official component…";
             try
@@ -2028,8 +2036,22 @@ public sealed class MainWindow : Window
                 }
                 if (result.Conflicts.Count > 0)
                     previewDetails.Children.Add(Text(result.ConflictCount +
-                        " existing files block installation: " +
+                        " existing files differ: " +
                         string.Join(", ", result.Conflicts.Take(8)), 12, MutedBrush));
+                if (!result.SafetyLimitExceeded &&
+                    result.ConflictCount > 0 &&
+                    result.ConflictCount == result.ReplaceableCount)
+                {
+                    previewedTag = chosen.Tag;
+                    previewedAsset = chosen.Asset;
+                    previewReplaceable = true;
+                    replaceComponent.IsEnabled = true;
+                    previewDetails.Children.Add(Text(
+                        "Backed-up replacement is optional. Originals are stored outside the game " +
+                        "and restored on removal if replacements remain unchanged. " +
+                        "The base AMDNR Doctor may report modified tracked files.",
+                        12, MutedBrush));
+                }
                 else if (result.Installable)
                 {
                     previewedTag = chosen.Tag;
@@ -2061,6 +2083,29 @@ public sealed class MainWindow : Window
                 previewDetails.Children.Clear();
             }
             catch (Exception ex) { _status.Text = "Component installation refused: " + ex.Message; }
+            finally { _busy = false; await ReloadManagedComponents(); }
+        };
+        replaceComponent.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null || !previewReplaceable ||
+                componentPicker.SelectedItem is not ReleaseEntry chosen ||
+                previewedTag != chosen.Tag || previewedAsset != chosen.Asset)
+                return;
+            _busy = true;
+            replaceComponent.IsEnabled = false;
+            installComponent.IsEnabled = false;
+            try
+            {
+                await _backend.InstallComponentAsync(selected, chosen.Tag, chosen.Asset,
+                    replaceConflicts: true);
+                _status.Text = "Installed " + chosen.Asset +
+                    "; replaced originals were backed up for component removal.";
+                previewedTag = null;
+                previewedAsset = null;
+                previewReplaceable = false;
+                previewDetails.Children.Clear();
+            }
+            catch (Exception ex) { _status.Text = "Backup-aware install refused: " + ex.Message; }
             finally { _busy = false; await ReloadManagedComponents(); }
         };
         await ReloadManagedComponents();
