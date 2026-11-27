@@ -461,8 +461,11 @@ def _github_json(url: str) -> object:
 
 
 
-DANIEL_RUNTIME_TAG = "Alpha0.3.5.5R4"
+# Official dedicated Daniel runtime ZIPs are distinct from AMDNR core archives.
+# Discover the full release history and keep one authoritative release per version.
+DANIEL_RUNTIME_TAG = "Alpha0.3.5.5R4"  # Legacy 0.6.0 fallback for existing installations.
 DANIEL_RUNTIME_ASSET = "v0.6.0-Runtime.zip"
+DANIEL_RUNTIME_RE = re.compile(r"v(\\d+\\.\\d+\\.\\d+)-Runtime\\.zip", re.I)
 DANIEL_REQUIRED_FILES = frozenset({
     "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll",
     "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin",
@@ -470,57 +473,80 @@ DANIEL_REQUIRED_FILES = frozenset({
 DANIEL_OPTIONAL_FILES = frozenset({"danielblnc_ATTRIBUTION.txt"})
 
 
+def _daniel_version(asset: str) -> str | None:
+    match = DANIEL_RUNTIME_RE.fullmatch(asset)
+    return match.group(1) if match else None
+
+
+def _daniel_sort(version: str) -> tuple[int, ...]:
+    return tuple(int(item) for item in version.split("."))
+
+
 def component_catalog(limit: int = 12) -> list[dict[str, object]]:
-    """List official independently downloadable AMDNR extension ZIPs."""
-    releases = _github_json(f"{RELEASE_API}?per_page={limit}")
+    """List current AMDNR extension assets and all officially published Daniel runtimes.
+
+    History is read from the official repository only, never the Linux fork.
+    Version entries deduplicate identical packages across multiple releases.
+    Require either a published SHA256SUMS file OR an asset SHA-256 digest.
+    """
+    if not 1 <= limit <= 100:
+        raise ValueError("Invalid catalog limit")
+    releases = _github_json(f"{RELEASE_API}?per_page={max(limit, 100)}")
     if not isinstance(releases, list):
         raise ValueError("Invalid releases response")
     found, seen = [], set()
-    for release in releases:
+    daniel_versions = {}
+    for index, release in enumerate(releases):
         if not isinstance(release, dict) or release.get("draft"):
             continue
         tag, assets = release.get("tag_name"), release.get("assets")
-        if not isinstance(tag, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", tag) or not isinstance(assets, list):
+        if (not isinstance(tag, str) or
+                not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", tag) or
+                not isinstance(assets, list)):
             continue
-        if not any(isinstance(a, dict) and a.get("name") == "SHA256SUMS.txt" for a in assets):
-            continue
-        for a in assets:
-            if not isinstance(a, dict):
+        has_manifest = any(isinstance(a, dict) and a.get("name") == "SHA256SUMS.txt"
+                           for a in assets)
+        for asset in assets:
+            if not isinstance(asset, dict):
                 continue
-            name, size = a.get("name"), a.get("size")
-            if (not isinstance(name, str) or not _is_component_zip(name)
-                    or not isinstance(size, int) or not 0 < size <= 1024 * 1024 * 1024
-                    or name in seen):
+            name, size = asset.get("name"), asset.get("size")
+            digest = asset.get("digest")
+            if (not isinstance(name, str) or not isinstance(size, int) or
+                    not 0 < size <= 1024 ** 3):
                 continue
-            seen.add(name)
-            found.append({"tag": tag, "name": name, "asset": name, "bytes": size,
-                          "prerelease": bool(release.get("prerelease", False))})
-    # Discover Daniel's dedicated, officially checksum-listed historical runtime.
-    daniel_release = _github_json(f"{RELEASE_API}/tags/{DANIEL_RUNTIME_TAG}")
-    if isinstance(daniel_release, dict) and not daniel_release.get("draft"):
-        assets = daniel_release.get("assets", [])
-        if isinstance(assets, list) and any(
-                isinstance(x, dict) and x.get("name") == "SHA256SUMS.txt"
-                for x in assets):
-            for item in assets:
-                if isinstance(item, dict) and item.get("name") == DANIEL_RUNTIME_ASSET:
-                    size = item.get("size")
-                    if isinstance(size, int) and 0 < size <= 1024 ** 3:
-                        found.insert(0, {"tag": DANIEL_RUNTIME_TAG,
-                                         "name": "Daniel 0.6.0 runtime (recommended)",
-                                         "asset": DANIEL_RUNTIME_ASSET,
-                                         "bytes": size, "prerelease": False})
-                    break
-    return found
+            verified = (has_manifest or (isinstance(digest, str) and
+                        bool(re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest))))
+            if not verified:
+                continue
+            version = _daniel_version(name)
+            if version is not None:
+                # The same version occurs on multiple historical releases.
+                # Prefer the newest release carrying the approved ZIP.
+                if version not in daniel_versions:
+                    daniel_versions[version] = {
+                        "tag": tag, "name": f"Daniel {version} runtime",
+                        "asset": name, "bytes": size,
+                        "prerelease": bool(release.get("prerelease", False)),
+                    }
+            elif index < limit and re.fullmatch(
+                    r"AMDNR-(?!v[0-9]|Launcher)[A-Za-z0-9._-]+\\.zip", name, re.I):
+                if name not in seen:
+                    seen.add(name)
+                    found.append({"tag": tag, "name": name, "asset": name,
+                                  "bytes": size,
+                                  "prerelease": bool(release.get("prerelease", False))})
+    return ([daniel_versions[x] for x in sorted(daniel_versions,
+                                               key=_daniel_sort, reverse=True)] + found)
 
 
 def _is_component_zip(name: str) -> bool:
-    return (name == DANIEL_RUNTIME_ASSET or bool(re.fullmatch(r"AMDNR-(?!v[0-9]|Launcher)[A-Za-z0-9._-]+\.zip", name, re.I)))
+    return (_daniel_version(name) is not None or bool(re.fullmatch(
+        r"AMDNR-(?!v[0-9]|Launcher)[A-Za-z0-9._-]+\\.zip", name, re.I)))
 
 
 def _component_install_name(asset: str, zip_member: str) -> str:
-    """Map only approved Daniel files to the same folder as OptiScaler.dll."""
-    if asset == DANIEL_RUNTIME_ASSET:
+    """Only supported Daniel binaries/weights are installed in the game root."""
+    if _daniel_version(asset) is not None:
         basename = zip_member.rsplit("/", 1)[-1]
         if basename not in DANIEL_REQUIRED_FILES | DANIEL_OPTIONAL_FILES:
             raise ValueError("Unsupported Daniel runtime payload: " + zip_member)
@@ -582,7 +608,7 @@ def _component_entries(archive: Path, *, inspect_only: bool = False) -> list:
                 raise ValueError("Unsafe archive path")
             if entry.is_dir():
                 continue
-            if archive.name == DANIEL_RUNTIME_ASSET:
+            if _daniel_version(archive.name) is not None:
                 if name.rsplit("/", 1)[-1] not in DANIEL_REQUIRED_FILES | DANIEL_OPTIONAL_FILES:
                     continue
             mode = (entry.external_attr >> 16) & 0o170000
@@ -605,7 +631,7 @@ def _component_entries(archive: Path, *, inspect_only: bool = False) -> list:
             entries.append(entry)
     if not entries:
         raise ValueError("Empty component archive")
-    if archive.name == DANIEL_RUNTIME_ASSET:
+    if _daniel_version(archive.name) is not None:
         actual = {_component_install_name(archive.name, x.filename) for x in entries}
         if not DANIEL_REQUIRED_FILES.issubset(actual):
             raise ValueError("Daniel runtime ZIP missing required pass DLLs or weights")
@@ -731,6 +757,11 @@ def install_component(executable: Path, tag: str, asset: str,
     records = _component_records(executable)
     if asset in records:
         raise ValueError("Component already managed")
+    if _daniel_version(asset) is not None:
+        others = [x for x in records if _daniel_version(x) is not None and x != asset]
+        if others:
+            raise ValueError("Another Daniel runtime is installed (" + ", ".join(others) +
+                             "). Remove it safely before switching versions.")
     if replace_conflicts and any(asset != other and name in
            (set(record.get("files", {})) | set(record.get("replaced", {})))
            for other, record in records.items() if isinstance(record, dict)
