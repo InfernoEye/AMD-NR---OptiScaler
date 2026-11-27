@@ -437,10 +437,42 @@ public sealed class MainWindow : Window
                     if (game is not null) SelectGame(game);
                 };
                 actions.Children.Add(manage);
+                var manageInstall = Button("MANAGE / RESTORE");
+                manageInstall.Click += (_, _) =>
+                {
+                    _exe = entry.Executable;
+                    _selectedGame = game;
+                    _selectedFolder = entry.Folder;
+                    ShowInstall();
+                };
+                actions.Children.Add(manageInstall);
+                var oneResult = Text("", 12, MutedBrush);
+                var verifyOne = Button("VERIFY FILES");
+                verifyOne.Click += async (_, _) =>
+                {
+                    if (_busy || _backend is null) return;
+                    _busy = true;
+                    verifyOne.IsEnabled = false;
+                    oneResult.Text = "Verifying tracked files…";
+                    try
+                    {
+                        var report = await _backend.InstallationAsync(entry.Executable);
+                        oneResult.Text = report.Status == "healthy"
+                            ? $"✓  {report.Verified}/{report.Files} files verified; backups present"
+                            : $"!  {report.Status} · {report.Missing} missing · " +
+                                $"{report.Modified} modified · " +
+                                $"{report.BackupsMissing} missing backups";
+                        _status.Text = "Verification complete for " + entry.Name;
+                    }
+                    catch (Exception ex) { oneResult.Text = "Verification failed: " + ex.Message; }
+                    finally { _busy = false; verifyOne.IsEnabled = true; }
+                };
+                actions.Children.Add(verifyOne);
                 var folder = Button("OPEN FOLDER");
                 folder.Click += (_, _) => OpenGameFolder(entry.Folder);
                 actions.Children.Add(folder);
                 details.Children.Add(actions);
+                details.Children.Add(oneResult);
                 results.Children.Add(Panel(details));
             }
             results.Children.Add(Text("This is an inventory of installation records, not a " +
