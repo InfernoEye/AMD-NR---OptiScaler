@@ -80,10 +80,11 @@ public sealed class MainWindow : Window
     private Button? _gridViewButton;
     private Button? _listViewButton;
     private Button? _refreshButton;
+    private OnboardingTour? _tour;
     private readonly string _onboardingPath = Path.Combine(
         Environment.GetEnvironmentVariable("XDG_CONFIG_HOME")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"),
-        "amdnr-linux", "onboarding-v1.txt");
+        "amdnr-linux", "onboarding-v2.txt");
     private readonly string _viewStateFile = Path.Combine(
         Environment.GetEnvironmentVariable("XDG_CONFIG_HOME")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"),
@@ -118,6 +119,12 @@ public sealed class MainWindow : Window
         };
         KeyDown += (_, e) =>
         {
+            if (_tour?.IsActive == true && e.Key == Key.Escape)
+            {
+                _tour.Close();
+                e.Handled = true;
+                return;
+            }
             if (e.Key == Key.F5 && !_busy)
             {
                 _ = RefreshGamesAsync();
@@ -169,6 +176,7 @@ public sealed class MainWindow : Window
         main.Children.Add(_pageScroller);
         app.Children.Add(main);
         Content = _shell;
+        _tour = new OnboardingTour(_shell, PrepareTourStep, ShowLibrary, _onboardingPath);
         UpdateNavigationLayout(Width);
         try { _backend = new Backend(); }
         catch (Exception ex) { _status.Text = ex.Message; }
@@ -183,83 +191,55 @@ public sealed class MainWindow : Window
         };
     }
 
-    private async Task ShowOnboardingAsync(bool replay = false)
+    private Task ShowOnboardingAsync(bool replay = false)
     {
-        if (!replay && File.Exists(_onboardingPath)) return;
-        var pages = UiLanguage.Current == "pl"
-            ? new (string Heading, string Description)[]
-            {
-                ("Witaj w AMDNR Linux", "Niezależny launcher Linux pomaga znaleźć gry, przeglądać pakiety AMDNR i zarządzać plikami. Ustawienia Steam i Protona nie są zmieniane po cichu."),
-                ("Twoja biblioteka gier", "Widok Siatka pokazuje okładki, a Lista — kompaktowe wiersze. Wybierz grę i potwierdź prawidłowy plik Windows .exe. Obsługiwane są Steam, Heroic, Lutris i gry dodane ręcznie."),
-                ("Instalacja pod Twoją kontrolą", "Sprawdź pakiet, sumy SHA-256 i nazwę DLL przed instalacją. Launcher tworzy kopie zapasowe. Opcje uruchamiania Steam pozostają propozycją do samodzielnego skopiowania."),
-                ("Naprawa i diagnostyka", "Zainstalowane pokazuje zapisane instalacje, Diagnostyka sprawdza pliki, a Naprawa i Odzyskiwanie obsługują przerwane operacje. Sprawdź raport przed zmianami."),
-                ("Ograniczenia środowiska Linux", "Działanie lmxxf pod Protonem zgłaszają użytkownicy, ale zależy od gry i GPU. Daniel pozostaje eksperymentalny; wersja 0.8.0 nie jest obsługiwana na Linuksie."),
-            }
-            : new (string Heading, string Description)[]
-            {
-                ("Welcome to AMDNR Linux", "This independent Linux launcher helps you find games, inspect AMDNR packages and manage game files. Steam and Proton settings are not silently changed."),
-                ("Your game library", "Use Grid for artwork cards or List for compact rows. Search, select a game, and confirm the correct Windows executable. Steam, Heroic, Lutris and custom entries can be discovered."),
-                ("Install with control", "Review the package, checksums and proxy DLL before installing. The launcher backs up replaced files. Steam launch options remain a preview for you to copy only if needed."),
-                ("Repair and diagnostics", "Installed tracks recorded files, Doctor checks integrity, and Repair/Recovery handles interrupted operations. Verify the report before changing a game."),
-                ("Linux runtime limitations", "lmxxf has community reports of working under some Proton setups, but compatibility depends on your game and GPU. Daniel is experimental; 0.8.0 is not supported on Linux."),
-            };
-        var dialog = new Window
+        if (_tour is null) return Task.CompletedTask;
+        if (!replay && _tour.HasBeenSeen) return Task.CompletedTask;
+        _tour.Start();
+        return Task.CompletedTask;
+    }
+
+    private Control TourNavigation(string section)
+    {
+        if (_sideNavigation?.IsVisible == true &&
+            _navigation.TryGetValue(section, out var sidebar))
+            return sidebar;
+        if (_horizontalNavigation.TryGetValue(section, out var horizontal))
+            return horizontal;
+        return _gridViewButton ?? _pageScroller;
+    }
+
+    private Control PrepareTourStep(int index)
+    {
+        // Tour visits real launcher pages before anchoring each visible control.
+        // Never trigger an install, repair, download, or external configuration.
+        switch (index)
         {
-            Title = "AMDNR Linux · " + UiLanguage.Translate("Getting started"),
-            Width = 540, Height = 350,
-            MinWidth = 390, MinHeight = 310,
-            CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = BackgroundBrush,
-        };
-        var body = new StackPanel { Spacing = 16, Margin = new Thickness(28) };
-        var step = Text("", 12, AccentBrush, FontWeight.Bold);
-        var heading = Text("", 25, ForegroundBrush, FontWeight.Bold);
-        var description = Text("", 15, ForegroundBrush);
-        description.MinHeight = 118;
-        var controls = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
-        var skip = Button(UiLanguage.Translate("Skip introduction").ToUpperInvariant());
-        var back = Button("← " + UiLanguage.Translate("Back").ToUpperInvariant());
-        var next = Button(UiLanguage.Translate("Next").ToUpperInvariant() + " →", true);
-        var pageIndex = 0;
-        void Render()
-        {
-            step.Text = $"{UiLanguage.Translate("Getting started").ToUpperInvariant()}   {pageIndex + 1} / {pages.Length}";
-            heading.Text = pages[pageIndex].Heading;
-            description.Text = pages[pageIndex].Description;
-            back.IsEnabled = pageIndex > 0;
-            next.Content = pageIndex == pages.Length - 1
-                ? UiLanguage.Translate("Finish").ToUpperInvariant()
-                : UiLanguage.Translate("Next").ToUpperInvariant() + " →";
+            case 0:
+                ShowLibrary();
+                return TourNavigation("Library");
+            case 1:
+                ShowLibrary();
+                return _gridViewButton ?? TourNavigation("Library");
+            case 2:
+                ShowLibrary();
+                return _librarySearch ?? TourNavigation("Library");
+            case 3:
+                ShowInstalledGames();
+                return TourNavigation("Installed");
+            case 4:
+                ShowInstall();
+                return TourNavigation("Install");
+            case 5:
+                ShowDoctor();
+                return TourNavigation("Doctor");
+            case 6:
+                ShowSettings();
+                return TourNavigation("Settings");
+            default:
+                ShowHelp();
+                return TourNavigation("Help");
         }
-        void MarkViewed()
-        {
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(_onboardingPath)!);
-                File.WriteAllText(_onboardingPath, "completed\n");
-            }
-            catch (IOException) { _status.Text = "Introduction preference couldn't be saved."; }
-            catch (UnauthorizedAccessException) { _status.Text = "Introduction preference couldn't be saved."; }
-        }
-        skip.Click += (_, _) => { MarkViewed(); dialog.Close(); };
-        back.Click += (_, _) => { if (pageIndex > 0) { pageIndex--; Render(); } };
-        next.Click += (_, _) =>
-        {
-            if (pageIndex == pages.Length - 1) { MarkViewed(); dialog.Close(); }
-            else { pageIndex++; Render(); }
-        };
-        controls.Children.Add(skip);
-        controls.Children.Add(back);
-        controls.Children.Add(next);
-        body.Children.Add(step);
-        body.Children.Add(heading);
-        body.Children.Add(description);
-        body.Children.Add(controls);
-        dialog.Content = body;
-        Render();
-        dialog.Opened += (_, _) => next.Focus();
-        await dialog.ShowDialog(this);
     }
 
     private bool ReadViewPreference()
@@ -345,6 +325,12 @@ public sealed class MainWindow : Window
     private void OnControllerAction(JoystickNavigation.Action action)
     {
         if (!IsActive) return;
+        if (_tour?.IsActive == true)
+        {
+            if (action == JoystickNavigation.Action.Confirm) _tour.Next();
+            else if (action == JoystickNavigation.Action.Back) _tour.Back();
+            return;
+        }
         if (action == JoystickNavigation.Action.Back)
         {
             // Gamepad B returns to the library, except while a modal window
