@@ -415,6 +415,47 @@ class BridgeTests(unittest.TestCase):
             migration.snapshot_existing(exe)
         self.assertEqual(actual.read_bytes(), b"do not touch")
 
+    def test_bridge_install_failure_restores_original_migrated_hook(self):
+        exe = self.exe()
+        hook = exe.parent / "dxgi.dll"
+        hook.write_bytes(b"original reshade hook")
+        src = self.root / "upstream-source"
+        manager = src / "linux/manage.py"
+        manager.parent.mkdir(parents=True)
+        manager.write_text("test")
+        failed = subprocess.CompletedProcess(args=["manage"], returncode=1,
+                                             stdout="", stderr="expected test failure")
+        with (patch.object(bridge, "status", return_value={
+                  "prepared": True, "conflicts": ["existing DXGI"]}),
+              patch.object(bridge, "source_path", return_value=src),
+              patch.object(bridge, "game_conflicts", return_value=["existing DXGI"]),
+              patch.object(bridge.subprocess, "run", return_value=failed)):
+            with self.assertRaisesRegex(ValueError, "Community manager refused"):
+                bridge.install(exe, True, replace_existing=True)
+        self.assertEqual(hook.read_bytes(), b"original reshade hook")
+        self.assertIsNone(migration.pending_snapshot(exe))
+
+    def test_bridge_migration_explicit_recovery_requires_no_active_wrapper(self):
+        exe = self.exe()
+        old = exe.parent / "dxgi.dll"
+        old.write_bytes(b"previous")
+        snapshot = Path(migration.snapshot_existing(exe)["snapshot"])
+        with self.assertRaisesRegex(ValueError, "approval"):
+            bridge.recover_migration(exe, False)
+        wrapper = exe.parent / "amdnr-linux/run.sh"
+        wrapper.parent.mkdir()
+        wrapper.write_text("active")
+        with self.assertRaisesRegex(ValueError, "bridge installation"):
+            bridge.recover_migration(exe, True)
+        wrapper.unlink()
+        wrapper.parent.rmdir()
+        outcome = bridge.recover_migration(exe, True)
+        self.assertEqual(outcome["blocked"], [])
+        self.assertTrue(old.is_file())
+        self.assertEqual(old.read_bytes(), b"previous")
+        self.assertEqual(json.loads((snapshot / "manifest.json").read_text())["status"],
+                         "restored")
+
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
         self.assertEqual(bridge.VERSION, "0.3.7")
