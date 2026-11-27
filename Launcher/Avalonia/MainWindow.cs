@@ -2473,7 +2473,12 @@ public sealed class MainWindow : Window
                 feedback.Text = "Installation stopped: " + ex.Message;
                 await Check();
             }
-            finally { busy = false; Buttons(); }
+            finally
+            {
+                busy = false;
+                await ReviewPendingAddons();
+                Buttons();
+            }
         }
 
         install.Click += async (_, _) => await RunInstall();
