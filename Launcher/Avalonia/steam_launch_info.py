@@ -224,23 +224,34 @@ def read_cached_app(appid: int, roots: list[Path]) -> dict | None:
 
 
 def resolve_windows_launch(appinfo: dict | None, folder: Path) -> dict:
-    """Prefer one existing normal Windows launch, never beta/tools/DLC launch modes."""
+    """Explain Steam launch metadata as well as conservatively selecting a target."""
     result = {"source": "steam_cache", "windows_candidates": [],
-              "selected": None, "linux_launches": 0, "reason": "metadata_missing"}
+              "selected": None, "linux_launches": 0, "reason": "metadata_missing",
+              "metadata_present": isinstance(appinfo, dict),
+              "metadata_sections": [], "launch_entries": 0,
+              "windows_declared": 0, "windows_missing": [],
+              "windows_invalid": [], "linux_declared": [],
+              "windows_optional": 0}
     if not isinstance(appinfo, dict):
         return result
     outer = appinfo.get("appinfo", appinfo)
     if not isinstance(outer, dict):
+        result["reason"] = "invalid_appinfo"
         return result
+    result["metadata_sections"] = sorted(str(k) for k in outer.keys())[:30]
     common = outer.get("common", {})
     if isinstance(common, dict) and str(common.get("type", "")).lower() not in ("game", "demo", ""):
         result["reason"] = "not_a_game"
         return result
     config = outer.get("config", {})
-    launches = config.get("launch", {}) if isinstance(config, dict) else {}
-    if not isinstance(launches, dict):
+    if not isinstance(config, dict):
         result["reason"] = "no_launch_config"
         return result
+    launches = config.get("launch")
+    if not isinstance(launches, dict) or not launches:
+        result["reason"] = "no_launch_config"
+        return result
+    result["launch_entries"] = len(launches)
 
     normal = []
     all_windows = []
@@ -255,32 +266,41 @@ def resolve_windows_launch(appinfo: dict | None, folder: Path) -> dict:
         executable = entry.get("executable", "")
         if not isinstance(executable, str) or not executable.strip():
             continue
+        relative = executable.replace("\\", "/").strip().strip('"')
         if "linux" in platform:
             linux += 1
+            if len(result["linux_declared"]) < 12:
+                result["linux_declared"].append(relative)
         if "windows" not in platform:
             continue
-        relative = executable.replace("\\", "/").strip().strip('"')
+        result["windows_declared"] += 1
         if relative.startswith("/") or ":" in relative or "\x00" in relative or \
                 any(p in ("", ".", "..") for p in relative.split("/")):
+            if len(result["windows_invalid"]) < 12:
+                result["windows_invalid"].append(relative)
             continue
         target = root.joinpath(*relative.split("/"))
         try:
             if not target.is_file() or target.is_symlink() or \
                     not target.resolve().is_relative_to(root) or target.suffix.lower() != ".exe":
+                if len(result["windows_missing"]) < 12:
+                    result["windows_missing"].append(relative)
                 continue
         except OSError:
+            if len(result["windows_missing"]) < 12:
+                result["windows_missing"].append(relative)
             continue
         target_string = str(target)
         if target_string not in all_windows:
             all_windows.append(target_string)
-        # Beta, workshop/DLC, foreign realm and secondary launch options are
-        # not authoritative even if Steam lists them.
         standard = (not entry.get("type") and not entry.get("description")
                     and not flags.get("betakey") and not flags.get("ownsdlc")
                     and str(flags.get("realm", "steamglobal")).lower() in
                     ("steamglobal", ""))
         if standard and target_string not in normal:
             normal.append(target_string)
+        elif not standard:
+            result["windows_optional"] += 1
     result["windows_candidates"] = all_windows
     result["linux_launches"] = linux
     result["reason"] = "steam_primary" if len(normal) == 1 else (
