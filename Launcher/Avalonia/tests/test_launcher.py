@@ -283,7 +283,8 @@ class LauncherTests(unittest.TestCase):
                 stream.writestr(f"payload/dlssnr_amd_pass{i}.dll", b"pass " + bytes([i]))
             stream.writestr("payload/dlssnr_on_amd_weights.bin", b"weights")
         with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
-              patch.object(launcher, "download_release", return_value=archive)):
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
             launcher._save_component_records(self.exe, {
                 "v0.6.0-Runtime.zip": {"tag": "Alpha0.3.5.5R4", "files": {}}})
             preview = launcher.component_preview(self.exe, tag, asset)
@@ -407,7 +408,8 @@ class LauncherTests(unittest.TestCase):
             stream.writestr("components/runtime.dll", b"official runtime")
         state = self.root / "state"
         with (patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}),
-              patch.object(launcher, "download_release", return_value=archive)):
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
             launcher.install_component(self.exe, tag, asset)
             changed = self.game / "components/runtime.dll"
             changed.write_bytes(b"modified by user")
@@ -428,7 +430,8 @@ class LauncherTests(unittest.TestCase):
         with zipfile.ZipFile(archive, "w") as stream:
             stream.writestr("components/runtime.dll", b"official")
         with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
-              patch.object(launcher, "download_release", return_value=archive)):
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
             launcher.install_component(self.exe, tag, asset)
             (self.game / "components/runtime.dll").unlink()
             outcome = launcher.remove_component(self.exe, asset, backup_modified=True)
@@ -444,7 +447,8 @@ class LauncherTests(unittest.TestCase):
         dest = self.game / "runtime.dll"
         dest.write_bytes(b"old game file")
         with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
-              patch.object(launcher, "download_release", return_value=archive)):
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
             launcher.install_component(self.exe, tag, asset, replace_conflicts=True)
             dest.write_bytes(b"later modification")
             outcome = launcher.remove_component(self.exe, asset, backup_modified=True)
