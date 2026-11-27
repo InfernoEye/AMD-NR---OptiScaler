@@ -47,7 +47,7 @@ The version and asset name come from the release catalog; they are not game-name
 
 ## Selecting a game executable
 
-Select a Steam game from the library. Avalonia now scans its Windows executables and displays the best heuristic suggestion immediately. Choose **Use This Executable** to confirm it, or use **Change Executable** to see alternatives. Developer tools, editors, setup programs, and anti-cheat binaries receive lower rankings. You can also browse manually or rescan. **No executable is approved for installation until explicitly confirmed.** A suggestion is never proof that the file is the correct game binary.
+Select a Steam game from the library. Avalonia scans its Windows executables and **automatically selects a high-confidence candidate**, including when there is only one non-suspicious EXE. If multiple executables look equally plausible, it asks you to choose instead. Developer tools, editors, setup programs, and anti-cheat binaries receive lower rankings. Use **Change Executable**, **Browse EXE**, or **Rescan** to override a selection. Manual choices are remembered across launches in `${XDG_CONFIG_HOME:-~/.config}/amdnr/game-executables/`, keyed by game installation directory rather than game title. Missing/stale saved paths are ignored. **An automatic selection is a heuristic, not proof of the correct game binary:** review the destination before installation; installing DLLs still requires a separate click.
 
 The CLI supports the same scan:
 
