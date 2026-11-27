@@ -1966,6 +1966,14 @@ public sealed class MainWindow : Window
         extraAddonOptions.Children.Add(addonCatalogueState);
         panel.Children.Add(extraAddonOptions);
         var selectedAddons = new List<(ReleaseEntry Release, CheckBox Option)>();
+        var installedAddons = new Dictionary<string, ManagedComponent>(
+            StringComparer.OrdinalIgnoreCase);
+        var backupModifiedApproval = new CheckBox
+        {
+            Content = "Preserve modified AMDNR component files in a recovery backup " +
+                      "before removal. I approve removing the recorded files.",
+            Foreground = ForegroundBrush, IsChecked = false, IsVisible = false,
+        };
         string Runtime() => addonDaniel.IsChecked == true ? "0.6.0" : "lmxxf";
 
         var state = Text("Checking existing bridge and prepared packages…", 13, ForegroundBrush);
@@ -1985,6 +1993,7 @@ public sealed class MainWindow : Window
             Foreground = ForegroundBrush, IsChecked = false, IsVisible = false,
         };
         panel.Children.Add(replaceApproval);
+        panel.Children.Add(backupModifiedApproval);
         var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
         var install = Button("INSTALL AMDNR", true);
         var uninstall = Button("UNINSTALL AMDNR");
@@ -2049,56 +2058,77 @@ public sealed class MainWindow : Window
             if (_backend is null) return;
             try
             {
-                var entries = await _backend.ComponentsAsync();
-                // Native lmxxf is bundled by the bridge and Daniel is the
-                // single runtime choice above. Avoid duplicate runtime archives.
-                var supported = entries.Where(x =>
+                var installed = await _backend.InstalledComponentsAsync(gameExe);
+                var catalog = await _backend.ComponentsAsync();
+                var supported = catalog.Where(x =>
                     !x.Asset.EndsWith("-Runtime.zip", StringComparison.OrdinalIgnoreCase) &&
                     !x.Asset.Contains("lmxxf", StringComparison.OrdinalIgnoreCase) &&
                     !x.Asset.Contains("neuralhub", StringComparison.OrdinalIgnoreCase) &&
                     !x.Prerelease)
                     .GroupBy(x => x.Asset, StringComparer.OrdinalIgnoreCase)
-                    .Select(x => x.First()).Take(5).ToArray();
-                if (supported.Length == 0)
+                    .Select(x => x.First()).Take(8).ToList();
+                // Include installed components even when no longer in the latest
+                // release catalog, so they can be unchecked and removed.
+                foreach (var component in installed)
                 {
-                    addonCatalogueState.Text = "No additional verified add-on packages published.";
-                    return;
+                    if (component.Asset.Contains("lmxxf", StringComparison.OrdinalIgnoreCase))
+                        continue; // Core native runtime belongs to bridge uninstall.
+                    if (!supported.Any(x => x.Asset.Equals(component.Asset,
+                            StringComparison.OrdinalIgnoreCase)))
+                        supported.Add(new ReleaseEntry(component.Tag ?? "",
+                            component.Asset, component.Asset, 0, false));
                 }
-                var already = (await _backend.InstalledComponentsAsync(gameExe))
-                    .Select(x => x.Asset).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                addonCatalogueState.Text = "Official optional add-ons (none selected by default):";
+                installedAddons.Clear();
+                foreach (var component in installed)
+                    installedAddons[component.Asset] = component;
+                selectedAddons.Clear();
+                extraAddonOptions.Children.Clear();
+                extraAddonOptions.Children.Add(addonCatalogueState);
+                addonCatalogueState.Text = "Check to install; uncheck to remove, then Apply Changes.";
                 foreach (var release in supported)
                 {
+                    var existing = installedAddons.ContainsKey(release.Asset);
                     var toggle = new CheckBox
                     {
-                        Content = release.Name + " (verified official package)",
-                        Foreground = ForegroundBrush, IsChecked = false,
-                        IsEnabled = !already.Contains(release.Asset),
+                        Content = release.Name + (existing ? " (installed)" : ""),
+                        Foreground = ForegroundBrush, IsChecked = existing,
                     };
-                    if (already.Contains(release.Asset))
-                        toggle.Content = release.Name + " (already installed)";
                     toggle.IsCheckedChanged += (_, _) => Buttons();
                     extraAddonOptions.Children.Add(toggle);
                     selectedAddons.Add((release, toggle));
                 }
+                backupModifiedApproval.IsVisible = installed.Any(x =>
+                    x.Modified.Count > 0);
+                if (!backupModifiedApproval.IsVisible)
+                    backupModifiedApproval.IsChecked = false;
+                Buttons();
             }
             catch (Exception ex)
             {
-                addonCatalogueState.Text = "Optional add-on catalog unavailable: " + ex.Message;
+                addonCatalogueState.Text = "Add-on inventory unavailable: " + ex.Message;
+                // Do not guess removal state when registry is unavailable.
+                selectedAddons.Clear();
+                installedAddons.Clear();
             }
         }
 
         void Buttons()
         {
             bool addOnsSelected = selectedAddons.Any(x =>
-                x.Option.IsEnabled && x.Option.IsChecked == true);
+                (x.Option.IsChecked == true) != installedAddons.ContainsKey(x.Release.Asset));
+            bool removalModified = selectedAddons.Any(x =>
+                x.Option.IsChecked != true &&
+                installedAddons.TryGetValue(x.Release.Asset, out var item) &&
+                item.Modified.Count > 0);
             install.IsEnabled = !busy && !migrationPending &&
-                (bridgeInstalled ? addOnsSelected :
+                (bridgeInstalled ? addOnsSelected &&
+                    (!removalModified || backupModifiedApproval.IsChecked == true) :
                     (!conflicts || replaceApproval.IsChecked == true) &&
                     (ready || compilerApproval.IsChecked == true));
             uninstall.IsEnabled = !busy && bridgeInstalled;
             refresh.IsEnabled = !busy;
             addonDaniel.IsEnabled = !busy && !bridgeInstalled;
+            if (bridgeInstalled) install.Content = "APPLY ADD-ON CHANGES";
         }
 
         async Task PreviewSteam(string? manual = null)
@@ -2223,7 +2253,7 @@ public sealed class MainWindow : Window
         {
             if (busy || migrationPending) return;
             if (bridgeInstalled && !selectedAddons.Any(x =>
-                    x.Option.IsEnabled && x.Option.IsChecked == true)) return;
+                    (x.Option.IsChecked == true) != installedAddons.ContainsKey(x.Release.Asset))) return;
             if (!bridgeInstalled && conflicts && replaceApproval.IsChecked != true)
             {
                 feedback.Text = "Approve backup and replacement of old hooks first.";
@@ -2267,7 +2297,27 @@ public sealed class MainWindow : Window
                 var skipped = new List<string>();
                 foreach (var (release, checkbox) in selectedAddons)
                 {
-                    if (checkbox.IsChecked != true) continue;
+                    if (checkbox.IsChecked == true) continue;
+                    if (!installedAddons.TryGetValue(release.Asset, out var previous)) continue;
+                    try
+                    {
+                        if (previous.Modified.Count > 0 &&
+                            backupModifiedApproval.IsChecked != true)
+                            throw new InvalidOperationException(
+                                "Approve preservation of modified files before removal.");
+                        await _backend.RemoveComponentAsync(gameExe, release.Asset,
+                            backupModified: previous.Modified.Count > 0);
+                        added.Add("Removed " + release.Name);
+                        installedAddons.Remove(release.Asset);
+                    }
+                    catch (Exception addonError)
+                    {
+                        skipped.Add("Could not remove " + release.Name + ": " + addonError.Message);
+                    }
+                }
+                foreach (var (release, checkbox) in selectedAddons)
+                {
+                    if (checkbox.IsChecked != true || installedAddons.ContainsKey(release.Asset)) continue;
                     try
                     {
                         // Preview validates archive contents and the destination;
@@ -2282,10 +2332,7 @@ public sealed class MainWindow : Window
                         }
                         await _backend.InstallComponentAsync(
                             gameExe, release.Tag, release.Asset);
-                        added.Add(release.Name);
-                        checkbox.IsChecked = false;
-                        checkbox.IsEnabled = false;
-                        checkbox.Content = release.Name + " (installed)";
+                        added.Add("Installed " + release.Name);
                     }
                     catch (Exception addonError)
                     {
@@ -2298,6 +2345,7 @@ public sealed class MainWindow : Window
                         string.Join(", ", skipped) + ". " : "") +
                     "Copy the final Steam launch options below.";
                 await Check();
+                await LoadOptionalAddons();
             }
             catch (Exception ex)
             {
@@ -2318,13 +2366,16 @@ public sealed class MainWindow : Window
                 // Remove only components that this installer's managed-component
                 // registry can safely restore. The backend checks hashes/backups.
                 var managed = await _backend.InstalledComponentsAsync(gameExe);
+                if (managed.Any(x => x.Modified.Count > 0) &&
+                    backupModifiedApproval.IsChecked != true)
+                    throw new InvalidOperationException(
+                        "Some AMDNR-managed files were modified. Check the recovery-backup " +
+                        "approval to preserve them before uninstalling.");
                 var removed = new List<string>();
                 foreach (var component in managed)
                 {
-                    if (component.Modified.Count > 0)
-                        throw new InvalidOperationException(
-                            component.Asset + " has modified files; managed removal requires review.");
-                    await _backend.RemoveComponentAsync(gameExe, component.Asset);
+                    await _backend.RemoveComponentAsync(gameExe, component.Asset,
+                        backupModified: component.Modified.Count > 0);
                     removed.Add(component.Asset);
                 }
                 var (exit, result) = await _backend.RunAsync(new[]
@@ -2350,7 +2401,8 @@ public sealed class MainWindow : Window
         };
         compilerApproval.IsCheckedChanged += (_, _) => Buttons();
         replaceApproval.IsCheckedChanged += (_, _) => Buttons();
-        refresh.Click += async (_, _) => await Check();
+        backupModifiedApproval.IsCheckedChanged += (_, _) => Buttons();
+        refresh.Click += async (_, _) => { await Check(); await LoadOptionalAddons(); };
         reviewOptions.Click += async (_, _) => await PreviewSteam(current.Text ?? "");
         copy.Click += async (_, _) =>
         {
