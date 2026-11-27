@@ -77,12 +77,58 @@ internal static class UiLanguage
         ["About this launcher"] = "O launcherze",
         ["Troubleshooting"] = "Rozwiązywanie problemów",
         ["Read-only checks"] = "Kontrole tylko do odczytu",
+        ["Save settings"] = "Zapisz ustawienia",
+        ["Save configuration"] = "Zapisz konfigurację",
+        ["Reload from disk"] = "Wczytaj ponownie z dysku",
+        ["Browse"] = "Przeglądaj",
+        ["Browse exe"] = "Wybierz EXE",
+        ["Rescan"] = "Skanuj ponownie",
+        ["Use this executable"] = "Użyj tego pliku EXE",
+        ["Quick install latest verified AMDNR"] = "Szybko zainstaluj najnowszy sprawdzony AMDNR",
+        ["Download selected zip"] = "Pobierz wybrany ZIP",
+        ["Load builds"] = "Wczytaj wersje",
+        ["Check available versions"] = "Sprawdź dostępne wersje",
+        ["Verify all installed files"] = "Sprawdź wszystkie zainstalowane pliki",
+        ["Check file integrity"] = "Sprawdź integralność plików",
+        ["Repair"] = "Napraw",
+        ["Repair automatically"] = "Napraw automatycznie",
+        ["Uninstall"] = "Odinstaluj",
+        ["Confirm removal"] = "Potwierdź usunięcie",
+        ["Cancel"] = "Anuluj",
+        ["Select release"] = "Wybierz wydanie",
+        ["Download verified AppImage"] = "Pobierz sprawdzony AppImage",
+        ["Install downloaded AppImage"] = "Zainstaluj pobrany AppImage",
+        ["View AMDNR-Linux research"] = "Zobacz badania AMDNR-Linux",
+        ["Show prerelease builds in the release picker"] = "Pokazuj wersje testowe w wyborze wydań",
+        ["Edit / remove custom game"] = "Edytuj / usuń grę niestandardową",
+        ["Change executable"] = "Zmień plik EXE",
+        ["Apply language"] = "Zastosuj język",
+        ["Preview this change"] = "Podgląd zmiany",
+        ["Manage plugins"] = "Zarządzaj wtyczkami",
+        ["Import local .asi"] = "Importuj lokalny plik .asi",
+        ["Save to library"] = "Zapisz w bibliotece",
+        ["Edit custom game"] = "Edytuj grę niestandardową",
+        ["Back to library"] = "Wróć do biblioteki",
     };
 
     internal static string Current { get; private set; } = Load();
 
     internal static string Translate(string key) =>
         Current == "pl" && Polish.TryGetValue(key, out var translation) ? translation : key;
+
+    internal static string TranslateButton(string label)
+    {
+        if (Current != "pl") return label;
+        if (Polish.TryGetValue(label, out var direct)) return direct;
+        // Match uppercase action labels without altering identifiers, filenames,
+        // Steam launch options or other user-supplied values.
+        foreach (var pair in Polish)
+        {
+            if (string.Equals(label, pair.Key.ToUpperInvariant(), StringComparison.Ordinal))
+                return pair.Value.ToUpperInvariant();
+        }
+        return label;
+    }
 
     internal static void Set(string code)
     {
