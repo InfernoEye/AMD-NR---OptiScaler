@@ -77,6 +77,24 @@ class LauncherTests(unittest.TestCase):
             }])
             self.assertEqual(launcher.installed_games_overview(), [])
 
+    def test_runtime_diagnostics_reads_missing_and_present_files_without_modification(self):
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
+            initial = launcher.runtime_diagnostics(self.exe)
+            self.assertFalse(initial["mochi_runtime_present"])
+            self.assertFalse(initial["daniel_pass_present"])
+            self.assertFalse(initial["daniel_weights_present"])
+            self.assertEqual(initial["folder"], str(self.game))
+            (self.game / "MochizukiNrRuntime.dll").write_bytes(b"mock mochi runtime")
+            for number in range(1, 4):
+                (self.game / f"dlssnr_amd_pass{number}.dll").write_bytes(b"mock daniel pass")
+            (self.game / "dlssnr_on_amd_weights.bin").write_bytes(b"mock weights")
+            after = launcher.runtime_diagnostics(self.exe)
+            self.assertTrue(after["mochi_runtime_present"])
+            self.assertTrue(after["daniel_pass_present"])
+            self.assertTrue(after["daniel_weights_present"])
+            self.assertEqual((self.game / "MochizukiNrRuntime.dll").read_bytes(),
+                             b"mock mochi runtime")
+
     def test_official_component_catalog_filters_and_deduplicates(self):
         releases = [
             {"tag_name": "Alpha2", "draft": False, "assets": [
