@@ -1536,6 +1536,57 @@ public sealed class MainWindow : Window
         Grid.SetColumn(browseExe, 1);
         exeRow.Children.Add(browseExe);
         section.Children.Add(exeRow);
+        var quickInstall = Button("QUICK INSTALL LATEST VERIFIED AMDNR", true);
+        section.Children.Add(quickInstall);
+        section.Children.Add(Text(
+            "Automatically selects the newest eligible official AMDNR ZIP, verifies its SHA-256, " +
+            "and installs it for the selected Windows executable using your preferred proxy DLL. " +
+            "Existing game files are backed up; an existing AMDNR installation must be managed via Update.",
+            12, MutedBrush));
+        quickInstall.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null || string.IsNullOrWhiteSpace(_exe) ||
+                !File.Exists(_exe))
+            {
+                _status.Text = "Select the game's Windows executable before quick install.";
+                return;
+            }
+            if (HasInstallRecord())
+            {
+                _status.Text = "AMDNR already installed. Use Repair / Update rather than overwriting it.";
+                return;
+            }
+            _busy = true;
+            quickInstall.IsEnabled = false;
+            string? verifiedArchive = null;
+            try
+            {
+                var entries = await _backend.ReleasesAsync();
+                var latest = (_launcherSettings?.ShowPrereleases == true
+                    ? entries : entries.Where(x => !x.Prerelease)).FirstOrDefault();
+                if (latest is null)
+                    throw new InvalidOperationException("No verified official AMDNR release found.");
+                _status.Text = "Downloading and verifying official AMDNR: " + latest.Asset;
+                var (exit, output) = await _backend.RunAsync(new[]
+                { "--download-release", latest.Tag, "--release-asset", latest.Asset });
+                if (exit != 0) throw new InvalidOperationException(output);
+                verifiedArchive = output.Trim();
+                if (!File.Exists(verifiedArchive))
+                    throw new FileNotFoundException("Verified release archive unavailable.");
+            }
+            catch (Exception ex) { _status.Text = "Quick install failed: " + ex.Message; }
+            finally
+            {
+                _busy = false;
+                quickInstall.IsEnabled = true;
+            }
+            if (verifiedArchive is not null)
+            {
+                _archive = verifiedArchive;
+                if (_archiveBox is not null) _archiveBox.Text = verifiedArchive;
+                await ExecuteAsync(true);
+            }
+        };
 
         var releaseSection = new StackPanel { Spacing = 11 };
         releaseSection.Children.Add(Text("UPSTREAM AMDNR BUILDS", 12, AccentBrush, FontWeight.Bold));
