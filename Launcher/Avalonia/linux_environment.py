@@ -85,31 +85,69 @@ def proton_tools(steam_roots: list[Path]) -> list[dict]:
     return sorted(items, key=lambda x: x["name"].lower())[:64]
 
 
-def game_running(executable: Path) -> dict:
-    """Only a best-effort process heuristic; Wine process paths can differ."""
+def _matches_game_process(executable: Path, argv: list[str], process_name: str,
+                          binary_name: str = "") -> bool:
+    """Match the actual Wine/game process, not a launcher mentioning --exe.
+
+    The old substring heuristic matched our own Python/Avalonia backend because
+    its arguments contain the selected executable's full path. In particular,
+    generic Win64 folders and log messages are not evidence of a running game.
+    """
+    if not argv:
+        return False
+    expected = executable.name.casefold()
+    expected_comm = expected[:15]  # Linux /proc/<pid>/comm is truncated.
+    comm = process_name.strip().casefold()
+    actual_binary = Path(binary_name.replace("\\", "/")).name.casefold()
+    argv0 = Path(argv[0].replace("\\", "/")).name.casefold()
+    # Wine commonly names a real running game thread after its PE filename.
+    if comm == expected or (len(expected) > 15 and comm == expected_comm):
+        return True
+    # Some Wine versions retain the exe path as argv0.
+    if argv0 == expected or actual_binary == expected:
+        return True
+    # Wine launchers may list the game as an argument. Require an actual Wine
+    # executable, never strings such as '--exe', diagnostics or a Python script.
+    wine_executables = ("wine", "wine64", "wine64-preloader", "wine-preloader",
+                        "wine64-staging", "wine-staging")
+    if argv0 not in wine_executables and actual_binary not in wine_executables:
+        return False
+    return any(Path(arg.replace("\\", "/")).name.casefold() == expected
+               for arg in argv[1:])
+
+
+def game_running(executable: Path, *, proc_root: Path = Path("/proc")) -> dict:
+    """Read-only conservative detection of actual Wine/game processes.
+
+    False positives must never be based on the launcher's --exe argument.
+    Only exact executable name and Wine process identity are sufficient.
+    """
     try:
-        exe_name = executable.name.lower()
-        folder_name = executable.parent.name.lower()
         match = []
         own_id = os.getuid()
-        for proc in list(Path("/proc").iterdir())[:15000]:
+        for proc in list(proc_root.iterdir())[:15000]:
             if not proc.name.isdigit():
                 continue
             try:
                 if proc.stat().st_uid != own_id:
                     continue
-                args = (proc / "cmdline").read_bytes()[:32768].replace(b"\x00", b" ").decode(
-                    "utf-8", errors="replace").lower()
-                if exe_name in args or (folder_name in args and "wine" in args):
+                args = (proc / "cmdline").read_bytes()[:32768].split(b"\\x00")
+                argv = [arg.decode("utf-8", errors="replace") for arg in args if arg]
+                comm = (proc / "comm").read_text(encoding="utf-8", errors="replace")
+                try:
+                    binary = os.readlink(proc / "exe")
+                except OSError:
+                    binary = ""
+                if _matches_game_process(executable, argv, comm, binary):
                     match.append(int(proc.name))
             except (OSError, PermissionError, UnicodeError):
                 continue
         return {"running": bool(match), "pids": match[:16],
-                "confidence": "heuristic",
-                "note": "Wine/Proton processes may not expose Windows executable names."}
+                "confidence": "process_identity" if match else "best_effort",
+                "note": "Detected matching Wine/game processes by executable identity; "
+                        "launcher arguments are ignored. Wine may still obscure process names."}
     except OSError:
         return {"running": None, "pids": [], "confidence": "unavailable"}
-
 
 def anti_cheat_scan(game_folder: Path) -> dict:
     """Bounded filename-only scan, no anti-cheat bypass or process modification."""
