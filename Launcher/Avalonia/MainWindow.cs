@@ -2107,7 +2107,8 @@ public sealed class MainWindow : Window
                         {
                             addonHasBlockedConflicts = true;
                             messages.Add(release.Name + ": files owned by bridge/other add-ons: " +
-                                string.Join(", ", preview.ManagedConflicts.Take(5)));
+                                string.Join(", ", preview.ManagedConflicts.Take(5)) +
+                                ". Uncheck the old component and Apply; the installer rechecks after removal.");
                         }
                         else if (preview.ConflictCount > preview.ReplaceableCount)
                         {
@@ -2222,9 +2223,11 @@ public sealed class MainWindow : Window
                 x.Option.IsChecked != true &&
                 installedAddons.TryGetValue(x.Release.Asset, out var item) &&
                 item.Modified.Count > 0);
+            bool removeFirst = selectedAddons.Any(x =>
+                x.Option.IsChecked != true && installedAddons.ContainsKey(x.Release.Asset));
             install.IsEnabled = !busy && !migrationPending &&
                 (bridgeInstalled ? addOnsSelected && !addonPreviewBusy &&
-                    !addonHasBlockedConflicts &&
+                    (!addonHasBlockedConflicts || removeFirst) &&
                     (!addonRequiresReplacement || replaceAddonApproval.IsChecked == true) &&
                     (!removalModified || backupModifiedApproval.IsChecked == true) :
                     (!conflicts || replaceApproval.IsChecked == true) &&
@@ -2359,7 +2362,9 @@ public sealed class MainWindow : Window
             if (busy || migrationPending) return;
             if (bridgeInstalled && !selectedAddons.Any(x =>
                     (x.Option.IsChecked == true) != installedAddons.ContainsKey(x.Release.Asset))) return;
-            if (addonPreviewBusy || addonHasBlockedConflicts ||
+            bool removeFirst = selectedAddons.Any(x =>
+                x.Option.IsChecked != true && installedAddons.ContainsKey(x.Release.Asset));
+            if (addonPreviewBusy || (addonHasBlockedConflicts && !removeFirst) ||
                 (addonRequiresReplacement && replaceAddonApproval.IsChecked != true))
             {
                 feedback.Text = "Review add-on file conflicts and approve safe backups first.";
