@@ -307,13 +307,15 @@ public sealed class MainWindow : Window
         // Always have useful artwork, even when Steam has no published capsule.
         // Generated locally from the game title: no name-based exceptions or extra APIs.
         var placeholder = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto") };
-        placeholder.Children.Add(new Border
+        var artBackground = new Border
         {
             Background = Brush("#30202C"),
             BorderBrush = AccentDarkBrush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
-        });
+        };
+        Grid.SetRowSpan(artBackground, 3);
+        placeholder.Children.Add(artBackground);
         var top = Text("AMDNR  /  LIBRARY", 10, AccentBrush, FontWeight.Bold);
         top.Margin = new Thickness(12, 11, 12, 0);
         placeholder.Children.Add(top);
