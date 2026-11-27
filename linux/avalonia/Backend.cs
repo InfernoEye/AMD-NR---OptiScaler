@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -55,18 +56,24 @@ public sealed class Backend
 
     public async Task<IReadOnlyList<GameEntry>> GamesAsync(CancellationToken token = default)
     {
-        var result = await RunAsync(new[] { "--list" }, token);
+        var result = await RunAsync(new[] { "--list-json" }, token);
         if (result.ExitCode != 0)
             throw new InvalidOperationException(result.Output);
+        using var document = JsonDocument.Parse(result.Output);
         var games = new List<GameEntry>();
-        foreach (var line in result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var item in document.RootElement.EnumerateArray())
         {
-            var fields = line.TrimEnd('\r').Split('\t', 2);
-            if (fields.Length == 2 && Directory.Exists(fields[1]))
-                games.Add(new GameEntry(fields[0], fields[1]));
+            var name = item.GetProperty("name").GetString();
+            var folder = item.GetProperty("folder").GetString();
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(folder)
+                || !Directory.Exists(folder))
+                continue;
+            var artwork = item.GetProperty("artwork").GetString();
+            games.Add(new GameEntry(name, folder,
+                artwork is not null && File.Exists(artwork) ? artwork : null));
         }
         return games;
     }
 }
 
-public sealed record GameEntry(string Name, string Folder);
+public sealed record GameEntry(string Name, string Folder, string? Artwork);
