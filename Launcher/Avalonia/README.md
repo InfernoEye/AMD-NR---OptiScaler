@@ -101,6 +101,32 @@ python3 Launcher/Avalonia/amdnr_launcher.py --bridge-discover-json --exe "/path/
 All changes for this wizard are limited to `Launcher/Avalonia/`, including
 `bridge_discovery.py` and regression tests in `tests/test_community_bridge.py`.
 
+## Updating the community bridge safely
+
+The **CHECK UPSTREAM BRIDGE UPDATES** action in the Experimental Linux ROCm Bridge
+screen only reads GitHub release metadata. It shows the newest stable release and
+whether a newer release exists; checking never downloads, executes, replaces or
+installs it. The same read-only report is available through
+`python3 Launcher/Avalonia/amdnr_launcher.py --bridge-check-updates-json`.
+
+Bridge versions are *not* automatically compatible simply because their
+version number is higher. The adapter's `SUPPORTED_RELEASES` registry in
+`community_bridge.py` contains the specifically reviewed version and SHA-256
+of the upstream source archive. When upstream publishes an update, a maintainer
+must examine changes to `linux/setup.py`, `linux/manage.py`, the release
+manifest, private ROCm dependencies, and install/uninstall behavior; verify the
+source archive's checksum; and extend the registry with a matching test. The
+highest reviewed version becomes the launcher's default in a **new launcher
+release**. Existing prepared installations are not overwritten or migrated.
+
+**Dependency pins are separate:** AMDNR-Linux v0.3.7's `linux/fetch-rocm.py`
+requires its own Ubuntu and AMD checksum-pinned packages. Merely changing the
+launcher fallback package name or substituting a newer `libelf1` is not
+compatible with the unmodified upstream script. Update upstream's dependency
+recipe or review a versioned, checksummed adapter change as one tested unit;
+never bypass the original script's hash verification. No Ubuntu installation,
+system package manager or game-file changes are required for checking releases.
+
 ## Experimental AMDNR-Linux ROCm bridge
 
 The **Experimental Linux ROCm Bridge** action on the selected game's details page
