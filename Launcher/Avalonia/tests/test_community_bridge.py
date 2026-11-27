@@ -492,6 +492,29 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(entered["steam_status"], "manual")
         self.assertIn('MANGOHUD=1 "', entered["preview"])
 
+    def test_full_uninstall_retains_earlier_hooks_in_snapshot_only(self):
+        exe = self.exe()
+        game = self.root / "steamapps/common/TestGame"
+        old = exe.parent / "dxgi.dll"
+        old.write_bytes(b"old legacy AMDNR")
+        before = game / ".amdnr-linux-install.json"
+        before.write_text('{"format": 1}')
+        snapshot = Path(migration.snapshot_existing(exe)["snapshot"])
+        migration.mark_installed(snapshot)
+        self.assertFalse(old.exists())
+        outcome = migration.retain_after_full_uninstall(snapshot)
+        self.assertFalse(outcome["restored_to_game"])
+        self.assertEqual((snapshot / "original" /
+                         old.relative_to(game)).read_bytes(), b"old legacy AMDNR")
+        self.assertFalse(old.exists())
+        self.assertFalse(before.exists())
+        self.assertIsNone(migration.latest_installed_snapshot(exe))
+        # A future install is permitted without reviving an earlier setup.
+        replacement = exe.parent / "version.dll"
+        replacement.write_bytes(b"other")
+        next_snapshot = migration.snapshot_existing(exe)
+        self.assertEqual(next_snapshot["status"], "backed_up")
+
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
         self.assertEqual(bridge.VERSION, "0.3.7")
