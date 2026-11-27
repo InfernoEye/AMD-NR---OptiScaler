@@ -617,7 +617,8 @@ def recover_migration(exe: Path, approved: bool) -> dict:
     return recover_pending(exe)
 
 
-def remove(exe: Path, approved: bool, *, restore_previous: bool = True) -> dict:
+def remove(exe: Path, approved: bool, *, restore_previous: bool = True,
+           force: bool = False) -> dict:
     if not approved:
         raise ValueError("Community bridge removal requires explicit consent.")
     folder = _game_directory(exe)
@@ -632,7 +633,17 @@ def remove(exe: Path, approved: bool, *, restore_previous: bool = True) -> dict:
     manager = source_path() / "linux/manage.py"
     if not manager.is_file():
         raise ValueError("Original community manager missing; cannot restore backups.")
-    finished = subprocess.run([sys.executable, str(manager), "uninstall", str(folder)],
+    if force:
+        from launcher_maintenance import _ensure_not_running
+        _ensure_not_running(exe)
+        from bridge_force_remove import preserve_changed_bridge_files
+        preserved_bridge = preserve_changed_bridge_files(folder, data)
+    else:
+        preserved_bridge = None
+    command = [sys.executable, str(manager), "uninstall", str(folder)]
+    if force:
+        command.append("--force")  # reviewed v0.3.7 manager's explicit force mode
+    finished = subprocess.run(command,
                               cwd=source_path(), text=True, capture_output=True, timeout=300)
     if finished.returncode:
         raise ValueError("Uninstall stopped; inspect changed files before retrying: " +
@@ -649,6 +660,7 @@ def remove(exe: Path, approved: bool, *, restore_previous: bool = True) -> dict:
                              f"Recovery snapshot: {old_snapshot}; blocked: " +
                              ", ".join(migration["blocked"]))
     return {"removed": True, "migration_restoration": migration, "steam_modified": False,
+            "preserved_bridge": preserved_bridge, "forced": force,
             "previous_install_restored": restore_previous,
             "warning": "Remove the bridge wrapper from your Steam launch options manually.",
             "output": finished.stdout[-1000:]}
