@@ -35,6 +35,35 @@
 > Windows DLL will run. Doctor can create a locally stored, redacted
 > AMDNR support bundle; it is not a separate benchmarking tool.
 
+## Local distro dependencies and pinned runtime recovery
+
+The experimental bridge now checks the host's **libelf.so.1** and
+**libnuma.so.1** without loading them or changing packages. When missing,
+Avalonia displays the detected distro and a **copy-only**, user-reviewed
+package-manager command (Debian/Ubuntu, Arch, Fedora or openSUSE). The
+launcher never runs `sudo`, `apt`, `pacman`, `dnf` or `zypper`.
+
+**Important limitation:** The community AMDNR-Linux v0.3.7 bridge prepares a
+**private, pinned ROCm 7.2.4 runtime**. The host's installed libelf/libnuma
+files cannot safely replace its exact private runtime just because they have
+the same library name. Installing distro libraries alone will **not** solve
+a missing pinned upstream `.deb` archive.
+
+To handle upstream Ubuntu archive URLs that now return HTTP 404, bridge
+preparation first reuses a byte-for-byte, SHA-256-matching `.deb` from
+`/var/cache/apt/archives` where available, then retries official Ubuntu
+mirrors and verifies the same upstream SHA-256 before letting the original,
+unmodified community preparation script consume it. A bad/corrupt existing
+cache entry blocks preparation; unknown files, host libraries, and arbitrary
+new package versions are not substituted. No game files or Steam/Proton
+settings are changed during this step.
+
+The pinned prerequisite archive names and checksums originate from
+`hassanm0301/AMDNR-Linux/linux/fetch-rocm.py` in the separately verified
+`linux-v0.3.7` release. Mirror recovery does not alter its source or
+license obligations. If all mirrors fail, the launcher stops with an
+actionable explanation instead of hiding an HTTP 404.
+
 ## Guided ROCm bridge preparation (launcher-only)
 
 The optional ROCm bridge page now starts with an automatic, **read-only**
