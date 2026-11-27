@@ -366,3 +366,22 @@ Open a selected Windows game's **Manage Extensions** screen. Under **Official AM
 
 Launcher-managed release components are tracked separately from imported `.asi` plugins under XDG state. Removing a component first checks every recorded file digest and refuses to delete modified or missing files. Existing user/third-party components are never claimed as launcher-managed. Component archives are installed with the directory layout inside the ZIP, so preview the file paths and confirm they suit the selected game. This feature manages files only; Proton compatibility or model activation is not guaranteed. Catalog lookup is on-demand and never triggers a Steam library rescan.
 
+
+### Guided Daniel neural runtime setup
+
+The **Get Daniel 0.6.0** button in **Game → Manage Extensions** resolves
+`v0.6.0-Runtime.zip` from the official upstream release
+`Alpha0.3.5.5R4` (not the Linux launcher fork). It downloads and checks
+the ZIP against that release's SHA-256 manifest, then previews installation.
+Only the three `dlssnr_amd_pass*.dll` files, the
+`dlssnr_on_amd_weights.bin` model, and optional attribution file are allowed.
+These are installed **beside the selected game executable/OptiScaler.dll**;
+the ZIP's own proxy, setup, or unrelated files are not installed.
+Installation remains an explicit second click, and existing differing files
+require the separate opt-in backup-and-replace flow. This is a separate
+runtime choice from Mochi: Daniel does not fix a Mochi detection failure.
+
+The runtime diagnostic screen distinguishes files copied successfully from
+a runtime detected by AMDNR. `MochizukiNrRuntime.dll` being present does not
+prove that the current OptiScaler binary recognizes or initializes Mochi;
+in-game detection and Proton compatibility require independent testing.
