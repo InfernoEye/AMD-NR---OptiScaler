@@ -2230,8 +2230,14 @@ public sealed class MainWindow : Window
                     (_launcherSettings?.ShowPrereleases == true || !x.Prerelease)).ToArray();
                 if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
                 danielPicker.ItemsSource = versions;
-                danielPicker.SelectedIndex = versions.Length > 0 ? 0 : -1;
-                _status.Text = versions.Length + " official Daniel runtimes found.";
+                // Prefer a supported legacy package on Linux. Newer NeuralHub
+                // versions remain selectable but are not presented as ready
+                // until their Windows AMD driver dependencies work under Proton.
+                danielPicker.SelectedItem = versions.FirstOrDefault(
+                    x => x.Asset == "v0.6.0-Runtime.zip") ??
+                    versions.FirstOrDefault();
+                _status.Text = versions.Length + " official Daniel runtimes found. " +
+                    "Choose a version and select Set Up Selected Daniel.";
             }
             catch (Exception ex) { _status.Text = "Daniel versions unavailable: " + ex.Message; }
             finally { _busy = false; loadDaniel.IsEnabled = true; }
