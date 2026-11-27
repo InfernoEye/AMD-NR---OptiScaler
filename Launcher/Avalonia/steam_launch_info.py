@@ -254,6 +254,7 @@ def resolve_windows_launch(appinfo: dict | None, folder: Path) -> dict:
     result["launch_entries"] = len(launches)
 
     normal = []
+    eligible_optional = []
     all_windows = []
     linux = 0
     root = folder.resolve()
@@ -299,19 +300,33 @@ def resolve_windows_launch(appinfo: dict | None, folder: Path) -> dict:
         target_string = str(target)
         if target_string not in all_windows:
             all_windows.append(target_string)
-        standard = (not entry.get("type") and not entry.get("description")
-                    and not flags.get("betakey") and not flags.get("ownsdlc")
-                    and str(flags.get("realm", "steamglobal")).lower() in
-                    ("steamglobal", ""))
+        # A description or "option1" type does not necessarily mean a
+        # secondary launcher: some developers mark their ONLY launch option
+        # that way. Hard exclusions remain beta, DLC and non-default realms.
+        restricted = (bool(flags.get("betakey")) or bool(flags.get("ownsdlc"))
+                      or str(flags.get("realm", "steamglobal")).lower()
+                      not in ("steamglobal", ""))
+        standard = not restricted and not entry.get("type") and not entry.get("description")
         if standard and target_string not in normal:
             normal.append(target_string)
         elif not standard:
             result["windows_optional"] += 1
+            if not restricted and target_string not in eligible_optional:
+                eligible_optional.append(target_string)
     result["windows_candidates"] = all_windows
     result["linux_launches"] = linux
-    result["reason"] = "steam_primary" if len(normal) == 1 else (
-        "steam_ambiguous" if len(normal) > 1 else
-        "no_installed_windows_launch" if not all_windows else "steam_optional_only")
     if len(normal) == 1:
+        result["reason"] = "steam_primary"
         result["selected"] = normal[0]
+    elif len(normal) > 1:
+        result["reason"] = "steam_ambiguous"
+    elif len(all_windows) == 1 and len(eligible_optional) == 1:
+        # A sole installed Windows candidate is a useful Steam-declared
+        # target even if its only entry has a display name / option type.
+        # This is NOT a reason to choose beta/DLC/workshop-only targets.
+        result["reason"] = "steam_unique_option"
+        result["selected"] = eligible_optional[0]
+    else:
+        result["reason"] = ("no_installed_windows_launch" if not all_windows
+                            else "steam_optional_only")
     return result
