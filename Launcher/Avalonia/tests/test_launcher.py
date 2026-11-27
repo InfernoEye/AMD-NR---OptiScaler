@@ -311,6 +311,40 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(next(x for x in candidates
                              if x["path"] == str(console))["suspicious"])
 
+    def test_strong_executable_match_auto_selects(self):
+        actual = self.game / "Binaries/Win64/Sample-Win64-Shipping.exe"
+        console = self.game / "Binaries/Win64/vconsole.exe"
+        actual.parent.mkdir(parents=True)
+        actual.write_bytes(b"game")
+        console.write_bytes(b"console")
+        candidates = launcher.executable_candidates(self.game)
+        self.assertEqual(candidates[0]["path"], str(actual))
+        self.assertTrue(candidates[0]["auto_select"])
+        self.assertFalse(candidates[1]["auto_select"])
+
+    def test_ambiguous_executables_do_not_auto_select(self):
+        (self.game / "first.exe").write_bytes(b"one")
+        (self.game / "second.exe").write_bytes(b"two")
+        candidates = launcher.executable_candidates(self.game)
+        self.assertFalse(any(c["auto_select"] for c in candidates))
+
+    def test_saved_game_exe_preference_survives_reload(self):
+        chosen = self.game / "second.exe"
+        chosen.write_bytes(b"exe")
+        with patch.dict(launcher.os.environ, {
+            "XDG_CONFIG_HOME": str(self.root / "config"),
+        }):
+            self.assertEqual(launcher.remember_executable(self.game, chosen), str(chosen))
+            self.assertEqual(launcher.saved_executable(self.game), str(chosen))
+            chosen.unlink()
+            self.assertIsNone(launcher.saved_executable(self.game))
+
+    def test_preference_cannot_point_outside_selected_game(self):
+        other = self.root / "outside.exe"
+        other.write_bytes(b"exe")
+        with self.assertRaisesRegex(ValueError, "inside the selected game"):
+            launcher.remember_executable(self.game, other)
+
     def test_executable_candidates_empty_for_unknown_game(self):
         self.assertEqual(launcher.executable_candidates(self.root / "missing"), [])
 
