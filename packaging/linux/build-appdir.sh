@@ -9,6 +9,7 @@ mkdir -p "$OUTPUT/usr/bin" "$OUTPUT/usr/lib/amdnr" \
   "$OUTPUT/usr/share/icons/hicolor/128x128/apps"
 cp -a "$PUBLISH/." "$OUTPUT/usr/lib/amdnr/"
 cp "$ROOT/Launcher/Avalonia/"*.py "$OUTPUT/usr/share/amdnr/"
+cp "$ROOT/Launcher/Avalonia/VERSION" "$OUTPUT/usr/share/amdnr/"
 cp -a "$ROOT/Launcher/Avalonia/model-tools" "$OUTPUT/usr/share/amdnr/"
 cp "$ROOT/packaging/linux/amdnr-linux.desktop" "$OUTPUT/usr/share/applications/"
 python3 "$ROOT/packaging/linux/make_icon.py" \
