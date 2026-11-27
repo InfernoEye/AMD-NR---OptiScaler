@@ -68,6 +68,24 @@ class AppInfoTests(unittest.TestCase):
         (self.game / "editor.exe").write_bytes(b"editor")
         (self.game / "legacy.exe").write_bytes(b"legacy")
 
+    def test_missing_launch_section_is_not_confused_with_missing_exe(self):
+        report = steam.resolve_windows_launch({"appinfo": {
+            "common": {"type": "Game"}, "config": {}
+        }}, self.game)
+        self.assertEqual(report["reason"], "no_launch_config")
+        self.assertTrue(report["metadata_present"])
+        self.assertEqual(report["launch_entries"], 0)
+
+    def test_report_declared_but_uninstalled_windows_exe(self):
+        app = sample_app()
+        (self.game / "game/bin/win64/cs2.exe").unlink()
+        report = steam.resolve_windows_launch(app, self.game)
+        self.assertEqual(report["reason"], "steam_optional_only")
+        self.assertIsNone(report["selected"])
+        self.assertEqual(report["windows_declared"], 3)
+        self.assertEqual(report["windows_missing"], ["game/bin/win64/cs2.exe"])
+        self.assertEqual(report["linux_declared"], ["game/cs2.sh"])
+
     def test_primary_windows_entry_ignores_linux_and_optional_launches(self):
         match = steam.resolve_windows_launch(sample_app(), self.game)
         self.assertEqual(match["reason"], "steam_primary")
