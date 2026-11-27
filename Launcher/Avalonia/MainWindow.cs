@@ -293,6 +293,24 @@ public sealed class MainWindow : Window
             }
         };
         form.Children.Add(browse);
+        form.Children.Add(Text("OPTIONAL WINDOWS EXECUTABLE", 11, AccentBrush, FontWeight.Bold));
+        var exeBox = new TextBox { Watermark = "Select a .exe if known; otherwise leave blank" };
+        form.Children.Add(exeBox);
+        var browseExe = Button("BROWSE EXE");
+        browseExe.Click += async (_, _) =>
+        {
+            var picked = await PickFileAsync("Choose game executable",
+                new FilePickerFileType("Windows executable") { Patterns = new[] { "*.exe" } });
+            if (picked is not null)
+            {
+                exeBox.Text = picked;
+                if (string.IsNullOrWhiteSpace(folderBox.Text))
+                    folderBox.Text = Path.GetDirectoryName(picked);
+                if (string.IsNullOrWhiteSpace(nameBox.Text))
+                    nameBox.Text = Path.GetFileNameWithoutExtension(picked);
+            }
+        };
+        form.Children.Add(browseExe);
         form.Children.Add(Text("The launcher will scan this folder for Windows executables. " +
             "This does not modify the selected game.", 12, MutedBrush));
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
@@ -306,11 +324,29 @@ public sealed class MainWindow : Window
                 _status.Text = "Choose an existing game folder first.";
                 return;
             }
+            var chosenExe = exeBox.Text?.Trim() ?? "";
+            if (chosenExe.Length > 0 && (!File.Exists(chosenExe) ||
+                !chosenExe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+                !Path.GetFullPath(chosenExe).StartsWith(
+                    Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar) +
+                    Path.DirectorySeparatorChar, StringComparison.Ordinal)))
+            {
+                _status.Text = "Choose a Windows .exe inside the selected game folder.";
+                return;
+            }
+            if (_games.Any(g => string.Equals(Path.GetFullPath(g.Folder),
+                Path.GetFullPath(folder), StringComparison.Ordinal)))
+            {
+                _status.Text = "This folder is already in your Library.";
+                return;
+            }
             _busy = true;
             save.IsEnabled = false;
             try
             {
                 await _backend.AddCustomGameAsync(folder, nameBox.Text ?? "");
+                if (chosenExe.Length > 0)
+                    await _backend.RememberExecutableAsync(folder, chosenExe);
                 await ReloadGamesAsync();
                 ShowLibrary();
                 _status.Text = "Custom game saved to your library.";
