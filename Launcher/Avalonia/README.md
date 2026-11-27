@@ -451,3 +451,20 @@ switch cannot silently overwrite a previously managed runtime. Installed
 legacy versions may not be compatible with the newest AMDNR in-game binary.
 Unversioned `Runtime.zip` and `Daniel-*-Manual-*.zip` are not treated as
 dedicated runtime packages, since their version/layout semantics differ.
+
+### Dedicated Daniel Neural Runtimes panel
+
+**Game → Manage Extensions** now shows a separate **Daniel Neural Runtimes**
+panel below the official Mochi/lmxxf/WrongGPU component manager. Daniel has
+its own version picker, upstream release discovery, checked ZIP preview,
+explicit install/backed-up replacement controls, and a dedicated installed
+runtime list with managed removal.
+
+**Daniel 0.8.0 is a NeuralHub host, not a 0.6.0-style pass-DLL runtime.**
+Its official v0.8.0 ZIP does not contain the four required legacy filenames;
+the older installer therefore reported a misleading "Empty component
+archive". The interface now explains that 0.8.0 requires a separate
+NeuralHub-specific installer and does not permit the legacy installation
+path to overwrite game files. Earlier supported pass-DLL versions remain
+available under the Daniel section; compatibility under Proton is not
+guaranteed. The general component selector excludes Daniel packages.
