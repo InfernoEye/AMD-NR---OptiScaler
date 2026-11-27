@@ -19,7 +19,7 @@ ln -sf usr/share/icons/hicolor/128x128/apps/amdnr-linux.png "$OUTPUT/amdnr-linux
 cat > "$OUTPUT/AppRun" <<'SH'
 #!/usr/bin/env sh
 set -eu
-if [ -n "$APPDIR" ]; then BASE="$APPDIR"; else BASE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"; fi
+if [ -n "${APPDIR:-}" ]; then BASE="$APPDIR"; else BASE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"; fi
 export AMDNR_AVALONIA_BACKEND="$BASE/usr/share/amdnr/amdnr_launcher.py"
 exec "$BASE/usr/lib/amdnr/Amdnr.Avalonia" "$@"
 SH
