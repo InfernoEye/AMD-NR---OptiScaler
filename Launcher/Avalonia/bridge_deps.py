@@ -28,9 +28,16 @@ UBUNTU_PACKAGES = (
      "n/numactl"),
 )
 UBUNTU_MIRRORS = (
+    # Historic pinned files can disappear from the canonical archive while
+    # remaining on mirrors. Every archive is verified against the exact
+    # upstream SHA-256, independent of which mirror supplies the bytes.
     "https://security.ubuntu.com/ubuntu/pool/main/",
     "https://archive.ubuntu.com/ubuntu/pool/main/",
     "https://old-releases.ubuntu.com/ubuntu/pool/main/",
+    "https://mirrors.edge.kernel.org/ubuntu/pool/main/",
+    "https://ftp.task.gda.pl/ubuntu/pool/main/",
+    "https://mirror.fem-net.de/ubuntu/pool/main/",
+    "https://distro.ibiblio.org/ubuntu/ubuntu/pool/main/",
 )
 MAX_PACKAGE_SIZE = 8 * 1024 * 1024
 
