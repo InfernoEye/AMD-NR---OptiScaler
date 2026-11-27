@@ -2019,6 +2019,24 @@ def differential_library() -> list[dict[str, object]]:
                       "artwork_checked": True,
                       "executable": old.get("executable")})
         seen.add(folder)
+    # Third-party game installs are reconciled from small Heroic/Lutris metadata
+    # files; no recursive executable scanning occurs during normal refresh.
+    try:
+        from third_party_stores import external_games
+        for external in external_games():
+            folder = external["folder"]
+            if folder in seen:
+                continue
+            old = previous.get(folder, {})
+            games.append({"name": external["name"], "folder": folder,
+                          "custom": True, "store": external["store"],
+                          "artwork": old.get("artwork"),
+                          "artwork_checked": True,
+                          "executable": old.get("executable") or external.get("executable")})
+            seen.add(folder)
+    except (OSError, ValueError):
+        # Game discovery must remain usable when third-party metadata breaks.
+        pass
 
     # Resolve cover art only for newly installed Steam games or missing cached art.
     needs_art = {row["folder"] for row in games if not row["custom"] and
@@ -2609,6 +2627,7 @@ def gui() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="List detected Steam games")
+    parser.add_argument("--other-stores-json", action="store_true", help="Discover Heroic/Lutris installed games")
     parser.add_argument("--releases-json", action="store_true", help="Show upstream AMDNR release packages as JSON")
     parser.add_argument("--doctor-json", action="store_true", help="Read-only launcher and installation diagnostics")
     parser.add_argument("--installation-json", action="store_true", help="Inspect installed files, backups and archive origin")
@@ -2694,6 +2713,13 @@ def main() -> int:
             else:
                 remove_custom_game(args.remove_custom_game)
                 print("Custom game entry removed; game files were not changed")
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.other_stores_json:
+        try:
+            from third_party_stores import external_games
+            print(json.dumps(external_games(), ensure_ascii=False))
         except (OSError, ValueError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
