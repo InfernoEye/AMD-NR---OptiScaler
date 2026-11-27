@@ -127,6 +127,23 @@ class LauncherTests(unittest.TestCase):
             self.assertFalse((self.game / "components" / "LICENSE.txt").exists())
             self.assertEqual(launcher.installed_components(self.exe), [])
 
+    def test_large_file_count_archive_is_inspectable_but_not_installable(self):
+        tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
+        archive = self.root / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            for i in range(520):
+                stream.writestr(f"models/shader_{i:04d}.bin", b"tiny")
+        with patch.object(launcher, "download_release", return_value=archive):
+            preview = launcher.component_preview(self.exe, tag, asset)
+        self.assertEqual(preview["file_count"], 520)
+        self.assertEqual(len(preview["files"]), 50)
+        self.assertTrue(preview["too_many_files"])
+        self.assertTrue(preview["safety_limit_exceeded"])
+        self.assertFalse(preview["installable"])
+        with patch.object(launcher, "download_release", return_value=archive):
+            with self.assertRaisesRegex(ValueError, "inspection only"):
+                launcher.install_component(self.exe, tag, asset)
+
     def test_large_valid_component_archive_can_be_previewed(self):
         # ZIP metadata of a >1 GiB component: avoid allocating a giant test file.
         import unittest.mock
