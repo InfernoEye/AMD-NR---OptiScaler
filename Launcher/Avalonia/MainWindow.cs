@@ -1352,7 +1352,7 @@ public sealed class MainWindow : Window
         var choose = Button("→", true);
         choose.VerticalAlignment = VerticalAlignment.Center;
         choose.Padding = new Thickness(13, 9);
-        choose.ToolTip = null;
+        ToolTip.SetTip(choose, "Open game details / Otwórz szczegóły gry");
         choose.Click += (_, _) => SelectGame(game);
         Grid.SetColumn(choose, 1);
         info.Children.Add(choose);
