@@ -97,6 +97,41 @@ def steam_games() -> list[tuple[str, Path]]:
     return sorted(games, key=lambda g: g[0].casefold())
 
 
+def steam_game_details() -> list[dict[str, str | None]]:
+    """Find locally cached Steam artwork without downloading or guessing game IDs."""
+    details: list[dict[str, str | None]] = []
+    roots = steam_roots()
+    for name, folder in steam_games():
+        appid = None
+        # The authoritative app ID is in a manifest belonging to this library.
+        manifest_dir = folder.parent.parent
+        for manifest in manifest_dir.glob("appmanifest_*.acf"):
+            try:
+                content = manifest.read_text(encoding="utf-8-sig", errors="replace")
+                if vdf_value(content, "installdir") == folder.name:
+                    appid = vdf_value(content, "appid") or manifest.stem.removeprefix("appmanifest_")
+                    break
+            except OSError:
+                continue
+        artwork = None
+        if appid and appid.isdecimal():
+            for root in roots:
+                cache = root / "appcache/librarycache"
+                for art in (
+                    cache / f"{appid}_library_600x900.jpg",
+                    cache / appid / "library_600x900.jpg",
+                    cache / f"{appid}_header.jpg",
+                    cache / appid / "header.jpg",
+                ):
+                    if art.is_file():
+                        artwork = str(art)
+                        break
+                if artwork:
+                    break
+        details.append({"name": name, "folder": str(folder), "artwork": artwork})
+    return details
+
+
 def guess_executable(directory: Path) -> Path | None:
     options: list[Path] = []
     try:
@@ -362,6 +397,7 @@ def gui() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="List detected Steam games")
+    parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
     parser.add_argument("--install", type=Path, metavar="ZIP", help="Install an AMDNR release ZIP")
     parser.add_argument("--uninstall", action="store_true", help="Uninstall and restore backups")
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
@@ -383,6 +419,8 @@ def main() -> int:
         except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
+    elif args.list_json:
+        print(json.dumps(steam_game_details(), ensure_ascii=False))
     elif args.list:
         for name, folder in steam_games():
             print(f"{name}\t{folder}")
