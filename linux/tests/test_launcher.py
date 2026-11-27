@@ -149,6 +149,25 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "JPEG and PNG"):
             launcher.set_artwork(self.game, bad)
 
+    def test_artwork_from_secondary_steam_library_cache(self):
+        secondary = self.root / "SecondLibrary"
+        cache = secondary / "appcache/librarycache"
+        cache.mkdir(parents=True)
+        cover = cache / "234_library_600x900.jpg"
+        cover.write_bytes(b"\xff\xd8\xff" + b"x" * 100)
+        with patch.object(launcher, "steam_libraries", return_value=[secondary]):
+            self.assertEqual(launcher._cached_artwork("234", []), cover)
+
+    def test_missing_artwork_report(self):
+        with patch.object(launcher, "steam_game_details", return_value=[
+            {"name": "Has Art", "folder": "/example/a", "artwork": "/example/pic.jpg"},
+            {"name": "No Art", "folder": "/example/b", "artwork": None},
+        ]):
+            report = launcher.artwork_diagnostics()
+        self.assertEqual(report["total"], 2)
+        self.assertEqual(report["with_artwork"], 1)
+        self.assertEqual(report["missing"][0]["name"], "No Art")
+
     def test_missing_game_executable_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Windows"):
             launcher.install(self.archive, self.game / "missing.exe", "dxgi.dll")
