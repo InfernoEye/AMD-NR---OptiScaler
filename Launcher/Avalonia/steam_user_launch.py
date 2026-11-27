@@ -151,3 +151,113 @@ def preview_launch_options(existing: str | None, alias: str) -> dict[str, object
     if "%command%" in raw:
         return {"status": "added", "preview": override + " " + raw}
     return {"status": "added", "preview": override + " %command% " + raw}
+
+
+# Bridge launch composition is separate from the legacy Windows proxy merger.
+# Keep unrelated Steam options byte-for-byte, and only remove DLL overrides
+# attributable to this launcher's archived installation records.
+_OLD_OVERRIDE_ALIASES = frozenset({
+    "dxgi", "version", "winmm", "winhttp", "wininet", "dbghelp", "d3d12",
+})
+_BRIDGE_CONFLICTS = (
+    "PROTON_USE_WINED3D=", "PROTON_NO_D3D12=", "PROTON_DISABLE_D3D12=",
+)
+
+
+def preview_bridge_launch(existing: str | None, wrapper: str,
+                          managed_aliases: tuple[str, ...] = ()) -> dict[str, object]:
+    """Build a Steam copy-only bridge preview and an explicit cleanup summary.
+
+    No shell evaluation; ambiguous syntax is never rewritten. The saved Steam
+    text is never changed by this function.
+    """
+    import shlex
+    if existing is None:
+        return {"compose_status": "unavailable", "preview": None,
+                "removed": [], "kept": [], "review": [
+                    "Steam launch options could not be read; paste the current text for review."]}
+    current = existing.strip()
+    if not wrapper.startswith("/") or any(ch in wrapper for ch in "\x00\r\n"):
+        raise ValueError("Bridge wrapper path must be an absolute regular path.")
+    quoted_wrapper = shlex.quote(wrapper)
+    # Steam's command processor is shell-like. Prefer a double quoted path
+    # because the upstream preview already uses it and paths can contain spaces.
+    quoted_wrapper = '"' + wrapper.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    removed: list[str] = []
+    kept: list[str] = []
+    review: list[str] = []
+    old_aliases = {name.casefold().removesuffix(".dll") for name in managed_aliases}
+    old_aliases &= _OLD_OVERRIDE_ALIASES
+
+    if any(ch in current for ch in "\x00\r\n"):
+        return {"compose_status": "needs_review", "preview": None, "removed": [],
+                "kept": [], "review": ["Multiline launch options need manual review."]}
+
+    if "%command%" not in current:
+        if current and any(ch in current for ch in "$" + chr(96) + "|;&<>"):
+            return {"compose_status": "needs_review", "preview": None,
+                    "removed": [], "kept": [], "review": [
+                        "Complex launch options without %command%; cannot insert bridge safely."]}
+        # Plain game arguments can follow the placeholder, but an existing
+        # executable/wrapper without %command% is ambiguous.
+        if current and (current.startswith("/") or current.startswith("./")):
+            return {"compose_status": "needs_review", "preview": None,
+                    "removed": [], "kept": [], "review": [
+                        "Existing executable/wrapper lacks %command%; review manually."]}
+        current = "%command% " + current if current else "%command%"
+        kept.append("Existing game arguments" if existing.strip() else "Steam's %command% placeholder")
+
+    if current.count("%command%") != 1:
+        return {"compose_status": "needs_review", "preview": None,
+                "removed": [], "kept": [], "review": [
+                    "Multiple %command% placeholders; review manually."]}
+    if any(token in current for token in ("&&", "||", "; ", "| ", "$(", chr(96), "\n")):
+        return {"compose_status": "needs_review", "preview": None,
+                "removed": [], "kept": [], "review": [
+                    "Shell chaining or substitution makes automatic merging ambiguous."]}
+    if "amdnr-linux/run.sh" in current or "AMDNR-Linux" in current:
+        return {"compose_status": "needs_review", "preview": None,
+                "removed": [], "kept": [], "review": [
+                    "An older bridge wrapper is already in Steam options; remove it before replacing."]}
+
+    matches = list(_ASSIGN.finditer(current))
+    if len(matches) > 1 or ("WINEDLLOVERRIDES=" in current and not matches):
+        return {"compose_status": "needs_review", "preview": None,
+                "removed": [], "kept": [], "review": [
+                    "Several or unusual WINEDLLOVERRIDES entries need manual review."]}
+    if matches:
+        item = matches[0]
+        old = next((value for value in item.groups() if value is not None), "")
+        # Preserve override groups and modes for DLLs we have not tracked.
+        remaining = []
+        for pair in old.split(";"):
+            if not pair or "=" not in pair:
+                return {"compose_status": "needs_review", "preview": None,
+                        "removed": [], "kept": [], "review": ["Invalid DLL override syntax."]}
+            aliases, mode = pair.split("=", 1)
+            if (not re.fullmatch(r"[a-zA-Z0-9_,.]+", aliases) or
+                    not re.fullmatch(r"[a-zA-Z0-9,]+", mode)):
+                return {"compose_status": "needs_review", "preview": None,
+                        "removed": [], "kept": [], "review": ["Complex DLL override syntax."]}
+            names = aliases.split(",")
+            old_names = [name for name in names if name.casefold() in old_aliases]
+            for name in old_names:
+                removed.append("Old managed DLL override: " + name + "=" + mode)
+            remaining_names = [name for name in names if name.casefold() not in old_aliases]
+            if remaining_names:
+                remaining.append(",".join(remaining_names) + "=" + mode)
+                kept.append("Other DLL override: " + ",".join(remaining_names) + "=" + mode)
+                if any(name.casefold() in _OLD_OVERRIDE_ALIASES for name in remaining_names):
+                    review.append("An untracked DLL override remains; verify it is needed with the bridge.")
+        replacement = ('WINEDLLOVERRIDES="' + ";".join(remaining) + '"') if remaining else ""
+        current = (current[:item.start()] + replacement + current[item.end():]).strip()
+        current = re.sub(r" {2,}", " ", current)
+    for variable in _BRIDGE_CONFLICTS:
+        if variable in current:
+            review.append(variable[:-1] + " may disable the required D3D12 path; review in Steam.")
+    if not removed:
+        kept.append("Existing Steam launch arguments and environment settings")
+    proposal = current.replace("%command%", quoted_wrapper + " %command%", 1)
+    return {"compose_status": "review" if review else "ready",
+            "preview": proposal, "removed": removed, "kept": kept,
+            "review": review}
