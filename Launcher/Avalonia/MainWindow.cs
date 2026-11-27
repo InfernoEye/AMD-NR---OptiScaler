@@ -500,6 +500,42 @@ public sealed class MainWindow : Window
             "record beside the selected executable. Existing installations made by other tools " +
             "may not be detected.", 12, MutedBrush));
         _content.Children.Add(Panel(detail));
+
+        if (HasInstallRecord())
+        {
+            var recordPanel = new StackPanel { Spacing = 9 };
+            recordPanel.Children.Add(Text("RECORDED INSTALLATION", 12, AccentBrush, FontWeight.Bold));
+            try
+            {
+                var stateFile = Path.Combine(Path.GetDirectoryName(_exe!)!,
+                    ".amdnr-linux-install.json");
+                using var record = JsonDocument.Parse(File.ReadAllText(stateFile));
+                var state = record.RootElement;
+                if (state.TryGetProperty("alias", out var alias))
+                    recordPanel.Children.Add(Text("Proxy DLL: " + alias.GetString(), 14));
+                if (state.TryGetProperty("files", out var files) &&
+                    files.ValueKind == JsonValueKind.Array)
+                {
+                    recordPanel.Children.Add(Text($"Tracked files: {files.GetArrayLength()}", 14));
+                    foreach (var file in files.EnumerateArray().Take(8))
+                    {
+                        if (file.TryGetProperty("path", out var name))
+                            recordPanel.Children.Add(Text("•  " + name.GetString(), 12, MutedBrush));
+                    }
+                    if (files.GetArrayLength() > 8)
+                        recordPanel.Children.Add(Text("Further files available in Doctor diagnostics.", 12, MutedBrush));
+                }
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+            {
+                recordPanel.Children.Add(Text("Could not read installation record: " + ex.Message,
+                    12, MutedBrush));
+            }
+            var runDoctor = Button("CHECK FILE INTEGRITY");
+            runDoctor.Click += (_, _) => ShowDoctor();
+            recordPanel.Children.Add(runDoctor);
+            _content.Children.Add(Panel(recordPanel));
+        }
     }
 
     private void ShowInstall()
