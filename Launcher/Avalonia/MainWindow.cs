@@ -2802,9 +2802,18 @@ public sealed class MainWindow : Window
         // and approves downloads before the upstream prepare script is executed.
         var preparation = new StackPanel { Spacing = 10 };
         preparation.Children.Add(Text("2   PREPARE DEPENDENCIES", 13, AccentBrush, FontWeight.Bold));
-        preparation.Children.Add(Text("AMDNR 0.3.5.8.28 · native lmxxf 0.4.6.2 · no Daniel/NeuralHub. " +
-            "Prepares a separate versioned package; existing 0.3.5.6 cache is preserved.",
+        preparation.Children.Add(Text("AMDNR 0.3.5.8.28 · select native lmxxf or Daniel up to 0.6.0. " +
+            "NeuralHub / Daniel 0.8 is excluded. Each runtime has a separate prepared package.",
             13, ForegroundBrush));
+        var runtimeChoices = new ComboBox
+        {
+            ItemsSource = new[] { "lmxxf", "0.6.0", "0.5.1", "0.5.0", "0.4.3", "0.4.1", "0.4.0" },
+            SelectedIndex = 0,
+            MinWidth = 250,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        preparation.Children.Add(runtimeChoices);
+        string SelectedBridgeRuntime() => runtimeChoices.SelectedItem as string ?? "lmxxf";
         preparation.Children.Add(Text(
             "Compiler candidates are searched automatically in this Steam library. " +
             "A matching x64 PE header is not proof of Microsoft origin: review the chosen " +
@@ -2940,7 +2949,7 @@ public sealed class MainWindow : Window
             try
             {
                 var (exit, raw) = await _backend.RunAsync(
-                    new[] { "--bridge-status-json", "--exe", selection });
+                    new[] { "--bridge-status-json", "--bridge-runtime", SelectedBridgeRuntime(), "--exe", selection });
                 if (exit != 0) throw new InvalidOperationException(raw);
                 using var result = JsonDocument.Parse(raw);
                 var state = result.RootElement;
@@ -2951,8 +2960,9 @@ public sealed class MainWindow : Window
                     .Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToArray();
                 blocked = conflicts.Length > 0;
                 var hostVersion = state.GetProperty("host_version").GetString() ?? "?";
+                var runtimeName = state.GetProperty("selected_runtime").GetString() ?? "lmxxf";
                 packageState.Text = $"Verified release archive: {(archiveVerified ? "ready" : "not downloaded")} · " +
-                    $"AMDNR {hostVersion} prepared: {(ready ? "ready" : "not prepared")} · " +
+                    $"AMDNR {hostVersion} / {runtimeName} prepared: {(ready ? "ready" : "not prepared")} · " +
                     $"Community wrapper: {(communityInstalled ? "installed" : "not installed")}";
                 problems.Text = blocked
                     ? "INSTALL BLOCKED — EXISTING FILES MUST BE REVIEWED:\n" +
@@ -3034,6 +3044,10 @@ public sealed class MainWindow : Window
             finally { scan.IsEnabled = !_busy; }
         }
 
+        runtimeChoices.SelectionChanged += async (_, _) =>
+        {
+            if (_backend is not null) await CheckStatusAsync();
+        };
         scan.Click += async (_, _) =>
         {
             await CheckHostAsync();
@@ -3061,7 +3075,7 @@ public sealed class MainWindow : Window
             try
             {
                 var (exit, output) = await _backend.RunAsync(
-                    new[] { "--bridge-prepare", compiler });
+                    new[] { "--bridge-prepare", compiler, "--bridge-runtime", SelectedBridgeRuntime() });
                 if (exit != 0) throw new InvalidOperationException(output);
                 prepareState.Text = "Bridge prepared and checked. Review the installation conflicts below.";
                 await CheckStatusAsync();
@@ -3085,7 +3099,7 @@ public sealed class MainWindow : Window
                 if (blocked || !ready || communityInstalled)
                     throw new InvalidOperationException("Game files changed or installation is not ready.");
                 var (exit, output) = await _backend.RunAsync(
-                    new[] { "--bridge-install", "--approve-bridge-install", "--exe", selection });
+                    new[] { "--bridge-install", "--approve-bridge-install", "--bridge-runtime", SelectedBridgeRuntime(), "--exe", selection });
                 if (exit != 0) throw new InvalidOperationException(output);
                 using var result = JsonDocument.Parse(output);
                 launchOptionText = result.RootElement.GetProperty("launch_option_preview").GetString() ?? "";
