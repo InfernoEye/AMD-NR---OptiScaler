@@ -1882,6 +1882,169 @@ public sealed class MainWindow : Window
         }
         var body = new StackPanel { Spacing = 12 };
         _content.Children.Add(Panel(body));
+        // Official release components are independent from local ASI plugins.
+        var official = new StackPanel { Spacing = 11 };
+        official.Children.Add(Text("OFFICIAL AMDNR COMPONENTS", 12, AccentBrush, FontWeight.Bold));
+        official.Children.Add(Text(
+            "Download from 3zwr1/AMD-NR---OptiScaler. ZIPs are SHA-256 verified. " +
+            "Preview files before installing; existing files are never overwritten.",
+            12, MutedBrush));
+        var componentPicker = new ComboBox
+        {
+            PlaceholderText = "Load official AMDNR components",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        official.Children.Add(componentPicker);
+        var componentActions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+        var loadComponents = Button("LOAD OFFICIAL COMPONENTS");
+        var previewComponent = Button("DOWNLOAD & PREVIEW");
+        var installComponent = Button("INSTALL PREVIEWED COMPONENT", true);
+        previewComponent.IsEnabled = false;
+        installComponent.IsEnabled = false;
+        componentActions.Children.Add(loadComponents);
+        componentActions.Children.Add(previewComponent);
+        componentActions.Children.Add(installComponent);
+        official.Children.Add(componentActions);
+        var previewDetails = new StackPanel { Spacing = 6 };
+        official.Children.Add(previewDetails);
+        var managedComponents = new StackPanel { Spacing = 9 };
+        official.Children.Add(Text("INSTALLED RELEASE COMPONENTS", 12, AccentBrush, FontWeight.Bold));
+        official.Children.Add(managedComponents);
+        _content.Children.Add(Panel(official));
+
+        async Task ReloadManagedComponents()
+        {
+            if (_backend is null) return;
+            managedComponents.Children.Clear();
+            try
+            {
+                var installed = await _backend.InstalledComponentsAsync(selected);
+                if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                if (installed.Count == 0)
+                    managedComponents.Children.Add(Text("No launcher-managed release components.",
+                        12, MutedBrush));
+                foreach (var component in installed)
+                {
+                    var item = component;
+                    var entry = new StackPanel { Spacing = 6 };
+                    entry.Children.Add(Text(item.Asset + " · " + item.FileCount +
+                        " files · " + item.Tag, 13, ForegroundBrush, FontWeight.SemiBold));
+                    if (item.Modified.Count > 0)
+                    {
+                        entry.Children.Add(Text("Modified/missing files: " +
+                            string.Join(", ", item.Modified.Take(5)) +
+                            " — removal blocked", 12, MutedBrush));
+                    }
+                    else
+                    {
+                        var remove = Button("REMOVE COMPONENT");
+                        remove.Click += async (_, _) =>
+                        {
+                            if (_busy || _backend is null) return;
+                            _busy = true;
+                            remove.IsEnabled = false;
+                            try
+                            {
+                                await _backend.RemoveComponentAsync(selected, item.Asset);
+                                _status.Text = "Removed component: " + item.Asset;
+                            }
+                            catch (Exception ex) { _status.Text = "Removal refused: " + ex.Message; }
+                            finally { _busy = false; await ReloadManagedComponents(); }
+                        };
+                        entry.Children.Add(remove);
+                    }
+                    managedComponents.Children.Add(Panel(entry, new Thickness(10)));
+                }
+            }
+            catch (Exception ex)
+            {
+                managedComponents.Children.Add(Text(
+                    "Component inventory unavailable: " + ex.Message, 12, MutedBrush));
+            }
+        }
+
+        string? previewedTag = null;
+        string? previewedAsset = null;
+        componentPicker.SelectionChanged += (_, _) =>
+        {
+            previewedTag = null;
+            previewedAsset = null;
+            installComponent.IsEnabled = false;
+            previewDetails.Children.Clear();
+            previewComponent.IsEnabled = componentPicker.SelectedItem is ReleaseEntry;
+        };
+        loadComponents.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null) return;
+            _busy = true;
+            loadComponents.IsEnabled = false;
+            try
+            {
+                var entries = await _backend.ComponentsAsync();
+                var visible = (_launcherSettings?.ShowPrereleases == true
+                    ? entries : entries.Where(x => !x.Prerelease)).ToArray();
+                if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                componentPicker.ItemsSource = visible;
+                componentPicker.SelectedIndex = visible.Length > 0 ? 0 : -1;
+                _status.Text = visible.Length + " official AMDNR component packages found.";
+            }
+            catch (Exception ex) { _status.Text = "Component lookup failed: " + ex.Message; }
+            finally { _busy = false; loadComponents.IsEnabled = true; }
+        };
+        previewComponent.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null || componentPicker.SelectedItem is not ReleaseEntry chosen)
+                return;
+            _busy = true;
+            previewComponent.IsEnabled = false;
+            installComponent.IsEnabled = false;
+            previewedTag = null;
+            previewedAsset = null;
+            previewDetails.Children.Clear();
+            _status.Text = "Downloading and verifying official component…";
+            try
+            {
+                var result = await _backend.PreviewComponentAsync(selected, chosen.Tag, chosen.Asset);
+                if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                previewDetails.Children.Add(Text(result.Files.Count + " archive files: " +
+                    string.Join(", ", result.Files.Take(12)) +
+                    (result.Files.Count > 12 ? "…" : ""), 12, MutedBrush));
+                if (result.Conflicts.Count > 0)
+                    previewDetails.Children.Add(Text("Existing files block installation: " +
+                        string.Join(", ", result.Conflicts.Take(8)), 12, MutedBrush));
+                else
+                {
+                    previewedTag = chosen.Tag;
+                    previewedAsset = chosen.Asset;
+                    installComponent.IsEnabled = true;
+                }
+                _status.Text = result.Installable
+                    ? "Component verified. Review the file list and select Install."
+                    : "Component install blocked by existing files.";
+            }
+            catch (Exception ex) { _status.Text = "Component preview failed: " + ex.Message; }
+            finally { _busy = false; previewComponent.IsEnabled = true; }
+        };
+        installComponent.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null || componentPicker.SelectedItem is not ReleaseEntry chosen ||
+                previewedTag != chosen.Tag || previewedAsset != chosen.Asset)
+                return;
+            _busy = true;
+            installComponent.IsEnabled = false;
+            try
+            {
+                await _backend.InstallComponentAsync(selected, chosen.Tag, chosen.Asset);
+                _status.Text = "Installed verified AMDNR component: " + chosen.Asset;
+                previewedTag = null;
+                previewedAsset = null;
+                previewDetails.Children.Clear();
+            }
+            catch (Exception ex) { _status.Text = "Component installation refused: " + ex.Message; }
+            finally { _busy = false; await ReloadManagedComponents(); }
+        };
+        await ReloadManagedComponents();
+
         async Task Reload()
         {
             if (_backend is null) return;
