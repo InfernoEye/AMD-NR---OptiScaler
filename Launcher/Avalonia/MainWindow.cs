@@ -73,8 +73,8 @@ public sealed class MainWindow : Window
         Title = "AMDNR Launcher";
         Width = 1120;
         Height = 750;
-        MinWidth = 900;
-        MinHeight = 480;
+        MinWidth = 720;
+        MinHeight = 450;
         // Never change window bounds in response to content changes.
         SizeToContent = SizeToContent.Manual;
         Background = BackgroundBrush;
@@ -82,6 +82,44 @@ public sealed class MainWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         var app = new Grid { ColumnDefinitions = new ColumnDefinitions("232,*") };
+        // Steam Deck compact mode: keep navigation available at 800 px
+        // logical width and let long sections wrap/scroll.
+        SizeChanged += (_, e) =>
+        {
+            app.ColumnDefinitions[0].Width = new GridLength(
+                e.NewSize.Width < 980 ? 178 : 232);
+        };
+        KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.F5)
+            {
+                _ = RefreshGamesAsync();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                ShowLibrary();
+                e.Handled = true;
+            }
+            else if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+            {
+                Action? page = e.Key switch
+                {
+                    Key.D1 => ShowLibrary,
+                    Key.D2 => ShowInstalledGames,
+                    Key.D3 => ShowInstall,
+                    Key.D4 => ShowDoctor,
+                    Key.D5 => ShowCompatibility,
+                    Key.D6 => ShowSettings,
+                    _ => null
+                };
+                if (page is not null)
+                {
+                    page();
+                    e.Handled = true;
+                }
+            }
+        };
         app.Children.Add(BuildSidebar());
         // Status lives in the header; the content viewport must never sit behind a footer.
         var main = new Grid { RowDefinitions = new RowDefinitions("90,*") };
