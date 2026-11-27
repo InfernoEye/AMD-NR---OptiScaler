@@ -458,6 +458,44 @@ public sealed class MainWindow : Window
             }
         };
         detail.Children.Add(selectExe);
+        var candidatesLabel = Text("Multiple game executables may be present. " +
+            "Select the actual Windows game executable before installing.", 12, MutedBrush);
+        detail.Children.Add(candidatesLabel);
+        var candidatesPanel = new StackPanel { Spacing = 8 };
+        var scanButton = Button("FIND GAME EXECUTABLES");
+        scanButton.Click += async (_, _) =>
+        {
+            if (_backend is null || _busy) return;
+            _busy = true;
+            scanButton.IsEnabled = false;
+            _status.Text = "Finding Windows executables inside selected game…";
+            try
+            {
+                var files = await _backend.ExecutablesAsync(game.Folder);
+                candidatesPanel.Children.Clear();
+                if (files.Count == 0)
+                    candidatesPanel.Children.Add(Text("No Windows EXE found. Browse manually.", 13, MutedBrush));
+                foreach (var candidate in files)
+                {
+                    var path = candidate.Path;
+                    var name = System.IO.Path.GetRelativePath(game.Folder, path);
+                    var item = Button((candidate.Recommended ? "★  " :
+                        candidate.Suspicious ? "⚠  " : "") + name);
+                    item.Click += (_, _) =>
+                    {
+                        _exe = path;
+                        ShowGameDetails();
+                        _status.Text = "Selected executable: " + name;
+                    };
+                    candidatesPanel.Children.Add(item);
+                }
+                _status.Text = $"Found {files.Count} executable candidates. Choose the correct game EXE.";
+            }
+            catch (Exception ex) { _status.Text = "Executable scan failed: " + ex.Message; }
+            finally { _busy = false; scanButton.IsEnabled = true; }
+        };
+        detail.Children.Add(scanButton);
+        detail.Children.Add(candidatesPanel);
         detail.Children.Add(Text("Install status is based on the Linux launcher's installation " +
             "record beside the selected executable. Existing installations made by other tools " +
             "may not be detected.", 12, MutedBrush));
@@ -692,19 +730,22 @@ public sealed class MainWindow : Window
         _content.Children.Add(Text("Environment and installation checks for Steam/Proton.",
             14, MutedBrush));
         var checks = new StackPanel { Spacing = 14 };
-        var lines = new List<(string, bool)>
+        var lines = new List<(string Name, bool Okay, bool Pending)>
         {
-            ("Linux desktop", OperatingSystem.IsLinux()),
-            ("Python 3 backend", _backend is not null),
-            ("Steam library discovered", _games.Count > 0),
-            ("Selected game executable", _exe is not null && File.Exists(_exe)),
-            ("Selected release archive", _archive is not null && File.Exists(_archive)),
+            ("Linux desktop", OperatingSystem.IsLinux(), false),
+            ("Python 3 backend", _backend is not null, false),
+            ("Steam library discovered", _games.Count > 0, false),
+            ("Selected game executable", _exe is not null && File.Exists(_exe),
+                string.IsNullOrWhiteSpace(_exe)),
+            ("Selected release archive", _archive is not null && File.Exists(_archive),
+                string.IsNullOrWhiteSpace(_archive)),
         };
-        foreach (var (name, okay) in lines)
+        foreach (var (name, okay, pending) in lines)
         {
             var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 12 };
-            row.Children.Add(Text(okay ? "✓" : "!", 18, okay ? AccentBrush : MutedBrush));
-            var info = Text(name, 15);
+            row.Children.Add(Text(okay ? "✓" : pending ? "○" : "!", 18,
+                okay ? AccentBrush : MutedBrush));
+            var info = Text(name + (pending ? "  ·  Not selected" : ""), 15);
             Grid.SetColumn(info, 1);
             row.Children.Add(info);
             checks.Children.Add(row);
@@ -741,9 +782,13 @@ public sealed class MainWindow : Window
                     var name = check.GetProperty("name").GetString() ?? "Check";
                     var detail = check.GetProperty("detail").GetString() ?? "";
                     var okay = check.GetProperty("ok").GetBoolean();
+                    var pending = check.TryGetProperty("status", out var state)
+                        && state.GetString() == "not_selected";
                     var line = new StackPanel { Spacing = 3 };
-                    line.Children.Add(Text((okay ? "✓  " : "•  ") + name, 15,
-                        okay ? AccentBrush : ForegroundBrush, FontWeight.SemiBold));
+                    line.Children.Add(Text((okay ? "✓  " : pending ? "○  " : "!  ") +
+                        name + (pending ? " · Not selected" : ""), 15,
+                        okay ? AccentBrush : pending ? MutedBrush : ForegroundBrush,
+                        FontWeight.SemiBold));
                     line.Children.Add(Text(detail, 12, MutedBrush));
                     results.Children.Add(line);
                 }
