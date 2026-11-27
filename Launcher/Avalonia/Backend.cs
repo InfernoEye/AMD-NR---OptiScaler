@@ -178,9 +178,16 @@ public sealed class Backend
         var steamReason = steam.ValueKind == JsonValueKind.Object &&
             steam.TryGetProperty("reason", out var cause) &&
             cause.ValueKind == JsonValueKind.String ? cause.GetString() : null;
+        var missingWindows = steam.ValueKind == JsonValueKind.Object &&
+            steam.TryGetProperty("windows_missing", out var missing) &&
+            missing.ValueKind == JsonValueKind.Array
+            ? missing.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String)
+                .Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToArray()
+            : Array.Empty<string>();
         return new ExecutableScan(results, native,
             root.GetProperty("reason").GetString() ?? "unknown",
-            root.GetProperty("partial").GetBoolean(), preferred, steamReason);
+            root.GetProperty("partial").GetBoolean(), preferred, steamReason,
+            missingWindows);
     }
 
     public async Task<IReadOnlyList<ExecutableEntry>> ExecutablesAsync(
@@ -216,7 +223,8 @@ public sealed record InstallationReport(bool Installed, string Status, string? A
 
 public sealed record ExecutableScan(IReadOnlyList<ExecutableEntry> Candidates,
     IReadOnlyList<string> NativeFiles, string Reason, bool Partial,
-    string? SteamPreferred, string? SteamReason);
+    string? SteamPreferred, string? SteamReason,
+    IReadOnlyList<string> SteamMissingWindows);
 
 public sealed record ExecutableEntry(string Path, bool Recommended, bool Suspicious, bool AutoSelect)
 {
