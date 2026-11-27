@@ -598,6 +598,14 @@ MAX_COMPONENT_FILES = 10000
 
 
 def _component_entries(archive: Path, *, inspect_only: bool = False) -> list:
+    if _daniel_version(archive.name) == "0.8.0":
+        # 0.8 uses the NeuralHub host and AMDNR-NeuralHub-080 setup/data
+        # rather than Daniel 0.6's three pass DLLs. Never flatten its ZIP
+        # into the game root or interpret it as an empty/corrupt archive.
+        raise ValueError(
+            "Daniel 0.8.0 uses NeuralHub, not the legacy pass-DLL layout. "
+            "Its host, settings, and data-index preparation require a separate "
+            "installer; this version is listed but installation is not supported yet.")
     with zipfile.ZipFile(archive) as source:
         entries, seen, size = [], set(), 0
         for entry in source.infolist():
