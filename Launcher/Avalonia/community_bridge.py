@@ -34,7 +34,7 @@ ARCHIVE = f"AMDNR-Linux-v{VERSION}.tar.gz"
 URL = f"https://github.com/hassanm0301/AMDNR-Linux/releases/download/linux-v{VERSION}/{ARCHIVE}"
 SHA256 = SUPPORTED_RELEASES[VERSION]
 RELEASES_API = "https://api.github.com/repos/hassanm0301/AMDNR-Linux/releases?per_page=30"
-RELEASE_TAG = re.compile(r"^linux-v(\\d+)\\.(\\d+)\\.(\\d+)$")
+RELEASE_TAG = re.compile(r"^linux-v(\d+)\.(\d+)\.(\d+)$")
 PROJECT = "https://github.com/hassanm0301/AMDNR-Linux"
 SOURCE_ROOT = f"AMDNR-Linux-v{VERSION}"
 MAX_ARCHIVE_BYTES = 90 * 1024 * 1024
