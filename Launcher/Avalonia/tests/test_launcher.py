@@ -28,6 +28,25 @@ class LauncherTests(unittest.TestCase):
             archive.writestr("release/OptiScaler.ini", b"configuration")
             archive.writestr("release/setup_windows.bat", b"not installed")
 
+    def test_existing_full_audit_exe_is_imported_without_binary_scan(self):
+        state = self.root / "state"
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}):
+            launcher._save_library_audit([
+                {"name": "Game", "folder": str(self.game), "custom": False,
+                 "status": "windows_ready", "executable": str(self.exe)}
+            ])
+            with patch.object(launcher, "steam_games", return_value=[
+                 ("Game", self.game)
+            ]), patch.object(launcher, "custom_games", return_value=[]), \
+                 patch.object(launcher, "steam_game_details", return_value=[
+                     {"name": "Game", "folder": str(self.game), "artwork": None}
+                 ]), patch.object(launcher, "executable_scan",
+                                  side_effect=AssertionError("unexpected binary scan")):
+                index = launcher.differential_library()
+                self.assertEqual(index[0]["executable"], str(self.exe))
+                self.assertEqual(launcher._read_library_index()[str(self.game)]
+                                 ["executable"], str(self.exe))
+
     def test_differential_library_remembers_missing_artwork(self):
         # A game without a Steam cover must not trigger artwork discovery at
         # every refresh after the first unsuccessful lookup.
