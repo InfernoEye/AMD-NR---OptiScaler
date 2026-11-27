@@ -185,9 +185,34 @@ def fetch_verified() -> Path:
     return archive
 
 
+def preparer_python() -> str:
+    """Find an existing Python 3.12+ with zstd support, without installing packages."""
+    candidates = [sys.executable, shutil.which("python3.14"), shutil.which("python3.13"),
+                  shutil.which("python3.12"), "/usr/bin/python3", shutil.which("python3")]
+    checked = set()
+    for candidate in candidates:
+        if not candidate or candidate in checked or not Path(candidate).is_file():
+            continue
+        checked.add(candidate)
+        try:
+            test = subprocess.run(
+                [str(candidate), "-c",
+                 "import sys; assert sys.version_info >= (3,12); "
+                 "import importlib.util; "
+                 "assert sys.version_info >= (3,14) or importlib.util.find_spec('zstandard') is not None"],
+                capture_output=True, timeout=7, check=False)
+            if test.returncode == 0:
+                return str(candidate)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    raise ValueError(
+        "Community preparation needs Python 3.12+ with the 'zstandard' module "
+        "(or Python 3.14+ with built-in compression.zstd). Install that module "
+        "for your system Python and retry; no system packages are installed automatically.")
+
+
 def prepare(compiler: Path) -> dict:
-    if sys.version_info < (3, 12):
-        raise ValueError("Community bridge preparation requires Python 3.12 or newer.")
+    interpreter = preparer_python()
     if not compiler.is_file() or compiler.is_symlink() or compiler.name.lower() != "d3dcompiler_47.dll":
         raise ValueError("Choose your own native x64 Microsoft d3dcompiler_47.dll.")
     if prepared_path().exists():
@@ -201,7 +226,7 @@ def prepare(compiler: Path) -> dict:
     manifest = json.loads((src / "RELEASE-MANIFEST.json").read_text())
     if manifest.get("release") != "linux-v" + VERSION:
         raise ValueError("Community release manifest identifies a different release.")
-    command = [sys.executable, str(src / "linux/setup.py"), "prepare",
+    command = [interpreter, str(src / "linux/setup.py"), "prepare",
                "--compiler", str(compiler.resolve()),
                "--output", str(prepared_path()),
                "--cache", str(cache_dir() / "upstream-cache")]
