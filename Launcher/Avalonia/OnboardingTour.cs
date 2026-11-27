@@ -20,6 +20,7 @@ internal sealed class OnboardingTour
     private readonly Popup _popup;
     private readonly Func<int, Control> _resolve;
     private readonly Action _finished;
+    private readonly Func<bool> _horizontalNavigation;
     private readonly string _seenFile;
     private TemplatedControl? _outlined;
     private IBrush? _previousBrush;
@@ -47,10 +48,12 @@ internal sealed class OnboardingTour
             "Pomoc", "Strona Pomoc wyjaśnia Protona, ograniczenia i diagnostykę. Możesz tutaj powtórzyć prezentację."),
     };
 
-    public OnboardingTour(Grid shell, Func<int, Control> resolve, Action finished, string seenFile)
+    public OnboardingTour(Grid shell, Func<int, Control> resolve, Action finished,
+        Func<bool> horizontalNavigation, string seenFile)
     {
         _resolve = resolve;
         _finished = finished;
+        _horizontalNavigation = horizontalNavigation;
         _seenFile = seenFile;
         _popup = new Popup
         {
@@ -173,7 +176,8 @@ internal sealed class OnboardingTour
             Padding = new Thickness(18),
         };
         _popup.PlacementTarget = target;
-        _popup.Placement = _index is 1 or 2 ? PlacementMode.Bottom : PlacementMode.Right;
+        _popup.Placement = _index is 1 or 2 || _horizontalNavigation()
+            ? PlacementMode.Bottom : PlacementMode.Right;
         Dispatcher.UIThread.Post(() => { if (IsActive) _popup.IsOpen = true; });
     }
 }
