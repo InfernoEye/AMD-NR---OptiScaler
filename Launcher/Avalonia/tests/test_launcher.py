@@ -264,7 +264,7 @@ class LauncherTests(unittest.TestCase):
         with patch.dict(launcher.os.environ, {"XDG_CACHE_HOME": str(self.root / "cache")}), \
              patch.object(launcher, "_github_json", return_value=metadata), \
              patch.object(launcher.urllib.request, "urlopen", return_value=Response()):
-            with self.assertRaisesRegex(ValueError, "incomplete"):
+            with self.assertRaisesRegex(ValueError, "exceeded the published size"):
                 launcher.download_release("Alpha1", "AMDNR-v1.zip")
 
     def test_release_blocks_arbitrary_asset_names(self):
