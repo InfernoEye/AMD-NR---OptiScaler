@@ -56,7 +56,7 @@ public sealed class Backend
 
     public async Task<IReadOnlyList<GameEntry>> GamesAsync(CancellationToken token = default)
     {
-        var result = await RunAsync(new[] { "--list-json" }, token);
+        var result = await RunAsync(new[] { "--list-json", "--download-artwork" }, token);
         if (result.ExitCode != 0)
             throw new InvalidOperationException(result.Output);
         using var document = JsonDocument.Parse(result.Output);
