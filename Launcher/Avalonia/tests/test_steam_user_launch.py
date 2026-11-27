@@ -81,7 +81,7 @@ class SteamUserLaunchTests(unittest.TestCase):
         outcome = launch.preview_bridge_launch(
             existing, '/game/Binaries/Win64/amdnr-linux/run.sh', ('dxgi.dll',))
         self.assertEqual(outcome["compose_status"], "review")
-        self.assertIn("Old managed DLL override: dxgi=n,b", outcome["removed"])
+        self.assertIn("Bridge-controlled DXGI override: dxgi=n,b", outcome["removed"])
         self.assertIn('WINEDLLOVERRIDES="version=n,b;msvcp140=n,b"', outcome["preview"])
         self.assertIn('PROTON_ENABLE_NVAPI=1', outcome["preview"])
         self.assertIn('mangohud "/game/Binaries/Win64/amdnr-linux/run.sh" %command% -launch', outcome["preview"])
@@ -93,15 +93,16 @@ class SteamUserLaunchTests(unittest.TestCase):
             '/game/amdnr-linux/run.sh', ('dxgi.dll',))
         self.assertEqual(result["compose_status"], "ready")
         self.assertEqual(result["preview"], '"/game/amdnr-linux/run.sh" %command% -novid')
-        self.assertEqual(result["removed"], ["Old managed DLL override: dxgi=n,b"])
+        self.assertEqual(result["removed"], ["Bridge-controlled DXGI override: dxgi=n,b"])
 
-    def test_bridge_preserves_unknown_override_and_warns(self):
+    def test_bridge_removes_stale_dxgi_even_without_old_install_record(self):
         result = launch.preview_bridge_launch(
-            'WINEDLLOVERRIDES="dxgi=n,b" %command%',
+            'WINEDLLOVERRIDES="dxgi=n,b" VKD3D_DISABLE_EXTENSIONS=VK_EXT_mesh_shader gamemoderun %command%',
             '/game/amdnr-linux/run.sh')
-        self.assertIn('WINEDLLOVERRIDES="dxgi=n,b"', result["preview"])
-        self.assertEqual(result["compose_status"], "review")
-        self.assertEqual(result["removed"], [])
+        self.assertEqual(result["compose_status"], "ready")
+        self.assertNotIn("WINEDLLOVERRIDES", result["preview"])
+        self.assertIn("VKD3D_DISABLE_EXTENSIONS=VK_EXT_mesh_shader gamemoderun", result["preview"])
+        self.assertEqual(result["removed"], ["Bridge-controlled DXGI override: dxgi=n,b"])
 
     def test_bridge_refuses_existing_wrapper_complex_or_unknown_steam_options(self):
         for existing in (
