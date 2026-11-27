@@ -714,6 +714,30 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
                     new_files.append(_component_install_name(asset, entry.filename))
             except (ValueError, OSError):
                 conflicts.append(_component_install_name(asset, entry.filename))
+    # Report conflicts owned by other managed components or the current
+    # bridge separately. Such paths must never be treated as replaceable:
+    # replacement would make later uninstall/recovery inconsistent.
+    owned_by_other = set()
+    for other_asset, item in _component_records(executable).items():
+        if other_asset == asset or not isinstance(item, dict):
+            continue
+        owned_by_other.update(item.get("files", {}))
+        owned_by_other.update(item.get("replaced", {}))
+    bridge_record = root / ".amdnr-linux-install.json"
+    if bridge_record.is_file() and not bridge_record.is_symlink() and bridge_record.stat().st_size <= 4 * 1024 * 1024:
+        try:
+            bridge_data = json.loads(bridge_record.read_text(encoding="utf-8"))
+            if (bridge_data.get("version") == 1 and
+                    isinstance(bridge_data.get("launcher"), dict) and
+                    isinstance(bridge_data.get("installed"), list)):
+                owned_by_other.update(
+                    p for p in bridge_data["installed"]
+                    if isinstance(p, str))
+        except (OSError, ValueError, UnicodeError):
+            raise ValueError("Installed bridge record cannot be verified; refusing component replacement")
+    managed_conflicts = sorted(set(conflicts) & owned_by_other)
+    replaceable = [name for name in replaceable if
+                   _component_install_name(asset, name) not in owned_by_other]
     if _daniel_version(asset) is not None:
         for older in _component_records(executable):
             if _daniel_version(older) is not None and older != asset:
@@ -727,6 +751,10 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
             "safety_limit_exceeded": too_large,
             "conflicts": conflicts[:50], "conflict_count": len(conflicts),
             "replaceable_count": len(replaceable),
+            "managed_conflicts": managed_conflicts[:50],
+            "managed_conflict_count": len(managed_conflicts),
+            "replaceable_conflicts": [
+                _component_install_name(asset, name) for name in replaceable[:50]],
             "identical": identical[:50], "identical_count": len(identical),
             "new_file_count": len(new_files),
             "installable": not conflicts and not too_large}
