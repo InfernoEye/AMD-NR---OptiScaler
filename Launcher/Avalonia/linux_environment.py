@@ -211,8 +211,13 @@ def launch_preview(game_folder: Path, alias: str, existing: str | None = None) -
                 "launch_options": None}
     command = merged["preview"]
     wrappers = []
+    existing_prefix = command.split("%command%", 1)[0]
     for option, binary in (("gamemode", "gamemoderun"), ("mangohud", "mangohud")):
         if settings[option]:
+            # Preserve existing user launch wrappers without doubling them.
+            if re.search(r"(?<![A-Za-z0-9_-])" + re.escape(binary) +
+                         r"(?![A-Za-z0-9_-])", existing_prefix):
+                continue
             if shutil.which(binary) is None:
                 return {"status": "missing_wrapper", "reason": binary + " not installed",
                         "launch_options": None}
