@@ -49,6 +49,8 @@ class BridgeTests(unittest.TestCase):
         struct.pack_into("<I", fake, 0x3c, 128)
         fake[128:132] = b"PE" + bytes([0, 0])
         struct.pack_into("<H", fake, 132, 0x8664 if x64 else 0x14c)
+        struct.pack_into("<H", fake, 148, 240)  # PE32+ optional header bytes
+        struct.pack_into("<H", fake, 150, 0x2000)  # IMAGE_FILE_DLL
         struct.pack_into("<H", fake, 152, 0x20b if x64 else 0x10b)
         path.write_bytes(fake)
         return path
@@ -72,6 +74,13 @@ class BridgeTests(unittest.TestCase):
         found = discovery.find_compilers(exe, include_library=True)
         self.assertIn(str(owned), [entry["path"] for entry in found])
         self.assertFalse(any("Proton 9.0" in entry["path"] for entry in found))
+
+    def test_compiler_discovery_rejects_wine_builtin_placeholder(self):
+        compiler = self.fake_compiler(self.root / "Game")
+        content = bytearray(compiler.read_bytes())
+        content[260:276] = b"Wine builtin DLL"
+        compiler.write_bytes(content)
+        self.assertFalse(discovery.compiler_is_candidate(compiler))
 
     def test_compiler_discovery_rejects_non_native_and_symlink(self):
         exe = self.exe()
