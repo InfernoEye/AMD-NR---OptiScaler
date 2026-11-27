@@ -489,6 +489,10 @@ def install(exe: Path, approved: bool, runtime: str = "lmxxf", *, replace_existi
     report = status(exe, runtime)
     if not report["prepared"]:
         raise ValueError("Prepare the checksum-verified community package first.")
+    from bridge_migration import pending_snapshot
+    pending = pending_snapshot(exe)
+    if pending is not None:
+        raise ValueError(f"Unfinished migration at {pending}; recover it before installation.")
     if report["conflicts"] and not replace_existing:
         raise ValueError("Existing game hooks require explicit backup-and-replace approval:\n" +
                          "\n".join(report["conflicts"]))
