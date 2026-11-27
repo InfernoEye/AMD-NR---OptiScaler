@@ -229,7 +229,7 @@ public sealed class MainWindow : Window
     {
         Clear("Library");
         _content.Children.Add(Text("Your games", 30, ForegroundBrush, FontWeight.Bold));
-        _content.Children.Add(Text("Detected Steam installations. Choose a game to manage AMDNR.",
+        _content.Children.Add(Text("Detected Steam installations and saved custom games.",
             14, MutedBrush));
 
         var toolbar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), ColumnSpacing = 12 };
@@ -256,7 +256,7 @@ public sealed class MainWindow : Window
         Grid.SetColumn(missing, 1);
         toolbar.Children.Add(missing);
         var manual = Button("+  Add manually");
-        manual.Click += (_, _) => ShowInstall();
+        manual.Click += (_, _) => ShowAddCustomGame();
         Grid.SetColumn(manual, 2);
         toolbar.Children.Add(manual);
         _content.Children.Add(toolbar);
@@ -266,17 +266,133 @@ public sealed class MainWindow : Window
         RenderLibraryResults();
     }
 
+    private void ShowAddCustomGame()
+    {
+        Clear("Library");
+        _content.Children.Add(Text("Add custom game", 27, ForegroundBrush, FontWeight.Bold));
+        var form = new StackPanel { Spacing = 12 };
+        form.Children.Add(Text("DISPLAY NAME (OPTIONAL)", 11, AccentBrush, FontWeight.Bold));
+        var nameBox = new TextBox { Watermark = "Defaults to folder name" };
+        form.Children.Add(nameBox);
+        form.Children.Add(Text("GAME INSTALLATION FOLDER", 11, AccentBrush, FontWeight.Bold));
+        var folderBox = new TextBox { Watermark = "/path/to/your/game" };
+        form.Children.Add(folderBox);
+        var browse = Button("BROWSE GAME FOLDER");
+        browse.Click += async (_, _) =>
+        {
+            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Choose custom game installation folder", AllowMultiple = false,
+            });
+            var chosen = folders.FirstOrDefault()?.TryGetLocalPath();
+            if (chosen is not null)
+            {
+                folderBox.Text = chosen;
+                if (string.IsNullOrWhiteSpace(nameBox.Text))
+                    nameBox.Text = Path.GetFileName(chosen.TrimEnd(Path.DirectorySeparatorChar));
+            }
+        };
+        form.Children.Add(browse);
+        form.Children.Add(Text("The launcher will scan this folder for Windows executables. " +
+            "This does not modify the selected game.", 12, MutedBrush));
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        var save = Button("SAVE TO LIBRARY", true);
+        save.Click += async (_, _) =>
+        {
+            if (_backend is null || _busy) return;
+            var folder = folderBox.Text?.Trim() ?? "";
+            if (!Directory.Exists(folder))
+            {
+                _status.Text = "Choose an existing game folder first.";
+                return;
+            }
+            _busy = true;
+            save.IsEnabled = false;
+            try
+            {
+                await _backend.AddCustomGameAsync(folder, nameBox.Text ?? "");
+                await ReloadGamesAsync();
+                ShowLibrary();
+                _status.Text = "Custom game saved to your library.";
+            }
+            catch (Exception ex) { _status.Text = "Could not add game: " + ex.Message; }
+            finally { _busy = false; save.IsEnabled = true; }
+        };
+        actions.Children.Add(save);
+        var cancel = Button("CANCEL");
+        cancel.Click += (_, _) => ShowLibrary();
+        actions.Children.Add(cancel);
+        form.Children.Add(actions);
+        _content.Children.Add(Panel(form));
+    }
+
+    private void ShowEditCustomGame(GameEntry game)
+    {
+        if (!game.Custom) return;
+        Clear("Library");
+        _content.Children.Add(Text("Edit custom game", 27, ForegroundBrush, FontWeight.Bold));
+        var form = new StackPanel { Spacing = 12 };
+        form.Children.Add(Text("DISPLAY NAME", 11, AccentBrush, FontWeight.Bold));
+        var nameBox = new TextBox { Text = game.Name };
+        form.Children.Add(nameBox);
+        form.Children.Add(Text("Installation folder: " + game.Folder, 13, MutedBrush));
+        var save = Button("SAVE NAME", true);
+        save.Click += async (_, _) =>
+        {
+            if (_backend is null || _busy) return;
+            try
+            {
+                await _backend.RenameCustomGameAsync(game.Folder, nameBox.Text ?? "");
+                await ReloadGamesAsync();
+                _selectedGame = _games.FirstOrDefault(g => g.Custom && g.Folder == game.Folder);
+                ShowLibrary();
+                _status.Text = "Custom game renamed.";
+            }
+            catch (Exception ex) { _status.Text = "Rename failed: " + ex.Message; }
+        };
+        form.Children.Add(save);
+        var remove = Button("REMOVE FROM LIBRARY");
+        remove.Click += (_, _) =>
+        {
+            remove.IsEnabled = false;
+            var confirm = Button("CONFIRM REMOVAL (GAME FILES UNTOUCHED)", true);
+            confirm.Click += async (_, _) =>
+            {
+                if (_backend is null || _busy) return;
+                _busy = true;
+                try
+                {
+                    await _backend.RemoveCustomGameAsync(game.Folder);
+                    _selectedGame = null;
+                    _exe = null;
+                    await ReloadGamesAsync();
+                    ShowLibrary();
+                    _status.Text = "Custom entry removed; no game files were changed.";
+                }
+                catch (Exception ex) { _status.Text = "Removal failed: " + ex.Message; }
+                finally { _busy = false; }
+            };
+            form.Children.Add(confirm);
+        };
+        form.Children.Add(remove);
+        var back = Button("BACK");
+        back.Click += (_, _) => ShowGameDetails();
+        form.Children.Add(back);
+        _content.Children.Add(Panel(form));
+    }
+
     private void RenderLibraryResults()
     {
         if (_libraryResults is null) return;
         _libraryResults.Children.Clear();
         var filtered = _games.Where(game =>
-            (!_missingArtOnly || string.IsNullOrEmpty(game.Artwork)) &&
+            (!_missingArtOnly || (!game.Custom && string.IsNullOrEmpty(game.Artwork))) &&
             (game.Name.Contains(_libraryQuery, StringComparison.OrdinalIgnoreCase) ||
              game.Folder.Contains(_libraryQuery, StringComparison.OrdinalIgnoreCase))).ToList();
-        var missingCount = _games.Count(game => string.IsNullOrEmpty(game.Artwork));
+        var missingCount = _games.Count(game => !game.Custom && string.IsNullOrEmpty(game.Artwork));
+        var customCount = _games.Count(game => game.Custom);
         _libraryResults.Children.Add(Text(
-            $"{filtered.Count} of {_games.Count} games  •  {missingCount} covers missing",
+            $"{filtered.Count} of {_games.Count} entries  •  {customCount} custom  •  {missingCount} Steam covers missing",
             12, AccentBrush, FontWeight.SemiBold));
 
         if (filtered.Count == 0)
@@ -285,13 +401,13 @@ public sealed class MainWindow : Window
             empty.Children.Add(Text(_games.Count == 0 ? "No Steam games detected" : "No matching games",
                 20, ForegroundBrush, FontWeight.SemiBold));
             empty.Children.Add(Text(_games.Count == 0
-                ? "Check Steam's library folders, refresh, or choose an executable manually."
+                ? "Check Steam libraries or add a custom game."
                 : _missingArtOnly ? "All visible games have covers. Choose SHOW ALL to return." :
                     "Try searching for a shorter name or clear the search field.", 13, MutedBrush));
-            var action = Button(_games.Count == 0 ? "Choose an executable" : "Clear search", true);
+            var action = Button(_games.Count == 0 ? "Add a custom game" : "Clear search", true);
             action.Click += (_, _) =>
             {
-                if (_games.Count == 0) ShowInstall();
+                if (_games.Count == 0) ShowAddCustomGame();
                 else if (_librarySearch is not null) _librarySearch.Text = "";
             };
             empty.Children.Add(action);
@@ -312,7 +428,7 @@ public sealed class MainWindow : Window
 
         var detail = new StackPanel { Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
         detail.Children.Add(Text(game.Name, 19, ForegroundBrush, FontWeight.SemiBold));
-        detail.Children.Add(Text("STEAM  ·  PROTON / WINE", 11, MutedBrush, FontWeight.SemiBold));
+        detail.Children.Add(Text(game.Custom ? "CUSTOM GAME  ·  LOCAL" : "STEAM  ·  PROTON / WINE", 11, MutedBrush, FontWeight.SemiBold));
         var location = Text(game.Folder, 12, MutedBrush);
         location.MaxLines = 2;
         detail.Children.Add(location);
@@ -351,7 +467,7 @@ public sealed class MainWindow : Window
         title.MaxLines = height >= 200 ? 4 : 3;
         Grid.SetRow(title, 1);
         placeholder.Children.Add(title);
-        var bottom = Text("STEAM  ·  COVER NOT AVAILABLE", 9, MutedBrush);
+        var bottom = Text(game.Custom ? "CUSTOM  ·  COVER NOT AVAILABLE" : "STEAM  ·  COVER NOT AVAILABLE", 9, MutedBrush);
         bottom.Margin = new Thickness(12, 0, 12, 10);
         Grid.SetRow(bottom, 2);
         placeholder.Children.Add(bottom);
@@ -478,7 +594,7 @@ public sealed class MainWindow : Window
         var hero = new Grid { ColumnDefinitions = new ColumnDefinitions("205,*"), ColumnSpacing = 20 };
         hero.Children.Add(GameArtwork(game, 190));
         var summary = new StackPanel { Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
-        summary.Children.Add(Text("STEAM  /  PROTON", 12, AccentBrush, FontWeight.SemiBold));
+        summary.Children.Add(Text(game.Custom ? "CUSTOM GAME  /  LOCAL" : "STEAM  /  PROTON", 12, AccentBrush, FontWeight.SemiBold));
         summary.Children.Add(Text(game.Name, 31, ForegroundBrush, FontWeight.Bold));
         bool installed = HasInstallRecord();
         summary.Children.Add(Text(installed ? "●  AMDNR installation recorded" :
@@ -517,6 +633,12 @@ public sealed class MainWindow : Window
             catch (Exception ex) { _status.Text = "Cover update failed: " + ex.Message; }
         };
         summary.Children.Add(coverButton);
+        if (game.Custom)
+        {
+            var edit = Button("EDIT / REMOVE CUSTOM GAME");
+            edit.Click += (_, _) => ShowEditCustomGame(game);
+            summary.Children.Add(edit);
+        }
         Grid.SetColumn(summary, 1);
         hero.Children.Add(summary);
         _content.Children.Add(Panel(hero, new Thickness(22)));
@@ -1083,6 +1205,17 @@ public sealed class MainWindow : Window
         _content.Children.Add(Panel(details));
     }
 
+    private async Task ReloadGamesAsync()
+    {
+        if (_backend is null) return;
+        var steam = await _backend.GamesAsync();
+        var custom = await _backend.CustomGamesAsync();
+        var seen = new HashSet<string>(steam.Select(g => Path.GetFullPath(g.Folder)),
+            StringComparer.Ordinal);
+        _games = steam.Concat(custom.Where(g => seen.Add(Path.GetFullPath(g.Folder))))
+            .OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     private async Task RefreshGamesAsync()
     {
         if (_busy || _backend is null) return;
@@ -1090,8 +1223,8 @@ public sealed class MainWindow : Window
         _status.Text = "Scanning Steam libraries…";
         try
         {
-            _games = (await _backend.GamesAsync()).ToList();
-            _status.Text = $"Detected {_games.Count} Steam games";
+            await ReloadGamesAsync();
+            _status.Text = $"Loaded {_games.Count} entries ({_games.Count(g => g.Custom)} custom)";
             // Scan changes should update the list, not navigate to a selected game.
             // Keep this deterministic even if the previous page was Game Details.
             if (_currentSection == "Library")
