@@ -193,7 +193,8 @@ public sealed class MainWindow : Window
         Grid.SetRow(statusBar, 3);
         _shell.Children.Add(statusBar);
         Content = _shell;
-        _tour = new OnboardingTour(_shell, PrepareTourStep, ShowLibrary, _onboardingPath);
+        _tour = new OnboardingTour(_shell, PrepareTourStep, ShowLibrary,
+            () => _topNavigation?.IsVisible == true, _onboardingPath);
         UpdateNavigationLayout(Width);
         try { _backend = new Backend(); }
         catch (Exception ex) { _status.Text = ex.Message; }
