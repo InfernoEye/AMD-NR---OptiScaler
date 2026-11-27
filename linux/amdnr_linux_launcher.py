@@ -99,66 +99,188 @@ def steam_games() -> list[tuple[str, Path]]:
     return sorted(games, key=lambda g: g[0].casefold())
 
 
-def _steam_artwork(appid: str, roots: list[Path], download: bool = False) -> str | None:
-    """Prefer existing Steam cover art; optionally fill gaps from Steam's image CDN."""
-    if not appid.isdecimal():
-        return None
+def _artwork_dir() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "amdnr" / "artwork"
 
-    cache_home = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-    cache_path = cache_home / "amdnr" / "steam-artwork" / f"{appid}_library_600x900.jpg"
 
-    # Find genuine local assets across all registered Steam locations. The recent
-    # Steam library cache stores some pictures inside an app-ID subdirectory.
-    candidates: list[Path] = [cache_path]
-    for root in roots:
-        steam_cache = root / "appcache" / "librarycache"
-        candidates.extend((
-            steam_cache / f"{appid}_library_600x900.jpg",
-            steam_cache / appid / "library_600x900.jpg",
-            steam_cache / f"{appid}_library_600x900.png",
-            steam_cache / f"{appid}_header.jpg",
-            steam_cache / appid / "header.jpg",
-            steam_cache / f"{appid}_header.png",
-        ))
-    for candidate in candidates:
+def _artwork_key(game_folder: Path) -> str:
+    return hashlib.sha256(str(game_folder.resolve()).encode("utf-8")).hexdigest()
+
+
+def _is_image(data: bytes) -> bool:
+    return data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def _manual_artwork(game_folder: Path) -> Path | None:
+    base = _artwork_dir() / _artwork_key(game_folder)
+    for extension in (".png", ".jpg"):
+        art = base.with_suffix(extension)
         try:
-            if candidate.is_file() and candidate.stat().st_size > 64:
-                return str(candidate)
+            if art.is_file() and _is_image(art.read_bytes()[:8]):
+                return art
+        except OSError:
+            pass
+    return None
+
+
+def set_artwork(game_folder: Path, image: Path) -> str:
+    """Save a per-game manual cover without modifying the game or Steam files."""
+    if not game_folder.is_dir():
+        raise ValueError(f"Game directory not found: {game_folder}")
+    if not image.is_file():
+        raise ValueError(f"Artwork not found: {image}")
+    if image.stat().st_size > 8 * 1024 * 1024:
+        raise ValueError("Artwork is larger than 8 MiB")
+    payload = image.read_bytes()
+    if not _is_image(payload):
+        raise ValueError("Only JPEG and PNG artwork is supported")
+    extension = ".png" if payload.startswith(b"\x89PNG") else ".jpg"
+    base = _artwork_dir() / _artwork_key(game_folder)
+    base.parent.mkdir(parents=True, exist_ok=True)
+    target = base.with_suffix(extension)
+    with tempfile.NamedTemporaryFile(dir=base.parent, prefix=".art-", delete=False) as out:
+        temporary = Path(out.name)
+        out.write(payload)
+    try:
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    base.with_suffix(".jpg" if extension == ".png" else ".png").unlink(missing_ok=True)
+    return str(target)
+
+
+def _cached_artwork(appid: str, roots: list[Path]) -> Path | None:
+    """Steam's official cache and user-selected custom artwork across accounts."""
+    for root in roots:
+        # A custom cover set in Steam should win over the official capsule.
+        try:
+            users = (root / "userdata").iterdir()
+            for user in users:
+                grid = user / "config/grid"
+                for name in (f"{appid}p.png", f"{appid}p.jpg",
+                             f"{appid}.png", f"{appid}.jpg",
+                             f"{appid}_hero.png", f"{appid}_hero.jpg"):
+                    candidate = grid / name
+                    if candidate.is_file():
+                        return candidate
         except OSError:
             pass
 
-    if not download or os.environ.get("AMDNR_NO_ARTWORK_DOWNLOAD") == "1":
-        return None
+    for root in roots:
+        cache = root / "appcache/librarycache"
+        paths = (
+            cache / appid / "library_600x900.jpg",
+            cache / appid / "library_600x900.png",
+            cache / f"{appid}_library_600x900.jpg",
+            cache / f"{appid}_library_600x900.png",
+            cache / appid / "header.jpg",
+            cache / f"{appid}_header.jpg",
+            cache / appid / "library_hero.jpg",
+            cache / f"{appid}_library_hero.jpg",
+        )
+        for path in paths:
+            try:
+                if path.is_file() and _is_image(path.read_bytes()[:8]):
+                    return path
+            except OSError:
+                continue
+        # Some Steam clients use a hashed asset suffix in the app-ID directory.
+        folder = cache / appid
+        if folder.is_dir():
+            for pattern in ("library_600x900*.jpg", "library_600x900*.png",
+                            "header*.jpg", "library_hero*.jpg"):
+                for path in sorted(folder.glob(pattern)):
+                    try:
+                        if path.is_file() and _is_image(path.read_bytes()[:8]):
+                            return path
+                    except OSError:
+                        continue
+    return None
 
-    # Only numeric Steam IDs are accepted and the host is fixed, so manifests
-    # cannot redirect this network request to arbitrary URLs.
-    for suffix in ("library_600x900.jpg", "header.jpg"):
-        url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/{suffix}"
+
+def _download_artwork(appid: str, destination: Path) -> Path | None:
+    """Bounded download from known Steam hosts, no third-party art services."""
+    urls = [
+        f"https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/{appid}/library_600x900.jpg",
+        f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_600x900.jpg",
+        f"https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/{appid}/header.jpg",
+        f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg",
+    ]
+
+    # Store metadata can point at content-hashed artwork for newer titles.
+    try:
+        url = f"https://store.steampowered.com/api/appdetails?appids={appid}&filters=basic"
+        req = urllib.request.Request(url, headers={"User-Agent": "AMDNR-Linux-Launcher/1.0"})
+        with urllib.request.urlopen(req, timeout=4) as response:
+            metadata = response.read(512 * 1024)
+        data = json.loads(metadata)
+        details = data.get(appid, {}).get("data", {})
+        header = details.get("header_image") if isinstance(details, dict) else None
+        if isinstance(header, str):
+            from urllib.parse import urlparse
+            parsed = urlparse(header)
+            if parsed.scheme == "https" and parsed.hostname in {
+                "shared.fastly.steamstatic.com", "shared.steamstatic.com",
+                "cdn.cloudflare.steamstatic.com", "cdn.akamai.steamstatic.com",
+            }:
+                urls.append(header)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
+    for url in urls:
         try:
-            request = urllib.request.Request(
-                url, headers={"User-Agent": "AMDNR-Linux-Launcher/1.0"})
-            with urllib.request.urlopen(request, timeout=5) as response:
+            req = urllib.request.Request(url, headers={"User-Agent": "AMDNR-Linux-Launcher/1.0"})
+            with urllib.request.urlopen(req, timeout=4) as response:
                 if response.status != 200:
                     continue
                 payload = response.read(4 * 1024 * 1024 + 1)
-            if len(payload) > 4 * 1024 * 1024 or len(payload) < 64:
+            if len(payload) > 4 * 1024 * 1024 or len(payload) < 64 or not _is_image(payload):
                 continue
-            if not payload.startswith(b"\xff\xd8\xff"):
-                continue
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            extension = ".png" if payload.startswith(b"\x89PNG") else ".jpg"
+            target = destination.with_suffix(extension)
             with tempfile.NamedTemporaryFile(
-                dir=cache_path.parent, prefix=".art-", delete=False
+                dir=destination.parent, prefix=".art-", delete=False
             ) as output:
                 temporary = Path(output.name)
                 output.write(payload)
             try:
-                os.replace(temporary, cache_path)
+                os.replace(temporary, target)
             finally:
                 temporary.unlink(missing_ok=True)
-            return str(cache_path)
+            return target
         except (OSError, ValueError):
             continue
     return None
+
+
+def _steam_artwork(appid: str, roots: list[Path], download: bool = False,
+                   game_folder: Path | None = None) -> str | None:
+    """Manual override > Steam custom grids > Steam cache > downloaded official art."""
+    if game_folder is not None:
+        manual = _manual_artwork(game_folder)
+        if manual is not None:
+            return str(manual)
+    if not appid.isdecimal():
+        return None
+
+    existing = _cached_artwork(appid, roots)
+    if existing is not None:
+        return str(existing)
+
+    cache_home = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    saved = cache_home / "amdnr/steam-artwork" / f"{appid}_library_600x900.jpg"
+    for path in (saved, saved.with_suffix(".png")):
+        try:
+            if path.is_file() and _is_image(path.read_bytes()[:8]):
+                return str(path)
+        except OSError:
+            continue
+
+    if not download or os.environ.get("AMDNR_NO_ARTWORK_DOWNLOAD") == "1":
+        return None
+    downloaded = _download_artwork(appid, saved)
+    return str(downloaded) if downloaded is not None else None
 
 
 def steam_game_details(download_artwork: bool = False) -> list[dict[str, str | None]]:
@@ -185,7 +307,7 @@ def steam_game_details(download_artwork: bool = False) -> list[dict[str, str | N
 
     def resolve(game: tuple[str, Path, str | None]) -> dict[str, str | None]:
         name, folder, appid = game
-        artwork = _steam_artwork(appid, roots, download_artwork) if appid else None
+        artwork = _steam_artwork(appid or "", roots, download_artwork, folder)
         return {"name": name, "folder": str(folder), "artwork": artwork}
 
     # Downloads are concurrent, bounded, and do not slow normal/offline scans.
@@ -462,12 +584,22 @@ def main() -> int:
     parser.add_argument("--list", action="store_true", help="List detected Steam games")
     parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
     parser.add_argument("--download-artwork", action="store_true", help="Fetch missing cover art from Steam CDN")
+    parser.add_argument("--set-artwork", type=Path, metavar="IMAGE", help="Set cover image (PNG/JPG) for a game")
+    parser.add_argument("--game-folder", type=Path, help="Game directory for --set-artwork")
     parser.add_argument("--install", type=Path, metavar="ZIP", help="Install an AMDNR release ZIP")
     parser.add_argument("--uninstall", action="store_true", help="Uninstall and restore backups")
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
-    if args.install or args.uninstall:
+    if args.set_artwork:
+        if not args.game_folder:
+            parser.error("--set-artwork requires --game-folder")
+        try:
+            print(set_artwork(args.game_folder, args.set_artwork))
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.install or args.uninstall:
         if not args.exe:
             parser.error("--install/--uninstall requires --exe")
         try:
