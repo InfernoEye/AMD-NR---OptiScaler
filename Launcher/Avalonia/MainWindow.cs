@@ -1757,18 +1757,15 @@ public sealed class MainWindow : Window
             installed ? AccentBrush : MutedBrush));
         summary.Children.Add(Text(game.Folder, 12, MutedBrush));
         var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
-        var install = Button(UiLanguage.Translate(installed
-            ? "Manage installation" : "Install AMDNR").ToUpperInvariant(), true);
+        var install = Button(installed ? "INSTALL / MIGRATE LINUX BRIDGE" : "INSTALL LINUX BRIDGE", true);
         install.IsEnabled = _exe is not null && File.Exists(_exe);
         install.Click += (_, _) => ShowInstall();
         actions.Children.Add(install);
         var doctor = Button(UiLanguage.Translate("Doctor").ToUpperInvariant());
         doctor.Click += (_, _) => ShowDoctor();
         actions.Children.Add(doctor);
-        var bridge = Button("EXPERIMENTAL LINUX ROCm BRIDGE");
-        bridge.IsEnabled = _exe is not null && File.Exists(_exe);
-        bridge.Click += (_, _) => ShowCommunityBridge();
-        actions.Children.Add(bridge);
+        // Linux/Proton users reach the bridge wizard from the primary Install action.
+        // Legacy Windows-DLL installation remains under Advanced in that wizard.
         summary.Children.Add(actions);
         if (_exe is not null && File.Exists(_exe))
         {
@@ -2086,8 +2083,18 @@ public sealed class MainWindow : Window
 
     private void ShowInstall()
     {
-        Clear("Install");
-        _content.Children.Add(Text("Install & manage", 30, ForegroundBrush, FontWeight.Bold));
+        if (!string.IsNullOrEmpty(_exe) && File.Exists(_exe))
+        {
+            ShowCommunityBridge();
+            return;
+        }
+        ShowLegacyInstall();
+    }
+
+    private void ShowLegacyInstall()
+    {
+        Clear("Legacy install");
+        _content.Children.Add(Text("Legacy DLL install / maintenance", 30, ForegroundBrush, FontWeight.Bold));
         _content.Children.Add(Text("Choose a game, review the verified package and DLL name, then confirm installation. " +
             "Nothing changes in Steam settings automatically.", 14, MutedBrush));
         var instructions = new StackPanel { Spacing = 7 };
@@ -2815,13 +2822,8 @@ public sealed class MainWindow : Window
         preparation.Children.Add(runtimeChoices);
         string SelectedBridgeRuntime() => runtimeChoices.SelectedItem as string ?? "lmxxf";
         preparation.Children.Add(Text(
-            "Compiler candidates are searched automatically in this Steam library. " +
-            "A matching x64 PE header is not proof of Microsoft origin: review the chosen " +
-            "file and use only a copy from a game you own. " +
-            "Some upstream dependencies are distributed as Ubuntu .deb archives, regardless of " +
-            "your Linux distro. These are extracted into a PRIVATE cache, never installed " +
-            "with apt or into your system. Exact SHA-256 verified files are reused when " +
-            "available; otherwise archive mirrors are tried.",
+            "Choose a native x64 Microsoft compiler from software you own. " +
+            "Dependencies are SHA-256 verified and staged privately; no Ubuntu installation is needed.",
             13, MutedBrush));
         var compilerChoices = new ComboBox
         {
@@ -2829,7 +2831,12 @@ public sealed class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch,
             IsVisible = false,
         };
-        preparation.Children.Add(compilerChoices);
+        preparation.Children.Add(new Expander
+        {
+            Header = "Advanced: other detected compiler candidates",
+            IsExpanded = false,
+            Content = compilerChoices,
+        });
         var compilerPath = new TextBox
         {
             Watermark = "Compiler path (auto-discovered, or browse to your own d3dcompiler_47.dll)",
@@ -2867,10 +2874,8 @@ public sealed class MainWindow : Window
         preparation.Children.Add(approval);
         var prepare = Button("DOWNLOAD & PREPARE BRIDGE", true);
         preparation.Children.Add(prepare);
-        var prepareState = Text("Requires Python 3.12+ with zstd and several GB of storage. " +
-            "Ubuntu package archives are only PRIVATE runtime inputs; you do not need " +
-            "to use Ubuntu or install them system-wide. Reference test: RX 9070 XT / " +
-            "GE-Proton11-9. Your game and GPU are NOT yet validated.", 12, MutedBrush);
+        var prepareState = Text("Several GB of free storage required. " +
+            "Proton-Wineland and Subnautica 2 rendering are not yet validated.", 12, MutedBrush);
         preparation.Children.Add(prepareState);
         _content.Children.Add(Panel(preparation));
 
@@ -2926,6 +2931,9 @@ public sealed class MainWindow : Window
         });
         _content.Children.Add(Panel(installation));
 
+        var advancedInstall = Button("ADVANCED: LEGACY DLL INSTALL / REPAIR");
+        advancedInstall.Click += (_, _) => ShowLegacyInstall();
+        _content.Children.Add(advancedInstall);
         var footer = new StackPanel { Spacing = 5 };
         footer.Children.Add(Text(
             "Third-party credits: hassanm0301/AMDNR-Linux (GPL-3.0+), patched vkd3d-proton " +
