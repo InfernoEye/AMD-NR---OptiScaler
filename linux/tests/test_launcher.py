@@ -168,6 +168,25 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(report["with_artwork"], 1)
         self.assertEqual(report["missing"][0]["name"], "No Art")
 
+    def test_hashed_subdirectory_steam_artwork(self):
+        steam = self.root / "Steam"
+        hashed = steam / "appcache/librarycache/987/012345abcdef"
+        hashed.mkdir(parents=True)
+        art = hashed / "library_600x900.jpg"
+        art.write_bytes(b"\xff\xd8\xff" + b"x" * 100)
+        self.assertEqual(launcher._cached_artwork("987", [steam]), art)
+
+    def test_game_names_not_used_as_artwork_identifiers(self):
+        with patch.object(launcher, "steam_games", return_value=[
+            ("Some New Game", self.game),
+        ]), patch.object(launcher, "steam_roots", return_value=[]), \
+             patch.object(launcher, "_steam_artwork", return_value=None) as get:
+            result = launcher.steam_game_details()
+        self.assertEqual(result[0]["artwork"], None)
+        # Source lookups use Steam IDs / installation directories, not a
+        # hand-maintained mapping of game names.
+        self.assertEqual(get.call_args.args[3], self.game)
+
     def test_missing_game_executable_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Windows"):
             launcher.install(self.archive, self.game / "missing.exe", "dxgi.dll")
