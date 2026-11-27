@@ -45,6 +45,18 @@ python3 Launcher/Avalonia/amdnr_launcher.py --download-release TAG --release-ass
 
 The version and asset name come from the release catalog; they are not game-name-specific. Only complete upstream AMDNR release ZIPs are supported by this workflow. Optional model packs and Windows executables are not offered as installable packages. **Downloading and installing the Windows DLL files does not establish Proton or neural-runtime compatibility.**
 
+## Selecting a game executable
+
+Select a Steam game from the library, then choose **Find Game Executables** to list candidate Windows executables. The suggestions rank common game-binary locations (such as `Binaries/Win64`) and mark common installer/anti-cheat filenames as suspicious. This is only a heuristic: **choose the actual game EXE before installing**. The launcher no longer silently picks the first EXE.
+
+The CLI supports the same scan:
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --exes-json "/path/to/steamapps/common/Game"
+```
+
+With a selected executable, the game screen also shows an existing Linux installation record, its DLL alias, and a summary of tracked files. Doctor can check the recorded files' integrity.
+
 ## Linux Doctor
 
 On **Doctor**, choose **Run Installation Diagnostics** to perform read-only checks of Steam libraries, the selected game EXE, the selected release ZIP and the Linux launcher's installation record. If recorded files exist, their SHA-256 hashes are compared against the installation record to identify missing or modified files.
