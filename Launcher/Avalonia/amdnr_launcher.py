@@ -2573,80 +2573,6 @@ def doctor_report(executable: Path | None, archive: Path | None) -> dict[str, ob
                     "They do not certify GPU support, anti-cheat compatibility or Proton rendering."}
 
 
-def gui() -> None:
-    try:
-        import tkinter as tk
-        from tkinter import filedialog, messagebox, ttk
-    except ImportError as exc:
-        raise RuntimeError("Tkinter unavailable. Install python3-tk or use --list/--install") from exc
-    window = tk.Tk()
-    window.title("AMDNR Linux Launcher (Proton)")
-    window.geometry("760x510")
-    box = ttk.Frame(window, padding=16)
-    box.pack(fill="both", expand=True)
-    ttk.Label(box, text="AMDNR for Steam / Proton", font=("Sans", 17, "bold")).pack(anchor="w")
-    ttk.Label(box, text="Choose a Windows game .exe; this manages files only, not GPU runtime support.",
-              wraplength=700).pack(anchor="w", pady=(4, 12))
-    game = tk.StringVar()
-    package = tk.StringVar()
-    alias = tk.StringVar(value="dxgi.dll")
-    options = ttk.Frame(box)
-    options.pack(fill="x")
-    ttk.Label(options, text="Game executable").grid(row=0, column=0, sticky="w")
-    ttk.Entry(options, textvariable=game).grid(row=1, column=0, sticky="ew")
-    ttk.Button(options, text="Browse", command=lambda: game.set(
-        filedialog.askopenfilename(title="Select game EXE", filetypes=[("Windows executables", "*.exe")])
-        or game.get())).grid(row=1, column=1, padx=6)
-    ttk.Label(options, text="AMDNR release ZIP").grid(row=2, column=0, sticky="w", pady=(9, 0))
-    ttk.Entry(options, textvariable=package).grid(row=3, column=0, sticky="ew")
-    ttk.Button(options, text="Browse", command=lambda: package.set(
-        filedialog.askopenfilename(title="Select AMDNR ZIP", filetypes=[("ZIP archive", "*.zip")])
-        or package.get())).grid(row=3, column=1, padx=6)
-    ttk.Label(options, text="Proxy DLL name").grid(row=4, column=0, sticky="w", pady=(9, 0))
-    ttk.Combobox(options, textvariable=alias, values=ALIASES, state="readonly").grid(
-        row=5, column=0, sticky="w")
-    options.columnconfigure(0, weight=1)
-    result = tk.StringVar(value="Installed games are listed below. Double-click one to select its likely EXE.")
-    ttk.Label(box, textvariable=result, wraplength=700).pack(anchor="w", pady=(12, 6))
-
-    def action(which: str) -> None:
-        try:
-            exe = Path(game.get()).expanduser()
-            if which == "install":
-                launch_options = install(Path(package.get()).expanduser(), exe, alias.get())
-                result.set(f"Installed. Set Steam launch options to: {launch_options}")
-                messagebox.showinfo("Steam launch options", launch_options)
-            else:
-                count, notes = uninstall(exe)
-                result.set(f"Restored/removed {count} files. " + "; ".join(notes))
-                if notes:
-                    messagebox.showwarning("Files kept", "\n".join(notes))
-        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
-            messagebox.showerror("AMDNR Linux Launcher", str(exc))
-    buttons = ttk.Frame(box)
-    buttons.pack(anchor="w", pady=(4, 12))
-    ttk.Button(buttons, text="Install", command=lambda: action("install")).pack(side="left")
-    ttk.Button(buttons, text="Uninstall / restore",
-               command=lambda: action("uninstall")).pack(side="left", padx=8)
-    ttk.Label(box, text="Detected Steam games").pack(anchor="w")
-    games = steam_games()
-    listing = tk.Listbox(box, height=9)
-    listing.pack(fill="both", expand=True)
-    for name, folder in games:
-        listing.insert("end", f"{name} — {folder}")
-
-    def select_game(_event: object) -> None:
-        selection = listing.curselection()
-        if selection:
-            found = guess_executable(games[selection[0]][1])
-            if found:
-                game.set(str(found))
-            else:
-                result.set("No game EXE found automatically; use Browse.")
-    listing.bind("<Double-Button-1>", select_game)
-    window.mainloop()
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="List detected Steam games")
@@ -3081,7 +3007,12 @@ def main() -> int:
         for name, folder in steam_games():
             print(f"{name}\t{folder}")
     else:
-        gui()
+        # CLI-only backend. This module must never spawn a second desktop
+        # interface when invoked without an explicit action.
+        parser.print_help(sys.stderr)
+        print("\nNo action specified. Start the native Avalonia launcher for the GUI.",
+              file=sys.stderr)
+        return 2
     return 0
 
 
