@@ -100,7 +100,12 @@ def find_compilers(exe: Path, *, include_library: bool = True) -> list[dict]:
                        and item.casefold() not in {
                            ".git", "shadercache", "compatdata", "node_modules",
                            "amdnr_backup", "amdnr-linux", "download", "downloads"
-                       }]
+                       }
+                       # Proton distributions bundle Wine-provided DLLs; they
+                       # must not be suggested as user-owned Microsoft compilers.
+                       and not (base == common and
+                                ("proton" in item.casefold() or
+                                 "wine" in item.casefold()))]
             for name in names:
                 files += 1
                 if files >= MAX_FILES:
