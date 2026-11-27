@@ -86,10 +86,16 @@ The registry only stores the game's display name and local installation folder. 
 
 ## Library readiness audit
 
-On the **Library** page, select **Analyze Library** to perform an on-demand,
-read-only executable audit of every detected Steam game and remembered custom
-installation. This is intentionally separate from normal Library refresh: it
-may take longer for large games, but does not touch game or Steam files.
+On the **Library** page, select **Analyze Library** to perform an on-demand
+executable audit of every detected Steam game and remembered custom
+installation. It reads game files but does not modify them. The finished
+results are saved atomically to
+`${XDG_STATE_HOME:-~/.local/state}/amdnr/library-audit.json` and restored when
+Avalonia starts again. Normal **Refresh**, restarting the launcher, and
+switching screens **do not** rebuild or delete the saved results. Only clicking
+**Analyze Library** initially or **Rescan Library** later triggers another
+full audit. Newly discovered games may have no readiness label until the next
+requested rescan, and saved results can become stale after game updates.
 
 Each library row gains a readiness label. The filter can show **Windows ready**,
 **Native Linux**, **Needs attention**, and **AMDNR recorded** entries. An
@@ -106,7 +112,11 @@ check; use **Install → Verify Installed Files** or Doctor for an integrity che
 Read the JSON directly without starting the GUI:
 
 ```bash
+# Explicit full scan: also saves its result
 python3 Launcher/Avalonia/amdnr_launcher.py --library-audit-json
+
+# Instant last-saved result: never scans game executables
+python3 Launcher/Avalonia/amdnr_launcher.py --library-audit-cache-json
 ```
 
 ## Steam launch metadata (automatic Windows EXE selection)
