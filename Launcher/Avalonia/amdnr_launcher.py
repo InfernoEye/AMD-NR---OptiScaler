@@ -673,12 +673,51 @@ def _game_binary_scan(directory: Path) -> tuple[list[Path], list[str], bool]:
     return windows, native[:12], unreadable or visited >= 30000
 
 
+def steam_launch_for_directory(directory: Path) -> dict[str, object]:
+    """Resolve Windows launch target from the installed Steam app's cached AppID."""
+    missing = {"source": "steam_cache", "windows_candidates": [],
+               "selected": None, "linux_launches": 0, "reason": "not_steam_install"}
+    try:
+        folder = directory.resolve()
+        if folder.parent.name != "common" or folder.parent.parent.name != "steamapps":
+            return missing
+        manifest_dir = folder.parent.parent
+        appid = None
+        for manifest in manifest_dir.glob("appmanifest_*.acf"):
+            if not manifest.is_file():
+                continue
+            content = manifest.read_text(encoding="utf-8-sig", errors="replace")
+            if vdf_value(content, "installdir") == folder.name:
+                found = vdf_value(content, "appid") or manifest.stem.removeprefix("appmanifest_")
+                if found.isdecimal():
+                    appid = int(found)
+                    break
+        if appid is None:
+            missing["reason"] = "manifest_missing"
+            return missing
+
+        import importlib.util
+        source = Path(__file__).with_name("steam_launch_info.py")
+        spec = importlib.util.spec_from_file_location("amdnr_steam_launch_info", source)
+        if spec is None or spec.loader is None:
+            raise ValueError("Steam metadata parser not available")
+        parser = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(parser)
+        data = parser.read_cached_app(appid, steam_roots())
+        report = parser.resolve_windows_launch(data, folder)
+        report["appid"] = appid
+        return report
+    except (OSError, ValueError, ImportError, AttributeError) as exc:
+        missing["reason"] = "cache_unavailable"
+        return missing
+
+
 def executable_scan(directory: Path) -> dict[str, object]:
     """Windows EXE candidates plus honest native-game/partial-scan diagnostics."""
     windows, native, partial = _game_binary_scan(directory)
     if not directory.is_dir():
         return {"candidates": [], "native": [], "reason": "missing_directory",
-                "partial": False}
+                "partial": False, "steam_launch": {"selected": None, "reason": "missing_directory"}}
     bad = ("unins", "setup", "crash", "redist", "vcredist",
            "unitycrash", "easyanticheat", "benchmark", "updater",
            "anticheat", "uninstall", "vconsole", "editor", "crashhandler")
@@ -711,11 +750,28 @@ def executable_scan(directory: Path) -> dict[str, object]:
          "suspicious": score <= -50}
         for rank, (score, path) in enumerate(ranked[:50])
     ]
-    reason = ("found_windows_exe" if candidates else
+    # Steam's installed app manifest maps a folder to AppID; appinfo can give
+    # a real launch target. Keep all other scanner results as fallbacks.
+    steam = steam_launch_for_directory(directory)
+    steam_choice = steam.get("selected")
+    if isinstance(steam_choice, str):
+        match = next((entry for entry in candidates if entry["path"] == steam_choice), None)
+        for entry in candidates:
+            entry["auto_select"] = False
+            entry["recommended"] = entry["path"] == steam_choice
+        if match is None:
+            candidates.insert(0, {"path": steam_choice, "recommended": True,
+                                  "auto_select": True, "suspicious": False})
+        else:
+            match["auto_select"] = True
+            candidates.remove(match)
+            candidates.insert(0, match)
+    reason = ("steam_primary" if steam_choice else
+              "found_windows_exe" if candidates else
               "native_linux_files" if native else
               "partial_scan" if partial else "no_windows_exe")
     return {"candidates": candidates, "native": native,
-            "reason": reason, "partial": partial}
+            "reason": reason, "partial": partial, "steam_launch": steam}
 
 
 def executable_candidates(directory: Path) -> list[dict[str, object]]:
