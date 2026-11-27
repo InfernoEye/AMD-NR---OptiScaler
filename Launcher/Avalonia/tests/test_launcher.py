@@ -382,6 +382,57 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inside the selected game"):
             launcher.remember_executable(self.game, other)
 
+    def test_nested_windows_executable_beyond_old_depth_limit(self):
+        nested = self.game.joinpath(*([f"level{i}" for i in range(9)]))
+        nested.mkdir(parents=True)
+        executable = nested / "RealGame.EXE"
+        executable.write_bytes(b"windows exe")
+        scan = launcher.executable_scan(self.game)
+        self.assertIn(str(executable), [item["path"] for item in scan["candidates"]])
+        self.assertEqual(scan["reason"], "found_windows_exe")
+
+    def test_native_linux_game_is_reported_without_fabricated_exe(self):
+        binary = self.game / "Game.x86_64"
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 50)
+        scan = launcher.executable_scan(self.game)
+        self.assertEqual(scan["candidates"], [])
+        self.assertEqual(scan["reason"], "native_linux_files")
+        self.assertIn("Game.x86_64", scan["native"])
+
+    def test_linux_game_shell_launcher_detected(self):
+        script = self.game / "start.sh"
+        script.write_bytes(b"#!/bin/sh\nexec ./game\n")
+        scan = launcher.executable_scan(self.game)
+        self.assertEqual(scan["reason"], "native_linux_files")
+        self.assertIn("start.sh", scan["native"])
+
+    def test_symlink_to_outside_windows_exe_is_ignored(self):
+        outside = self.root / "elsewhere"
+        outside.mkdir()
+        (outside / "outside.exe").write_bytes(b"outside")
+        (self.game / "linked").symlink_to(outside, target_is_directory=True)
+        scan = launcher.executable_scan(self.game)
+        self.assertEqual(scan["candidates"], [])
+        self.assertNotEqual(scan["reason"], "found_windows_exe")
+
+    def test_scan_continues_when_one_directory_is_unreadable(self):
+        good = self.game / "good"
+        good.mkdir()
+        (good / "working.exe").write_bytes(b"exe")
+        broken = self.game / "broken"
+        broken.mkdir()
+        import os
+        original_scandir = os.scandir
+        def fake_scandir(path):
+            if Path(path) == broken:
+                raise PermissionError("restricted")
+            return original_scandir(path)
+        with patch.object(launcher.os, "scandir", side_effect=fake_scandir):
+            scan = launcher.executable_scan(self.game)
+        self.assertTrue(scan["partial"])
+        self.assertIn(str(good / "working.exe"),
+                      [item["path"] for item in scan["candidates"]])
+
     def test_executable_candidates_empty_for_unknown_game(self):
         self.assertEqual(launcher.executable_candidates(self.root / "missing"), [])
 
