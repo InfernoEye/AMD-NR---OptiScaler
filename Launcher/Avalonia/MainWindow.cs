@@ -946,9 +946,26 @@ public sealed class MainWindow : Window
     {
         Clear("Library");
         _content.Children.Add(Text(UiLanguage.Translate("Your library").ToUpperInvariant(),
-            28, ForegroundBrush, FontWeight.Bold));
-        _content.Children.Add(Text("Steam, Heroic, Lutris and your saved games · Choose a game to manage AMDNR.",
-            13, MutedBrush));
+            27, ForegroundBrush, FontWeight.Bold));
+        _content.Children.Add(Text(
+            $"{_games.Count} games in library  ·  Steam / Heroic / Lutris / Custom",
+            12, MutedBrush));
+        var libraryTabs = new WrapPanel { ItemSpacing = 6, LineSpacing = 7 };
+        void AddLibraryTab(string key, string display)
+        {
+            var tab = Button(display, _auditFilter == key);
+            tab.Padding = new Thickness(12, 6);
+            tab.Click += (_, _) =>
+            {
+                _auditFilter = key;
+                ShowLibrary();
+            };
+            libraryTabs.Children.Add(tab);
+        }
+        AddLibraryTab("All games", UiLanguage.Translate("All games"));
+        AddLibraryTab("AMDNR recorded", UiLanguage.Translate("Installed"));
+        AddLibraryTab("Windows ready", UiLanguage.Translate("Windows ready"));
+        _content.Children.Add(libraryTabs);
 
         var toolbar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), ColumnSpacing = 12 };
         _librarySearch = new TextBox
@@ -1008,7 +1025,13 @@ public sealed class MainWindow : Window
         };
         auditControls.Children.Add(filters);
         auditBar.Children.Add(auditControls);
-        _content.Children.Add(Panel(auditBar, new Thickness(14)));
+        _content.Children.Add(new Expander
+        {
+            Header = "LIBRARY HEALTH  /  AUDIT AND READINESS FILTERS",
+            IsExpanded = false,
+            Background = SurfaceBrush,
+            Content = Panel(auditBar, new Thickness(13)),
+        });
 
         _libraryResults = new StackPanel { Spacing = 12 };
         _content.Children.Add(_libraryResults);
@@ -1265,8 +1288,8 @@ public sealed class MainWindow : Window
             var tiles = new WrapPanel
             {
                 Orientation = Orientation.Horizontal,
-                ItemSpacing = 14,
-                LineSpacing = 14,
+                ItemSpacing = 12,
+                LineSpacing = 12,
             };
             foreach (var game in filtered)
                 tiles.Children.Add(BuildGameTile(game));
@@ -1281,8 +1304,8 @@ public sealed class MainWindow : Window
 
     private Control BuildGameTile(GameEntry game)
     {
-        var stack = new StackPanel { Width = 202, Spacing = 7 };
-        stack.Children.Add(GameArtwork(game, 155));
+        var stack = new StackPanel { Width = 246, Spacing = 8 };
+        stack.Children.Add(GameArtwork(game, 161, fill: true));
         var title = Text(game.Name, 15, ForegroundBrush, FontWeight.SemiBold);
         title.MaxLines = 2;
         stack.Children.Add(title);
@@ -1298,7 +1321,7 @@ public sealed class MainWindow : Window
             stack.Children.Add(Text(game.Custom ? "CUSTOM GAME" : "STEAM GAME",
                 11, MutedBrush));
         }
-        var choose = Button(UiLanguage.Translate("Select game").ToUpperInvariant() + " →", true);
+        var choose = Button(UiLanguage.Translate("Select game").ToUpperInvariant() + " →");
         choose.HorizontalAlignment = HorizontalAlignment.Stretch;
         choose.HorizontalContentAlignment = HorizontalAlignment.Center;
         choose.Click += (_, _) => SelectGame(game);
