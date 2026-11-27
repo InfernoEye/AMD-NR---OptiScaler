@@ -45,6 +45,18 @@ python3 Launcher/Avalonia/amdnr_launcher.py --download-release TAG --release-ass
 
 The version and asset name come from the release catalog; they are not game-name-specific. Only complete upstream AMDNR release ZIPs are supported by this workflow. Optional model packs and Windows executables are not offered as installable packages. **Downloading and installing the Windows DLL files does not establish Proton or neural-runtime compatibility.**
 
+## Linux Doctor
+
+On **Doctor**, choose **Run Installation Diagnostics** to perform read-only checks of Steam libraries, the selected game EXE, the selected release ZIP and the Linux launcher's installation record. If recorded files exist, their SHA-256 hashes are compared against the installation record to identify missing or modified files.
+
+The same report is available at the command line:
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --doctor-json --exe "/path/to/game.exe" --archive "/path/to/AMDNR.zip"
+```
+
+These checks do **not** establish GPU compatibility, Proton execution success, or anti-cheat compatibility.
+
 ## Diagnose missing game artwork
 
 The game library now shows a **Missing Art** filter and a count of unresolved covers. For an exact list of games that remain unresolved after searching Steam caches and official artwork sources, run:
