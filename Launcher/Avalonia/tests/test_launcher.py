@@ -459,6 +459,50 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual((Path(outcome["preserved_modified"]) / "runtime.dll").read_bytes(),
                              b"later modification")
 
+    def test_force_component_remove_with_missing_original_backup(self):
+        tag, asset = "Alpha1", "AMDNR-WrongGPU-test.zip"
+        archive = self.root / tag / asset
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("runtime.dll", b"component replacement")
+        target = self.game / "runtime.dll"
+        target.write_bytes(b"old game bytes")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
+            launcher.install_component(self.exe, tag, asset, replace_conflicts=True)
+            saved = launcher._component_backup_dir(self.exe, asset) / "runtime.dll"
+            saved.unlink()
+            target.write_bytes(b"later modified managed bytes")
+            with self.assertRaisesRegex(ValueError, "approval"):
+                launcher.remove_component(self.exe, asset)
+            result = launcher.remove_component(self.exe, asset,
+                                               backup_modified=True, force=True)
+            self.assertTrue(result["forced"])
+            self.assertEqual(result["originals_not_restored"], ["runtime.dll"])
+            self.assertFalse(target.exists())
+            self.assertEqual(launcher.installed_components(self.exe), [])
+            self.assertEqual((Path(result["preserved_modified"]) / "runtime.dll").read_bytes(),
+                             b"later modified managed bytes")
+
+    def test_force_component_removal_still_rejects_symlink(self):
+        tag, asset = "Alpha1", "AMDNR-WrongGPU-test.zip"
+        archive = self.root / tag / asset
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("runtime.dll", b"component")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
+            launcher.install_component(self.exe, tag, asset)
+            target = self.game / "runtime.dll"
+            target.unlink()
+            target.symlink_to(self.exe)
+            with self.assertRaisesRegex(ValueError, "unsafe|symlink"):
+                launcher.remove_component(self.exe, asset, backup_modified=True, force=True)
+            self.assertTrue(target.is_symlink())
+            self.assertTrue(launcher.installed_components(self.exe))
+
     def test_large_file_count_archive_is_installable_within_limit(self):
         tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
         archive = self.root / asset
