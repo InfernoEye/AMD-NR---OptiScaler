@@ -698,6 +698,11 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
                     new_files.append(_component_install_name(asset, entry.filename))
             except (ValueError, OSError):
                 conflicts.append(_component_install_name(asset, entry.filename))
+    if _daniel_version(asset) is not None:
+        for older in _component_records(executable):
+            if _daniel_version(older) is not None and older != asset:
+                conflicts.append("Remove installed Daniel " + str(_daniel_version(older)) +
+                                 " before installing another version")
     return {"tag": tag, "asset": asset,
             "files": [_component_install_name(asset, e.filename) for e in entries[:50]],
             "file_count": len(entries),
@@ -1207,8 +1212,8 @@ def _release_asset(tag: str, asset_name: str) -> tuple[str, str, int, str | None
                     and a.get("name") == asset_name), None)
     checksum = next((a for a in assets if isinstance(a, dict)
                      and a.get("name") == "SHA256SUMS.txt"), None)
-    if not archive or not checksum:
-        raise ValueError("Release archive or SHA256SUMS.txt is missing")
+    if not archive:
+        raise ValueError("Selected release archive is missing")
     size = archive.get("size")
     if not isinstance(size, int) or not 0 < size <= 1024 * 1024 * 1024:
         raise ValueError("Release archive size is unsupported")
@@ -1219,7 +1224,11 @@ def _release_asset(tag: str, asset_name: str) -> tuple[str, str, int, str | None
     metadata_sha256 = None
     if isinstance(metadata_digest, str) and re.fullmatch(r"sha256:[0-9a-fA-F]{64}", metadata_digest):
         metadata_sha256 = metadata_digest[7:].lower()
-    return root + quote(asset_name), root + "SHA256SUMS.txt", size, metadata_sha256
+    if checksum is None and metadata_sha256 is None:
+        raise ValueError("No official SHA-256 checksum for selected release asset")
+    return (root + quote(asset_name),
+            root + "SHA256SUMS.txt" if checksum is not None else None,
+            size, metadata_sha256)
 
 
 def _release_cache_dir() -> Path:
@@ -1229,18 +1238,18 @@ def _release_cache_dir() -> Path:
 def download_release(tag: str, asset_name: str) -> Path:
     """Download a checksum-verified AMDNR ZIP to the user's cache, never to a game."""
     archive_url, sums_url, size, metadata_sha256 = _release_asset(tag, asset_name)
-    request = urllib.request.Request(sums_url, headers={"User-Agent": "AMDNR-Avalonia-Linux/1.0"})
-    with urllib.request.urlopen(request, timeout=20) as response:
-        sums = response.read(256 * 1024 + 1)
-    if len(sums) > 256 * 1024:
-        raise ValueError("Checksum manifest too large")
     expected = None
-    for line in sums.decode("utf-8-sig").splitlines():
-        # Standard 'sha256  filename' format. Reject unsafe/ambiguous names.
-        match = re.fullmatch(r"([0-9a-fA-F]{64})\s+\*?(.+)", line.strip())
-        if match and match.group(2).strip() == asset_name:
-            expected = match.group(1).lower()
-            break
+    if sums_url is not None:
+        request = urllib.request.Request(sums_url, headers={"User-Agent": "AMDNR-Avalonia-Linux/1.0"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            sums = response.read(256 * 1024 + 1)
+        if len(sums) > 256 * 1024:
+            raise ValueError("Checksum manifest too large")
+        for line in sums.decode("utf-8-sig").splitlines():
+            match = re.fullmatch(r"([0-9a-fA-F]{64})\s+\*?(.+)", line.strip())
+            if match and match.group(2).strip() == asset_name:
+                expected = match.group(1).lower()
+                break
     if expected is None:
         # Some official historical release manifests omit separately uploaded
         # runtime ZIPs. GitHub's release-asset digest is also an upstream
