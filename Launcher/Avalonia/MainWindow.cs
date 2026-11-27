@@ -270,6 +270,109 @@ public sealed class MainWindow : Window
                 $"{valid} recorded installation{(valid == 1 ? "" : "s")}" +
                 (invalid > 0 ? $"  ·  {invalid} record{(invalid == 1 ? "" : "s")} need attention" : ""),
                 15, AccentBrush, FontWeight.SemiBold));
+            var healthTools = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+            var verifyAll = Button("VERIFY ALL INSTALLED FILES", true);
+            var healthResults = new StackPanel { Spacing = 8 };
+            verifyAll.Click += async (_, _) =>
+            {
+                if (_backend is null || _busy) return;
+                _busy = true;
+                verifyAll.IsEnabled = false;
+                _status.Text = "Verifying tracked AMDNR files and backups…";
+                healthResults.Children.Clear();
+                try
+                {
+                    var healthy = 0;
+                    var attention = 0;
+                    foreach (var game in installed)
+                    {
+                        if (game.Status != "recorded") continue;
+                        var report = await _backend.InstallationAsync(game.Executable);
+                        if (_currentSection != "Installed") return;
+                        var good = report.Status == "healthy";
+                        if (good) healthy++; else attention++;
+                        healthResults.Children.Add(Text(
+                            (good ? "✓  " : "!  ") + game.Name + " · " +
+                            report.Status + (report.Status == "invalid_record"
+                                ? ": " + report.Error
+                                : $" · {report.Verified}/{report.Files} verified, " +
+                                  $"{report.Missing} missing, {report.Modified} modified, " +
+                                  $"{report.BackupsMissing} missing backups"),
+                            13, good ? AccentBrush : ForegroundBrush));
+                    }
+                    _status.Text = $"Verified {healthy + attention} installations: " +
+                        $"{healthy} healthy, {attention} need attention.";
+                }
+                catch (Exception ex) { _status.Text = "Verification stopped: " + ex.Message; }
+                finally { _busy = false; verifyAll.IsEnabled = true; }
+            };
+            healthTools.Children.Add(verifyAll);
+            results.Children.Add(healthTools);
+            results.Children.Add(healthResults);
+            var releaseTools = new StackPanel { Spacing = 9 };
+            releaseTools.Children.Add(Text("RELEASE / UPDATE MANAGEMENT",
+                12, AccentBrush, FontWeight.Bold));
+            releaseTools.Children.Add(Text("Compare recorded archive names with published builds. " +
+                "Download a verified ZIP to prepare a manual update. No live game files are " +
+                "replaced automatically.", 12, MutedBrush));
+            var builds = new ComboBox
+            {
+                MinWidth = 350, MaxWidth = 720,
+                PlaceholderText = "Check upstream releases",
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            var compareText = Text("No release check performed.", 13, MutedBrush);
+            var check = Button("CHECK AVAILABLE VERSIONS");
+            check.Click += async (_, _) =>
+            {
+                if (_backend is null || _busy) return;
+                _busy = true;
+                check.IsEnabled = false;
+                try
+                {
+                    var candidates = await _backend.ReleasesAsync();
+                    var visible = _launcherSettings?.ShowPrereleases == true
+                        ? candidates : candidates.Where(x => !x.Prerelease).ToList();
+                    if (_currentSection != "Installed") return;
+                    builds.ItemsSource = visible;
+                    builds.SelectedIndex = visible.Count > 0 ? 0 : -1;
+                    compareText.Text = visible.Count == 0 ? "No releases available." :
+                        $"Latest listed build: {visible[0].Tag} / {visible[0].Asset}. " +
+                        "Check each recorded archive name below before deciding to update.";
+                    _status.Text = $"Loaded {visible.Count} published releases.";
+                }
+                catch (Exception ex) { _status.Text = "Version lookup failed: " + ex.Message; }
+                finally { _busy = false; check.IsEnabled = true; }
+            };
+            releaseTools.Children.Add(check);
+            releaseTools.Children.Add(builds);
+            releaseTools.Children.Add(compareText);
+            var fetch = Button("DOWNLOAD VERIFIED BUILD");
+            fetch.Click += async (_, _) =>
+            {
+                if (_backend is null || _busy || builds.SelectedItem is not ReleaseEntry chosen)
+                    return;
+                _busy = true;
+                fetch.IsEnabled = false;
+                try
+                {
+                    var (exit, result) = await _backend.RunAsync(new[]
+                    {
+                        "--download-release", chosen.Tag, "--release-asset", chosen.Asset
+                    });
+                    if (exit != 0) throw new InvalidOperationException(result);
+                    var path = result.Trim();
+                    if (!File.Exists(path)) throw new IOException("Downloaded archive is missing");
+                    _archive = path;
+                    _status.Text = "Verified " + chosen.Asset +
+                        ". Select a game and use Install for manual version changes.";
+                    compareText.Text = "Verified archive prepared: " + path;
+                }
+                catch (Exception ex) { _status.Text = "Release download failed: " + ex.Message; }
+                finally { _busy = false; fetch.IsEnabled = true; }
+            };
+            releaseTools.Children.Add(fetch);
+            results.Children.Add(Panel(releaseTools));
             if (installed.Count == 0)
             {
                 var empty = new StackPanel { Spacing = 10 };
