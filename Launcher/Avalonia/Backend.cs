@@ -76,6 +76,20 @@ public sealed class Backend
         return games;
     }
 
+    public async Task<string?> SavedExecutableAsync(string folder)
+    {
+        var (exit, output) = await RunAsync(new[] { "--saved-exe", folder });
+        if (exit != 0) throw new InvalidOperationException(output);
+        return string.IsNullOrWhiteSpace(output) ? null : output;
+    }
+
+    public async Task RememberExecutableAsync(string folder, string executable)
+    {
+        var (exit, output) = await RunAsync(new[]
+            { "--remember-exe", folder, "--exe", executable });
+        if (exit != 0) throw new InvalidOperationException(output);
+    }
+
     public async Task<IReadOnlyList<ExecutableEntry>> ExecutablesAsync(
         string gameFolder, CancellationToken token = default)
     {
@@ -89,7 +103,8 @@ public sealed class Backend
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
             results.Add(new ExecutableEntry(path,
                 item.GetProperty("recommended").GetBoolean(),
-                item.GetProperty("suspicious").GetBoolean()));
+                item.GetProperty("suspicious").GetBoolean(),
+                item.GetProperty("auto_select").GetBoolean()));
         }
         return results;
     }
@@ -116,7 +131,7 @@ public sealed class Backend
 
 public sealed record GameEntry(string Name, string Folder, string? Artwork);
 
-public sealed record ExecutableEntry(string Path, bool Recommended, bool Suspicious)
+public sealed record ExecutableEntry(string Path, bool Recommended, bool Suspicious, bool AutoSelect)
 {
     public override string ToString() =>
         (Recommended ? "★  " : Suspicious ? "⚠  " : "") + Path;
