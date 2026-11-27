@@ -78,7 +78,7 @@ class LauncherTests(unittest.TestCase):
         cache = steam / "appcache/librarycache"
         cache.mkdir(parents=True)
         cover = cache / "123_library_600x900.jpg"
-        cover.write_bytes(b"fake cover" * 10)
+        cover.write_bytes(b"\xff\xd8\xff" + b"x" * 100)
         with patch.object(launcher, "steam_games", return_value=[("Test", game)]), \
              patch.object(launcher, "steam_roots", return_value=[steam]):
             details = launcher.steam_game_details()
@@ -91,7 +91,7 @@ class LauncherTests(unittest.TestCase):
         cache = steam / "appcache/librarycache/123"
         cache.mkdir(parents=True)
         cover = cache / "library_600x900.jpg"
-        cover.write_bytes(b"image" * 20)
+        cover.write_bytes(b"\xff\xd8\xff" + b"x" * 100)
         self.assertEqual(launcher._steam_artwork("123", [steam]), str(cover))
 
     def test_steam_artwork_rejects_non_numeric_app_id(self):
@@ -120,7 +120,34 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(Path(found).read_bytes()[:3], b"\xff\xd8\xff")
             self.assertIn("/steam/apps/123/library_600x900.jpg", get.call_args.args[0].full_url)
             self.assertEqual(launcher._steam_artwork("123", [], True), found)
-            get.assert_called_once()
+            self.assertEqual(get.call_count, 2)
+
+    def test_user_grid_artwork_precedes_official_cache(self):
+        steam = self.root / "Steam"
+        grid = steam / "userdata/12345/config/grid"
+        grid.mkdir(parents=True)
+        custom = grid / "678p.png"
+        custom.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 80)
+        cache = steam / "appcache/librarycache"
+        cache.mkdir(parents=True)
+        (cache / "678_library_600x900.jpg").write_bytes(b"\xff\xd8\xff" + b"x" * 90)
+        self.assertEqual(launcher._steam_artwork("678", [steam]), str(custom))
+
+    def test_per_game_manual_artwork_override(self):
+        artwork = self.root / "custom.png"
+        artwork.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 100)
+        with patch.dict(launcher.os.environ, {
+            "XDG_DATA_HOME": str(self.root / "data"),
+        }):
+            saved = launcher.set_artwork(self.game, artwork)
+            self.assertTrue(Path(saved).is_file())
+            self.assertEqual(launcher._steam_artwork("123", [], game_folder=self.game), saved)
+
+    def test_manual_artwork_rejects_nonimage(self):
+        bad = self.root / "not-an-image.jpg"
+        bad.write_text("not an image")
+        with self.assertRaisesRegex(ValueError, "JPEG and PNG"):
+            launcher.set_artwork(self.game, bad)
 
     def test_missing_game_executable_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Windows"):
