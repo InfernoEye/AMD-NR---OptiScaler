@@ -58,6 +58,8 @@ public sealed class MainWindow : Window
     private bool _missingArtOnly;
     private StackPanel? _libraryResults;
     private TextBox? _librarySearch;
+    private readonly Dictionary<string, LibraryAuditEntry> _libraryAudit = new(StringComparer.Ordinal);
+    private string _auditFilter = "All games";
 
     public MainWindow()
     {
@@ -264,6 +266,33 @@ public sealed class MainWindow : Window
         toolbar.Children.Add(manual);
         _content.Children.Add(toolbar);
 
+        var auditBar = new StackPanel { Spacing = 10 };
+        auditBar.Children.Add(Text("GAME READINESS  /  LIBRARY AUDIT", 12, AccentBrush, FontWeight.Bold));
+        auditBar.Children.Add(Text("Check executable detection across Steam and custom installations. " +
+            "Read-only; scans are run only when requested. An AMDNR record does not verify its files.",
+            12, MutedBrush));
+        var auditControls = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 10,
+            LineSpacing = 8 };
+        var auditButton = Button(_libraryAudit.Count > 0 ? "RESCAN LIBRARY" : "ANALYZE LIBRARY", true);
+        auditButton.Click += async (_, _) => await AuditLibraryAsync(auditButton);
+        auditControls.Children.Add(auditButton);
+        var filters = new ComboBox
+        {
+            ItemsSource = new[] { "All games", "Windows ready", "Native Linux",
+                "Needs attention", "AMDNR recorded" },
+            SelectedItem = _auditFilter,
+            MinWidth = 200,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        filters.SelectionChanged += (_, _) =>
+        {
+            _auditFilter = filters.SelectedItem?.ToString() ?? "All games";
+            RenderLibraryResults();
+        };
+        auditControls.Children.Add(filters);
+        auditBar.Children.Add(auditControls);
+        _content.Children.Add(Panel(auditBar, new Thickness(14)));
+
         _libraryResults = new StackPanel { Spacing = 12 };
         _content.Children.Add(_libraryResults);
         RenderLibraryResults();
@@ -424,18 +453,65 @@ public sealed class MainWindow : Window
         _content.Children.Add(Panel(form));
     }
 
+    private async Task AuditLibraryAsync(Button trigger)
+    {
+        if (_busy || _backend is null) return;
+        _busy = true;
+        trigger.IsEnabled = false;
+        trigger.Content = "ANALYZING LIBRARY…";
+        _status.Text = "Auditing installed game executables (read-only)…";
+        try
+        {
+            var entries = await _backend.AuditLibraryAsync();
+            _libraryAudit.Clear();
+            foreach (var item in entries)
+                _libraryAudit[Path.GetFullPath(item.Folder)] = item;
+            _status.Text = $"Analyzed {entries.Count} games · " +
+                $"{entries.Count(e => e.Status == "windows_ready")} Windows ready · " +
+                $"{entries.Count(e => e.Status == "native_linux")} native Linux · " +
+                $"{entries.Count(e => e.InstalledRecord)} AMDNR records.";
+            RenderLibraryResults();
+            trigger.Content = "RESCAN LIBRARY";
+        }
+        catch (Exception ex)
+        {
+            _status.Text = "Library audit failed: " + ex.Message;
+            trigger.Content = _libraryAudit.Count > 0 ? "RESCAN LIBRARY" : "ANALYZE LIBRARY";
+        }
+        finally { _busy = false; trigger.IsEnabled = true; }
+    }
+
+    private bool MatchesAuditFilter(GameEntry game)
+    {
+        if (_auditFilter == "All games") return true;
+        if (!_libraryAudit.TryGetValue(Path.GetFullPath(game.Folder), out var entry))
+            return false;
+        return _auditFilter switch
+        {
+            "Windows ready" => entry.Status == "windows_ready",
+            "Native Linux" => entry.Status == "native_linux",
+            "AMDNR recorded" => entry.InstalledRecord,
+            "Needs attention" => entry.Status is not ("windows_ready" or "native_linux"),
+            _ => true,
+        };
+    }
+
     private void RenderLibraryResults()
     {
         if (_libraryResults is null) return;
         _libraryResults.Children.Clear();
         var filtered = _games.Where(game =>
             (!_missingArtOnly || (!game.Custom && string.IsNullOrEmpty(game.Artwork))) &&
+            MatchesAuditFilter(game) &&
             (game.Name.Contains(_libraryQuery, StringComparison.OrdinalIgnoreCase) ||
              game.Folder.Contains(_libraryQuery, StringComparison.OrdinalIgnoreCase))).ToList();
         var missingCount = _games.Count(game => !game.Custom && string.IsNullOrEmpty(game.Artwork));
         var customCount = _games.Count(game => game.Custom);
         _libraryResults.Children.Add(Text(
-            $"{filtered.Count} of {_games.Count} entries  •  {customCount} custom  •  {missingCount} Steam covers missing",
+            $"{filtered.Count} of {_games.Count} entries  •  {customCount} custom  •  {missingCount} Steam covers missing" +
+            (_libraryAudit.Count == 0 ? "  •  readiness not scanned" :
+                $"  •  {_libraryAudit.Values.Count(a => a.Status == "windows_ready")} Windows ready" +
+                $"  •  {_libraryAudit.Values.Count(a => a.Status == "native_linux")} native Linux"),
             12, AccentBrush, FontWeight.SemiBold));
 
         if (filtered.Count == 0)
@@ -446,7 +522,9 @@ public sealed class MainWindow : Window
             empty.Children.Add(Text(_games.Count == 0
                 ? "Check Steam libraries or add a custom game."
                 : _missingArtOnly ? "All visible games have covers. Choose SHOW ALL to return." :
-                    "Try searching for a shorter name or clear the search field.", 13, MutedBrush));
+                    _auditFilter != "All games" ?
+                        "No games match this readiness filter. Choose All games or analyze the library." :
+                        "Try searching for a shorter name or clear the search field.", 13, MutedBrush));
             var action = Button(_games.Count == 0 ? "Add a custom game" : "Clear search", true);
             action.Click += (_, _) =>
             {
@@ -471,7 +549,25 @@ public sealed class MainWindow : Window
 
         var detail = new StackPanel { Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
         detail.Children.Add(Text(game.Name, 19, ForegroundBrush, FontWeight.SemiBold));
-        detail.Children.Add(Text(game.Custom ? "CUSTOM GAME  ·  LOCAL" : "STEAM  ·  PROTON / WINE", 11, MutedBrush, FontWeight.SemiBold));
+        detail.Children.Add(Text(game.Custom ? "CUSTOM GAME  ·  LOCAL" : "STEAM  ·  GAME INSTALLATION", 11, MutedBrush, FontWeight.SemiBold));
+        if (_libraryAudit.TryGetValue(Path.GetFullPath(game.Folder), out var audit))
+        {
+            var readiness = audit.Status switch
+            {
+                "windows_ready" => "✓  WINDOWS EXE READY" +
+                    (audit.Source is null ? "" : $"  ·  {audit.Source.ToUpperInvariant()}"),
+                "native_linux" => "●  NATIVE LINUX BUILD",
+                "needs_selection" => "○  CHOOSE WINDOWS EXECUTABLE",
+                "no_windows_exe" => "○  WINDOWS EXECUTABLE NOT FOUND",
+                "missing_folder" => "!  INSTALLATION FOLDER UNAVAILABLE",
+                "scan_incomplete" => "!  SCAN INCOMPLETE",
+                _ => "!  EXECUTABLE NEEDS ATTENTION",
+            };
+            detail.Children.Add(Text(readiness +
+                (audit.InstalledRecord ? "  ·  AMDNR RECORDED" : ""),
+                11, audit.Status == "windows_ready" ? AccentBrush : MutedBrush,
+                FontWeight.SemiBold));
+        }
         var location = Text(game.Folder, 12, MutedBrush);
         location.MaxLines = 2;
         detail.Children.Add(location);
@@ -1291,6 +1387,7 @@ public sealed class MainWindow : Window
             StringComparer.Ordinal);
         _games = steam.Concat(custom.Where(g => seen.Add(Path.GetFullPath(g.Folder))))
             .OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        _libraryAudit.Clear(); // Never retain readiness information after library refresh.
     }
 
     private async Task RefreshGamesAsync()
