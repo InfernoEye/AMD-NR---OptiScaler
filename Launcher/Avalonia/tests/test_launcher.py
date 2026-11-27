@@ -326,6 +326,56 @@ class LauncherTests(unittest.TestCase):
         self.assertFalse(next(x for x in report["checks"] if x["name"] == "Game executable")["ok"])
         self.assertFalse((self.root / launcher.STATE_NAME).exists())
 
+    def test_custom_game_persists_name_and_folder(self):
+        with patch.dict(launcher.os.environ, {
+            "XDG_CONFIG_HOME": str(self.root / "configuration"),
+        }):
+            added = launcher.add_custom_game(self.game, "My Custom Game")
+            self.assertEqual(added["name"], "My Custom Game")
+            saved = launcher.custom_games()
+            self.assertEqual(len(saved), 1)
+            self.assertEqual(saved[0]["folder"], str(self.game))
+            self.assertTrue(saved[0]["exists"])
+            self.assertTrue((self.root / "configuration/amdnr/custom-games.json").is_file())
+            with self.assertRaisesRegex(ValueError, "already"):
+                launcher.add_custom_game(self.game, "Duplicate")
+            launcher.rename_custom_game(self.game, "Updated Name")
+            self.assertEqual(launcher.custom_games()[0]["name"], "Updated Name")
+
+    def test_custom_game_missing_directory_still_listed(self):
+        with patch.dict(launcher.os.environ, {
+            "XDG_CONFIG_HOME": str(self.root / "configuration"),
+        }):
+            launcher.add_custom_game(self.game)
+            self.exe.unlink()
+            self.game.rmdir()
+            items = launcher.custom_games()
+            self.assertEqual(len(items), 1)
+            self.assertFalse(items[0]["exists"])
+
+    def test_custom_game_remove_does_not_touch_game_files(self):
+        with patch.dict(launcher.os.environ, {
+            "XDG_CONFIG_HOME": str(self.root / "configuration"),
+        }):
+            launcher.add_custom_game(self.game)
+            launcher.remove_custom_game(self.game)
+            self.assertEqual(launcher.custom_games(), [])
+            self.assertTrue(self.exe.is_file())
+
+    def test_custom_game_validation_and_registry_failure(self):
+        with patch.dict(launcher.os.environ, {
+            "XDG_CONFIG_HOME": str(self.root / "configuration"),
+        }):
+            with self.assertRaisesRegex(ValueError, "existing game folder"):
+                launcher.add_custom_game(self.root / "not-found")
+            with self.assertRaisesRegex(ValueError, "printable"):
+                launcher.add_custom_game(self.game, "bad\nname")
+            path = launcher._custom_games_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("invalid json", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "custom game registry"):
+                launcher.custom_games()
+
     def test_executable_candidates_prioritize_shipping_binary(self):
         shipping = self.game / "Binaries/Win64/Example-Win64-Shipping.exe"
         shipping.parent.mkdir(parents=True)
