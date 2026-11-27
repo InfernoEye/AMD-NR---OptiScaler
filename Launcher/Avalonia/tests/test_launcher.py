@@ -54,6 +54,43 @@ class LauncherTests(unittest.TestCase):
         state = json.loads((self.game / launcher.STATE_NAME).read_text())
         self.assertEqual(len(state["files"]), 1)
 
+    def test_installation_report_tracks_source_and_integrity(self):
+        launcher.install(self.archive, self.exe, "dxgi.dll")
+        report = launcher.installation_report(self.exe)
+        self.assertEqual(report["status"], "healthy")
+        self.assertEqual(report["source_archive"], "release.zip")
+        self.assertEqual(len(report["source_sha256"]), 64)
+        self.assertEqual(report["verified"], 2)
+        (self.game / "dxgi.dll").write_bytes(b"tampered")
+        report = launcher.installation_report(self.exe)
+        self.assertEqual(report["status"], "needs_attention")
+        self.assertEqual(report["modified"], 1)
+
+    def test_old_install_record_has_no_invented_release_version(self):
+        launcher.install(self.archive, self.exe, "dxgi.dll")
+        record_path = self.game / launcher.STATE_NAME
+        record = json.loads(record_path.read_text())
+        record.pop("source_archive")
+        record.pop("source_sha256")
+        record_path.write_text(json.dumps(record))
+        report = launcher.installation_report(self.exe)
+        self.assertEqual(report["status"], "healthy")
+        self.assertIsNone(report["source_archive"])
+
+    def test_installation_report_detects_missing_backup(self):
+        existing = self.game / "dxgi.dll"
+        existing.write_bytes(b"original")
+        launcher.install(self.archive, self.exe, "dxgi.dll")
+        (self.game / "AMDNR_backup/linux-launcher/dxgi.dll").unlink()
+        report = launcher.installation_report(self.exe)
+        self.assertEqual(report["status"], "needs_attention")
+        self.assertEqual(report["backups_missing"], 1)
+
+    def test_installation_report_not_installed(self):
+        report = launcher.installation_report(self.exe)
+        self.assertFalse(report["installed"])
+        self.assertEqual(report["status"], "not_installed")
+
     def test_reinstall_is_refused(self):
         launcher.install(self.archive, self.exe, "dxgi.dll")
         with self.assertRaisesRegex(ValueError, "already recorded"):
