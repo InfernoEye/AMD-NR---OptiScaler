@@ -2272,7 +2272,8 @@ public sealed class MainWindow : Window
                 else
                 {
                     var result = await _backend.PreviewComponentAsync(selected, chosen.Tag, chosen.Asset);
-                    if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                    if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions" ||
+                        !ReferenceEquals(danielPicker.SelectedItem, chosen)) return;
                     danielPreviewDetails.Children.Add(Text(
                         result.FileCount + " Daniel runtime files · " +
                         result.NewFileCount + " new · " +
