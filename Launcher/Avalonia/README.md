@@ -88,10 +88,27 @@ The registry only stores the game's display name and local installation folder. 
 
 The selected-game page includes a **GAME SETUP / QUICK ACTIONS** panel:
 it displays readiness without rescanning, offers **Copy EXE Path** and **Open
-Game Folder**, and provides a copyable Steam/Proton launch override. For an
-existing recorded AMDNR installation, the override uses the recorded proxy
-DLL rather than an unrelated default selection. ASI plugins are explicitly
-shown as requiring a compatible loader, not a DLL override.
+Game Folder**, and reads the game's existing Steam Launch Options from the
+local user configuration (`Steam/userdata/<profile>/config/localconfig.vdf`)
+without modifying it. The launcher shows both the **existing options** and
+a **final copyable preview**, inserting the AMDNR DLL override while preserving
+other environment variables, wrappers, and game arguments. If the original
+contains `WINEDLLOVERRIDES`, the target DLL is merged without discarding other
+DLL settings. Missing or conflicting Steam profiles and complex override
+expressions produce a warning instead of an unsafe automatic merge.
+
+For an existing recorded AMDNR installation, the override uses the recorded
+proxy DLL rather than an unrelated default selection. ASI plugins are
+explicitly shown as requiring a compatible loader, not a DLL override.
+No game files or Steam settings are changed while reading or copying options.
+The Steam options reader is a small per-game lookup, **not** a library rescan.
+
+Read the same preview from a terminal:
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --steam-user-options-json \
+  "/path/to/steamapps/common/Game" --alias dxgi.dll
+```
 
 The **Install** page now updates its launch-options preview immediately when
 the proxy DLL choice changes. Copying options only copies text; the launcher
