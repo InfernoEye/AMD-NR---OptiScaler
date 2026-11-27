@@ -1,0 +1,146 @@
+"""Regression coverage for independent Linux maintenance transactions."""
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+import zipfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import amdnr_launcher as core
+import launcher_maintenance as maintenance
+
+
+class MaintenanceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.game = self.root / "Game With Spaces"
+        self.game.mkdir()
+        self.exe = self.game / "Game.exe"
+        self.exe.write_bytes(b"game exe")
+        self.archive = self.root / "v1.zip"
+        self.write_zip(self.archive, b"proxy first", b"cfg first")
+        core.install(self.archive, self.exe, "dxgi.dll")
+
+    @staticmethod
+    def write_zip(path, proxy, ini):
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("payload/OptiScaler.dll", proxy)
+            archive.writestr("payload/OptiScaler.ini", ini)
+
+    def test_exact_recorded_archive_repairs_missing_file(self):
+        path = self.game / "dxgi.dll"
+        path.unlink()
+        report = maintenance.repair_or_update(self.exe, self.archive)
+        self.assertEqual(report["status"], "repaired")
+        self.assertEqual(path.read_bytes(), b"proxy first")
+        self.assertFalse(maintenance.status(self.exe)["interrupted"])
+        self.assertEqual(core.installation_report(self.exe)["status"], "healthy")
+
+    def test_modified_file_requires_explicit_permission_and_is_preserved(self):
+        path = self.game / "dxgi.dll"
+        path.write_bytes(b"my custom DLL")
+        with self.assertRaisesRegex(ValueError, "Modified managed file"):
+            maintenance.repair_or_update(self.exe, self.archive)
+        self.assertEqual(path.read_bytes(), b"my custom DLL")
+        report = maintenance.repair_or_update(self.exe, self.archive, allow_modified=True)
+        self.assertEqual(report["status"], "repaired")
+        self.assertEqual(path.read_bytes(), b"proxy first")
+        preserved = list((self.game / "AMDNR_backup").glob("linux-repair-preserved-*/dxgi.dll"))
+        self.assertEqual(len(preserved), 1)
+        self.assertEqual(preserved[0].read_bytes(), b"my custom DLL")
+
+    def test_upgrade_keeps_original_game_file_for_uninstall(self):
+        original = self.game / "OptiScaler.ini"
+        # Upgrade after clean install; original user INI was not backed up.
+        updated = self.root / "v2.zip"
+        self.write_zip(updated, b"proxy next", b"cfg next")
+        result = maintenance.repair_or_update(self.exe, updated, update=True)
+        self.assertEqual(result["status"], "updated")
+        self.assertEqual((self.game / "dxgi.dll").read_bytes(), b"proxy next")
+        self.assertEqual(original.read_bytes(), b"cfg next")
+        self.assertEqual(core.installation_report(self.exe)["status"], "healthy")
+        removed, warnings = core.uninstall(self.exe)
+        self.assertFalse(warnings)
+        self.assertFalse((self.game / "dxgi.dll").exists())
+
+    def test_update_blocks_unmanaged_file_collisions(self):
+        update = self.root / "v3.zip"
+        with zipfile.ZipFile(update, "w") as archive:
+            archive.writestr("payload/OptiScaler.dll", b"new")
+            archive.writestr("payload/new.dll", b"our new")
+        (self.game / "new.dll").write_bytes(b"unmanaged")
+        with self.assertRaisesRegex(ValueError, "unmanaged"):
+            maintenance.repair_or_update(self.exe, update, update=True)
+        self.assertEqual((self.game / "new.dll").read_bytes(), b"unmanaged")
+        self.assertFalse(maintenance.status(self.exe)["interrupted"])
+
+    def test_repair_rejects_wrong_archive_even_when_filenames_match(self):
+        different = self.root / "wrong.zip"
+        self.write_zip(different, b"evil", b"cfg first")
+        with self.assertRaisesRegex(ValueError, "exact recorded"):
+            maintenance.repair_or_update(self.exe, different)
+        self.assertEqual((self.game / "dxgi.dll").read_bytes(), b"proxy first")
+
+    def test_proxy_retry_skips_occupied_alias_and_preserves_modified(self):
+        (self.game / "version.dll").write_bytes(b"third party")
+        report = maintenance.next_proxy(self.exe, core.ALIASES)
+        self.assertNotEqual(report["alias"], "version.dll")
+        self.assertEqual((self.game / "version.dll").read_bytes(), b"third party")
+        self.assertFalse((self.game / "dxgi.dll").exists())
+        self.assertTrue((self.game / report["alias"]).exists())
+        core.uninstall(self.exe)
+        self.assertEqual((self.game / "version.dll").read_bytes(), b"third party")
+
+    def test_recovery_restores_original_snapshot_without_overwriting_other_edits(self):
+        # Emulate an interruption immediately after the new proxy was placed.
+        root = self.game
+        snapshot = root / "AMDNR_backup" / maintenance.TRANSACTION_DIR
+        snapshot.mkdir(parents=True)
+        old_state = root / ".amdnr-linux-install.json"
+        state_snapshot = snapshot / "original-install.json"
+        state_snapshot.write_bytes(old_state.read_bytes())
+        original = root / "dxgi.dll"
+        (snapshot / "dxgi.dll").write_bytes(original.read_bytes())
+        changed = b"temporary replacement"
+        original.write_bytes(changed)
+        maintenance.write_json_atomic(root / maintenance.JOURNAL_NAME, {
+            "format": 1,
+            "state_sha256": maintenance.digest(old_state),
+            "new_state_sha256": maintenance.digest(old_state),
+            "touched": [{
+                "path": "dxgi.dll",
+                "previous_sha256": maintenance.digest(snapshot / "dxgi.dll"),
+                "expected_sha256": __import__("hashlib").sha256(changed).hexdigest(),
+            }]
+        })
+        result = maintenance.restore_transaction(self.exe)
+        self.assertEqual(result["status"], "restored")
+        self.assertEqual(original.read_bytes(), b"proxy first")
+        self.assertFalse(maintenance.status(self.exe)["interrupted"])
+
+    def test_recovery_protects_files_modified_after_interruption(self):
+        root = self.game
+        snapshot = root / "AMDNR_backup" / maintenance.TRANSACTION_DIR
+        snapshot.mkdir(parents=True)
+        state = root / ".amdnr-linux-install.json"
+        (snapshot / "original-install.json").write_bytes(state.read_bytes())
+        (snapshot / "dxgi.dll").write_bytes((root / "dxgi.dll").read_bytes())
+        maintenance.write_json_atomic(root / maintenance.JOURNAL_NAME, {
+            "format": 1, "state_sha256": maintenance.digest(state),
+            "new_state_sha256": maintenance.digest(state),
+            "touched": [{"path": "dxgi.dll",
+                         "previous_sha256": maintenance.digest(snapshot / "dxgi.dll"),
+                         "expected_sha256": "f" * 64}],
+        })
+        (root / "dxgi.dll").write_bytes(b"unrecognized third-party change")
+        with self.assertRaisesRegex(ValueError, "changed independently"):
+            maintenance.restore_transaction(self.exe)
+        self.assertEqual((root / "dxgi.dll").read_bytes(),
+                         b"unrecognized third-party change")
+
+
+if __name__ == "__main__":
+    unittest.main()
