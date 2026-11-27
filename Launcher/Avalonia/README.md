@@ -101,6 +101,28 @@ python3 Launcher/Avalonia/amdnr_launcher.py --bridge-discover-json --exe "/path/
 All changes for this wizard are limited to `Launcher/Avalonia/`, including
 `bridge_discovery.py` and regression tests in `tests/test_community_bridge.py`.
 
+## Steam launch options after bridge installation
+
+The bridge wizard now reads the game's existing Steam launch options from the
+app's `appmanifest_*.acf` and active account's `userdata/*/config/localconfig.vdf`
+(read-only). It displays the current options, the bridge wrapper combined into
+the existing `%command%` position, and three explicit groups:
+
+- **Remove:** only `WINEDLLOVERRIDES` entries for DLL aliases proven to belong
+  to earlier AMDNR v1 records preserved in the migration snapshot
+- **Keep:** unrelated Steam environment variables, launch wrappers such as
+  `gamemoderun` and `mangohud`, and game arguments
+- **Review:** other DLL overrides, legacy D3D12-disabling Proton flags,
+  ambiguous shell syntax or pre-existing bridge wrappers
+
+The preview is **copy-only**. The launcher never writes Steam settings, and
+unknown overrides are not silently removed. When several Steam userdata
+profiles disagree or the options cannot be read, the wizard allows pasting
+the active account's options and reviewing a new preview. If a safe merge
+cannot be made, the copy action is disabled. A successful installation
+does not establish that the specific Proton-Wineland version can run the
+selected neural rendering runtime.
+
 ## Primary Linux/Proton installation and existing-file migration
 
 On Linux, the game page's main **Install Linux Bridge** action opens the
