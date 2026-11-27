@@ -460,6 +460,201 @@ def _github_json(url: str) -> object:
     return json.loads(payload)
 
 
+
+def component_catalog(limit: int = 12) -> list[dict[str, object]]:
+    """List official independently downloadable AMDNR extension ZIPs."""
+    releases = _github_json(f"{RELEASE_API}?per_page={limit}")
+    if not isinstance(releases, list):
+        raise ValueError("Invalid releases response")
+    found, seen = [], set()
+    for release in releases:
+        if not isinstance(release, dict) or release.get("draft"):
+            continue
+        tag, assets = release.get("tag_name"), release.get("assets")
+        if not isinstance(tag, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", tag) or not isinstance(assets, list):
+            continue
+        if not any(isinstance(a, dict) and a.get("name") == "SHA256SUMS.txt" for a in assets):
+            continue
+        for a in assets:
+            if not isinstance(a, dict):
+                continue
+            name, size = a.get("name"), a.get("size")
+            if (not isinstance(name, str) or not _is_component_zip(name)
+                    or not isinstance(size, int) or not 0 < size <= 1024 * 1024 * 1024
+                    or name in seen):
+                continue
+            seen.add(name)
+            found.append({"tag": tag, "name": name, "asset": name, "bytes": size,
+                          "prerelease": bool(release.get("prerelease", False))})
+    return found
+
+
+def _is_component_zip(name: str) -> bool:
+    return bool(re.fullmatch(r"AMDNR-(?!v[0-9]|Launcher)[A-Za-z0-9._-]+\.zip", name, re.I))
+
+
+def _component_manifest(executable: Path) -> Path:
+    state = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+    key = hashlib.sha256(str(executable.resolve().parent).encode()).hexdigest()
+    return state / "amdnr" / "managed-components" / f"{key}.json"
+
+
+def _component_records(executable: Path) -> dict:
+    path = _component_manifest(executable)
+    if not path.exists():
+        return {}
+    if path.is_symlink() or path.stat().st_size > 256 * 1024:
+        raise ValueError("Invalid component registry")
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict) or data.get("format") != 1 or not isinstance(data.get("components"), dict):
+        raise ValueError("Invalid component registry")
+    return data["components"]
+
+
+def _save_component_records(executable: Path, records: dict) -> None:
+    path = _component_manifest(executable)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink():
+        raise ValueError("Unsafe component registry")
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                     prefix=".components-", delete=False) as stream:
+        temp = Path(stream.name)
+        os.chmod(temp, 0o600)
+        json.dump({"format": 1, "components": records}, stream, indent=2)
+        stream.flush()
+        os.fsync(stream.fileno())
+    try:
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _component_entries(archive: Path) -> list:
+    with zipfile.ZipFile(archive) as source:
+        entries, seen, size = [], set(), 0
+        for entry in source.infolist():
+            name = entry.filename
+            parts = name.rstrip("/").split("/")
+            if (not name or "\\" in name or name.startswith("/") or ":" in name
+                    or any(p in ("", ".", "..") for p in parts)):
+                raise ValueError("Unsafe archive path")
+            if entry.is_dir():
+                continue
+            mode = (entry.external_attr >> 16) & 0o170000
+            if mode not in (0, 0o100000):
+                raise ValueError("Archive contains links or special files")
+            size += entry.file_size
+            if len(entries) >= 500 or size > 1024 * 1024 * 1024:
+                raise ValueError("Component archive too large")
+            if name.casefold() in seen:
+                raise ValueError("Duplicate archive path")
+            seen.add(name.casefold())
+            entries.append(entry)
+    if not entries:
+        raise ValueError("Empty component archive")
+    return entries
+
+
+def _component_target(root: Path, name: str) -> Path:
+    dest = root.joinpath(*name.split("/"))
+    relative = dest.relative_to(root)
+    parent = root
+    if root.is_symlink():
+        raise ValueError("Symlink game folder")
+    for segment in relative.parts[:-1]:
+        parent = parent / segment
+        if parent.is_symlink():
+            raise ValueError("Symlink component directory")
+    if dest.is_symlink():
+        raise ValueError("Symlink component target")
+    return dest
+
+
+def component_preview(executable: Path, tag: str, asset: str) -> dict:
+    if not executable.is_file() or executable.is_symlink() or executable.suffix.lower() != ".exe":
+        raise ValueError("Select a Windows game executable")
+    if not _is_component_zip(asset):
+        raise ValueError("Not a component package")
+    archive = download_release(tag, asset)
+    root = executable.resolve().parent
+    entries = _component_entries(archive)
+    conflicts = []
+    for entry in entries:
+        try:
+            dest = _component_target(root, entry.filename)
+            if dest.exists():
+                conflicts.append(entry.filename)
+        except ValueError:
+            conflicts.append(entry.filename)
+    return {"tag": tag, "asset": asset, "files": [e.filename for e in entries],
+            "conflicts": conflicts, "installable": not conflicts}
+
+
+def install_component(executable: Path, tag: str, asset: str) -> dict:
+    preview = component_preview(executable, tag, asset)
+    if preview["conflicts"]:
+        raise ValueError("Component would overwrite game files: " + ", ".join(preview["conflicts"][:6]))
+    records = _component_records(executable)
+    if asset in records:
+        raise ValueError("Component already managed")
+    root = executable.resolve().parent
+    archive = _release_cache_dir() / tag / asset
+    added, hashes = [], {}
+    try:
+        with zipfile.ZipFile(archive) as source:
+            for entry in _component_entries(archive):
+                dest = _component_target(root, entry.filename)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with source.open(entry) as incoming, dest.open("xb") as output:
+                    added.append(dest)
+                    sha = hashlib.sha256()
+                    for block in iter(lambda: incoming.read(1024 * 1024), b""):
+                        sha.update(block)
+                        output.write(block)
+                    hashes[entry.filename] = sha.hexdigest()
+        records[asset] = {"tag": tag, "files": hashes}
+        _save_component_records(executable, records)
+    except Exception:
+        for dest in reversed(added):
+            dest.unlink(missing_ok=True)
+        raise
+    return {"status": "installed", "asset": asset, "files": len(added)}
+
+
+def installed_components(executable: Path) -> list:
+    root = executable.resolve().parent
+    output = []
+    for asset, rec in _component_records(executable).items():
+        if not isinstance(rec, dict) or not isinstance(rec.get("files"), dict):
+            raise ValueError("Invalid component record")
+        changed = []
+        for name, digest in rec["files"].items():
+            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise ValueError("Invalid recorded component digest")
+            dest = _component_target(root, name)
+            if not dest.is_file() or _digest(dest) != digest:
+                changed.append(name)
+        output.append({"asset": asset, "tag": rec.get("tag"), "files": len(rec["files"]), "modified": changed})
+    return output
+
+
+def remove_component(executable: Path, asset: str) -> dict:
+    records = _component_records(executable)
+    if asset not in records:
+        raise ValueError("Component not managed")
+    root = executable.resolve().parent
+    for name, digest in records[asset]["files"].items():
+        dest = _component_target(root, name)
+        if not dest.is_file() or _digest(dest) != digest:
+            raise ValueError("Component modified; refusing removal: " + name)
+    for name in records[asset]["files"]:
+        _component_target(root, name).unlink()
+    count = len(records[asset]["files"])
+    del records[asset]
+    _save_component_records(executable, records)
+    return {"status": "removed", "asset": asset, "files": count}
+
+
 def release_catalog(limit: int = 12) -> list[dict[str, object]]:
     """Return only upstream AMDNR full-package ZIP assets from GitHub releases."""
     if not 1 <= limit <= 30:
@@ -499,7 +694,7 @@ def _release_asset(tag: str, asset_name: str) -> tuple[str, str, int]:
     """Resolve a selected release again; never trust a caller-supplied download URL."""
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", tag):
         raise ValueError("Invalid release tag")
-    if not re.fullmatch(r"AMDNR-v[A-Za-z0-9._-]+\.zip", asset_name):
+    if not (re.fullmatch(r"AMDNR-v[A-Za-z0-9._-]+\.zip", asset_name) or _is_component_zip(asset_name)):
         raise ValueError("Only AMDNR release ZIP packages can be downloaded")
     record = _github_json(f"{RELEASE_API}/tags/{tag}")
     if not isinstance(record, dict) or record.get("draft"):
@@ -1879,6 +2074,12 @@ def main() -> int:
     parser.add_argument("--settings-json", action="store_true", help="Read persistent launcher preferences")
     parser.add_argument("--save-settings-base64", metavar="JSON_B64", help="Save validated launcher preferences")
     parser.add_argument("--ini-json", action="store_true", help="Read OptiScaler.ini beside --exe")
+    parser.add_argument("--components-json", action="store_true")
+    parser.add_argument("--installed-components-json", action="store_true")
+    parser.add_argument("--component-preview", metavar="TAG")
+    parser.add_argument("--install-component", metavar="TAG")
+    parser.add_argument("--remove-component", metavar="ZIP")
+    parser.add_argument("--component-asset", metavar="ZIP")
     parser.add_argument("--extensions-json", action="store_true", help="Read installed ASI/DLL plugins and loader state")
     parser.add_argument("--import-extension", type=Path, metavar="ASI", help="Import a local ASI extension without overwrites")
     parser.add_argument("--remove-managed-extension", metavar="NAME", help="Remove an unmodified launcher-managed ASI")
@@ -1948,6 +2149,29 @@ def main() -> int:
                     raise ValueError("Settings payload too large")
                 print(json.dumps(save_launcher_settings(json.loads(payload)), ensure_ascii=False))
         except (OSError, ValueError, TypeError, UnicodeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif (args.components_json or args.installed_components_json or args.component_preview
+          or args.install_component or args.remove_component):
+        try:
+            if args.components_json:
+                result = component_catalog()
+            else:
+                if args.exe is None:
+                    parser.error("Component management requires --exe")
+                if args.installed_components_json:
+                    result = installed_components(args.exe)
+                elif args.remove_component:
+                    result = remove_component(args.exe, args.remove_component)
+                else:
+                    if not args.component_asset:
+                        parser.error("Component preview/install requires --component-asset")
+                    if args.component_preview:
+                        result = component_preview(args.exe, args.component_preview, args.component_asset)
+                    else:
+                        result = install_component(args.exe, args.install_component, args.component_asset)
+            print(json.dumps(result, ensure_ascii=False))
+        except (OSError, ValueError, TypeError, KeyError, zipfile.BadZipFile) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     elif args.import_extension is not None or args.remove_managed_extension is not None:
