@@ -309,6 +309,8 @@ public sealed class MainWindow : Window
         {
             try
             {
+                // Decode first; if the cache is corrupt retain the letter placeholder.
+                var bitmap = new Bitmap(game.Artwork);
                 illustration.Children.Clear();
                 illustration.Children.Add(new Border
                 {
@@ -316,8 +318,8 @@ public sealed class MainWindow : Window
                     ClipToBounds = true,
                     Child = new Image
                     {
-                        Source = new Bitmap(game.Artwork),
-                        Stretch = Stretch.UniformToFill,
+                        Source = bitmap,
+                        Stretch = Stretch.Uniform,
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                         VerticalAlignment = VerticalAlignment.Stretch,
                     },
