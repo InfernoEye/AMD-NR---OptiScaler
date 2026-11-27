@@ -392,6 +392,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(scan["reason"], "found_windows_exe")
 
     def test_native_linux_game_is_reported_without_fabricated_exe(self):
+        self.exe.unlink()  # Fixture normally includes a Windows EXE.
         binary = self.game / "Game.x86_64"
         binary.write_bytes(b"\x7fELF" + b"\x00" * 50)
         scan = launcher.executable_scan(self.game)
@@ -400,6 +401,7 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("Game.x86_64", scan["native"])
 
     def test_linux_game_shell_launcher_detected(self):
+        self.exe.unlink()  # Fixture normally includes a Windows EXE.
         script = self.game / "start.sh"
         script.write_bytes(b"#!/bin/sh\nexec ./game\n")
         scan = launcher.executable_scan(self.game)
@@ -407,6 +409,7 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("start.sh", scan["native"])
 
     def test_symlink_to_outside_windows_exe_is_ignored(self):
+        self.exe.unlink()  # Fixture normally includes a Windows EXE.
         outside = self.root / "elsewhere"
         outside.mkdir()
         (outside / "outside.exe").write_bytes(b"outside")
