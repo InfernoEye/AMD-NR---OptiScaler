@@ -1010,6 +1010,9 @@ public sealed class MainWindow : Window
             var configure = Button("CONFIGURE AMDNR");
             configure.Click += (_, _) => ShowGameConfiguration();
             summary.Children.Add(configure);
+            var extensions = Button("MANAGE EXTENSIONS");
+            extensions.Click += (_, _) => ShowExtensions();
+            summary.Children.Add(extensions);
         }
         var coverButton = Button("CHANGE COVER ART");
         coverButton.Click += async (_, _) =>
@@ -1707,6 +1710,141 @@ public sealed class MainWindow : Window
             _launcherSettingsLoaded = true;
         }
         catch (Exception ex) { _status.Text = "Launcher preferences unavailable: " + ex.Message; }
+    }
+
+    private async void ShowExtensions()
+    {
+        Clear("Library");
+        _breadcrumb.Text = "AMDNR  /  Extensions";
+        _content.Children.Add(Text("AMDNR Extensions", 30, ForegroundBrush, FontWeight.Bold));
+        var back = Button("←  BACK TO GAME");
+        back.Click += (_, _) => ShowGameDetails();
+        _content.Children.Add(back);
+        var selected = _exe;
+        if (_backend is null || string.IsNullOrEmpty(selected) || !File.Exists(selected))
+        {
+            _content.Children.Add(Text("Select a Windows game executable first.",
+                14, MutedBrush));
+            return;
+        }
+        var body = new StackPanel { Spacing = 12 };
+        _content.Children.Add(Panel(body));
+        async Task Reload()
+        {
+            if (_backend is null) return;
+            body.Children.Clear();
+            body.Children.Add(Text("Reading plugin directory and loader settings…", 13, MutedBrush));
+            try
+            {
+                var extensions = await _backend.ExtensionsAsync(selected);
+                if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                body.Children.Clear();
+                body.Children.Add(Text("OPTISCALER PLUGINS", 12, AccentBrush, FontWeight.Bold));
+                body.Children.Add(Text("Installed .asi and .dll plugins found in: " +
+                    extensions.Folder, 12, MutedBrush));
+                body.Children.Add(Text(extensions.Enabled is true
+                    ? "ASI loader: enabled in OptiScaler.ini"
+                    : extensions.Enabled is false
+                        ? "ASI loader: disabled in OptiScaler.ini"
+                        : "ASI loader: not explicitly configured", 14,
+                    ForegroundBrush, FontWeight.SemiBold));
+                var toggles = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+                var enable = Button("ENABLE ASI LOADER");
+                var disable = Button("DISABLE ASI LOADER");
+                enable.IsEnabled = extensions.IniPresent;
+                disable.IsEnabled = extensions.IniPresent;
+                async Task Toggle(bool state)
+                {
+                    if (_busy || _backend is null) return;
+                    _busy = true;
+                    enable.IsEnabled = false;
+                    disable.IsEnabled = false;
+                    try
+                    {
+                        var snapshot = await _backend.ReadIniAsync(selected);
+                        var saved = await _backend.SetExtensionLoaderAsync(
+                            selected, snapshot.Sha256, state);
+                        _status.Text = "ASI loader " + (state ? "enabled" : "disabled") +
+                            ". INI backup: " + saved.Backup;
+                    }
+                    catch (Exception ex) { _status.Text = "Loader change refused: " + ex.Message; }
+                    finally { _busy = false; await Reload(); }
+                }
+                enable.Click += async (_, _) => await Toggle(true);
+                disable.Click += async (_, _) => await Toggle(false);
+                toggles.Children.Add(enable);
+                toggles.Children.Add(disable);
+                body.Children.Add(toggles);
+                body.Children.Add(Text("ASI loader changes are backed up. Importing a plugin " +
+                    "does not automatically enable it; use a trusted plugin source.",
+                    12, MutedBrush));
+                var import = Button("IMPORT LOCAL .ASI", true);
+                import.Click += async (_, _) =>
+                {
+                    if (_busy || _backend is null) return;
+                    var file = await PickFileAsync("Import a trusted ASI plugin",
+                        new FilePickerFileType("ASI plugins") { Patterns = new[] { "*.asi" } });
+                    if (file is null) return;
+                    _busy = true;
+                    try
+                    {
+                        await _backend.ImportExtensionAsync(selected, file);
+                        _status.Text = "Plugin imported: " + Path.GetFileName(file);
+                    }
+                    catch (Exception ex) { _status.Text = "Plugin import refused: " + ex.Message; }
+                    finally { _busy = false; await Reload(); }
+                };
+                body.Children.Add(import);
+                if (extensions.Plugins.Count == 0)
+                    body.Children.Add(Text("No .asi or .dll plugins found in this game's " +
+                        "plugins folder.", 13, MutedBrush));
+                foreach (var plugin in extensions.Plugins)
+                {
+                    var item = plugin;
+                    var detail = new StackPanel { Spacing = 7 };
+                    detail.Children.Add(Text(item.Name, 15, ForegroundBrush,
+                        FontWeight.SemiBold));
+                    detail.Children.Add(Text(item.Managed
+                        ? item.Modified
+                            ? "Managed · modified since import · removal blocked"
+                            : "Managed by Linux launcher · can safely remove"
+                        : "Existing external plugin · not managed by this launcher",
+                        12, MutedBrush));
+                    if (item.Managed && !item.Modified)
+                    {
+                        var remove = Button("REMOVE MANAGED PLUGIN");
+                        remove.Click += async (_, _) =>
+                        {
+                            if (_busy || _backend is null) return;
+                            _busy = true;
+                            remove.IsEnabled = false;
+                            try
+                            {
+                                await _backend.RemoveExtensionAsync(selected, item.Name);
+                                _status.Text = "Removed launcher-managed plugin: " + item.Name;
+                            }
+                            catch (Exception ex)
+                            {
+                                _status.Text = "Removal refused: " + ex.Message;
+                            }
+                            finally { _busy = false; await Reload(); }
+                        };
+                        detail.Children.Add(remove);
+                    }
+                    body.Children.Add(Panel(detail, new Thickness(12)));
+                }
+                body.Children.Add(Text("The launcher never removes pre-existing plugins, " +
+                    "never replaces an extension on import, and refuses removal " +
+                    "when an imported file has changed.", 12, MutedBrush));
+            }
+            catch (Exception ex)
+            {
+                body.Children.Clear();
+                body.Children.Add(Text("Could not inspect extensions: " + ex.Message,
+                    13, MutedBrush));
+            }
+        }
+        await Reload();
     }
 
     private async void ShowGameConfiguration()
