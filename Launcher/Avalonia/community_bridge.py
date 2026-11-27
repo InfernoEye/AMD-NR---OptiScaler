@@ -544,6 +544,58 @@ def install(exe: Path, approved: bool, runtime: str = "lmxxf", *, replace_existi
             "output": finished.stdout[-1600:]}
 
 
+def steam_launch_preview(exe: Path, *, steam_report: dict | None = None,
+                         manual_options: str | None = None) -> dict:
+    """Read-only bridge launch preview using Steam's active userdata when unambiguous.
+
+    Existing launch options are never written. Only aliases from verified v1
+    records preserved in the migration snapshot may be dropped automatically.
+    """
+    from bridge_migration import game_root, latest_installed_snapshot
+    from steam_user_launch import preview_bridge_launch
+    if not exe.is_file() or exe.is_symlink():
+        raise ValueError("Selected game executable is missing.")
+    wrapper = exe.resolve().parent / "amdnr-linux/run.sh"
+    aliases = set()
+    snapshot = latest_installed_snapshot(exe)
+    if snapshot is not None:
+        original = snapshot / "original"
+        for record in original.rglob(".amdnr-linux-install.json"):
+            if record.is_symlink() or not record.is_file() or not record.resolve().is_relative_to(original.resolve()):
+                continue
+            if record.stat().st_size > 4 * 1024 * 1024:
+                continue
+            try:
+                payload = json.loads(record.read_text(encoding="utf-8"))
+            except (OSError, ValueError, UnicodeError):
+                continue
+            if payload.get("format") != 1 or not isinstance(payload.get("files"), list):
+                continue
+            alias = payload.get("alias")
+            if isinstance(alias, str) and alias.casefold() in (
+                    "dxgi.dll", "version.dll", "winmm.dll", "winhttp.dll",
+                    "wininet.dll", "dbghelp.dll", "d3d12.dll"):
+                aliases.add(alias)
+    if steam_report is None:
+        steam_report = {"status": "unavailable", "existing": None}
+    steam_status = steam_report.get("status", "unavailable")
+    current = manual_options if manual_options is not None else (
+        steam_report.get("existing") if steam_status in ("found", "empty") else None)
+    if current is not None and not isinstance(current, str):
+        raise ValueError("Unexpected launch options type.")
+    result = preview_bridge_launch(current, str(wrapper), tuple(sorted(aliases)))
+    result.update({
+        "steam_status": "manual" if manual_options is not None else steam_status,
+        "existing": current,
+        "managed_aliases": sorted(aliases),
+        "wrapper": str(wrapper),
+        "steam_modified": False,
+        "proton_modified": False,
+        "instruction": "Paste the reviewed final preview into Steam > Game Properties > General > Launch Options.",
+    })
+    return result
+
+
 def recover_migration(exe: Path, approved: bool) -> dict:
     if not approved:
         raise ValueError("Migration recovery requires explicit user approval.")
