@@ -461,6 +461,15 @@ def _github_json(url: str) -> object:
 
 
 
+DANIEL_RUNTIME_TAG = "Alpha0.3.5.5R4"
+DANIEL_RUNTIME_ASSET = "v0.6.0-Runtime.zip"
+DANIEL_REQUIRED_FILES = frozenset({
+    "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll",
+    "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin",
+})
+DANIEL_OPTIONAL_FILES = frozenset({"danielblnc_ATTRIBUTION.txt"})
+
+
 def component_catalog(limit: int = 12) -> list[dict[str, object]]:
     """List official independently downloadable AMDNR extension ZIPs."""
     releases = _github_json(f"{RELEASE_API}?per_page={limit}")
@@ -486,11 +495,37 @@ def component_catalog(limit: int = 12) -> list[dict[str, object]]:
             seen.add(name)
             found.append({"tag": tag, "name": name, "asset": name, "bytes": size,
                           "prerelease": bool(release.get("prerelease", False))})
+    # Discover Daniel's dedicated, officially checksum-listed historical runtime.
+    daniel_release = _github_json(f"{RELEASE_API}/tags/{DANIEL_RUNTIME_TAG}")
+    if isinstance(daniel_release, dict) and not daniel_release.get("draft"):
+        assets = daniel_release.get("assets", [])
+        if isinstance(assets, list) and any(
+                isinstance(x, dict) and x.get("name") == "SHA256SUMS.txt"
+                for x in assets):
+            for item in assets:
+                if isinstance(item, dict) and item.get("name") == DANIEL_RUNTIME_ASSET:
+                    size = item.get("size")
+                    if isinstance(size, int) and 0 < size <= 1024 ** 3:
+                        found.insert(0, {"tag": DANIEL_RUNTIME_TAG,
+                                         "name": "Daniel 0.6.0 runtime (recommended)",
+                                         "asset": DANIEL_RUNTIME_ASSET,
+                                         "bytes": size, "prerelease": False})
+                    break
     return found
 
 
 def _is_component_zip(name: str) -> bool:
-    return bool(re.fullmatch(r"AMDNR-(?!v[0-9]|Launcher)[A-Za-z0-9._-]+\.zip", name, re.I))
+    return (name == DANIEL_RUNTIME_ASSET or bool(re.fullmatch(r"AMDNR-(?!v[0-9]|Launcher)[A-Za-z0-9._-]+\.zip", name, re.I)))
+
+
+def _component_install_name(asset: str, zip_member: str) -> str:
+    """Map only approved Daniel files to the same folder as OptiScaler.dll."""
+    if asset == DANIEL_RUNTIME_ASSET:
+        basename = zip_member.rsplit("/", 1)[-1]
+        if basename not in DANIEL_REQUIRED_FILES | DANIEL_OPTIONAL_FILES:
+            raise ValueError("Unsupported Daniel runtime payload: " + zip_member)
+        return basename
+    return zip_member
 
 
 def _component_manifest(executable: Path) -> Path:
@@ -547,6 +582,9 @@ def _component_entries(archive: Path, *, inspect_only: bool = False) -> list:
                 raise ValueError("Unsafe archive path")
             if entry.is_dir():
                 continue
+            if archive.name == DANIEL_RUNTIME_ASSET:
+                if name.rsplit("/", 1)[-1] not in DANIEL_REQUIRED_FILES | DANIEL_OPTIONAL_FILES:
+                    continue
             mode = (entry.external_attr >> 16) & 0o170000
             if mode not in (0, 0o100000):
                 raise ValueError("Archive contains links or special files")
@@ -560,12 +598,17 @@ def _component_entries(archive: Path, *, inspect_only: bool = False) -> list:
                 raise ValueError("Component file exceeds 8 GiB extracted size limit")
             if not inspect_only and size > MAX_COMPONENT_UNPACKED:
                 raise ValueError("Component exceeds 12 GiB extracted size limit")
-            if name.casefold() in seen:
-                raise ValueError("Duplicate archive path")
-            seen.add(name.casefold())
+            destination = _component_install_name(archive.name, name)
+            if destination.casefold() in seen:
+                raise ValueError("Duplicate archive destination")
+            seen.add(destination.casefold())
             entries.append(entry)
     if not entries:
         raise ValueError("Empty component archive")
+    if archive.name == DANIEL_RUNTIME_ASSET:
+        actual = {_component_install_name(archive.name, x.filename) for x in entries}
+        if not DANIEL_REQUIRED_FILES.issubset(actual):
+            raise ValueError("Daniel runtime ZIP missing required pass DLLs or weights")
     return entries
 
 
@@ -617,20 +660,20 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
     with zipfile.ZipFile(archive) as source:
         for entry in entries:
             try:
-                dest = _component_target(root, entry.filename)
+                dest = _component_target(root, _component_install_name(asset, entry.filename))
                 if dest.exists():
                     if not too_large and _component_existing_matches(source, entry, dest):
-                        identical.append(entry.filename)
+                        identical.append(_component_install_name(asset, entry.filename))
                     else:
-                        conflicts.append(entry.filename)
+                        conflicts.append(_component_install_name(asset, entry.filename))
                         if dest.is_file() and not dest.is_symlink() and not too_large:
                             replaceable.append(entry.filename)
                 else:
-                    new_files.append(entry.filename)
+                    new_files.append(_component_install_name(asset, entry.filename))
             except (ValueError, OSError):
-                conflicts.append(entry.filename)
+                conflicts.append(_component_install_name(asset, entry.filename))
     return {"tag": tag, "asset": asset,
-            "files": [e.filename for e in entries[:50]],
+            "files": [_component_install_name(asset, e.filename) for e in entries[:50]],
             "file_count": len(entries),
             "extracted_bytes": total_size, "largest_files": largest_files,
             "too_many_files": too_many,
@@ -714,7 +757,7 @@ def install_component(executable: Path, tag: str, asset: str,
             created_backup = True
         with zipfile.ZipFile(archive) as source:
             for entry in entries:
-                name = entry.filename
+                name = _component_install_name(asset, entry.filename)
                 dest = _component_target(root, name)
                 if dest.exists():
                     if _component_existing_matches(source, entry, dest):
