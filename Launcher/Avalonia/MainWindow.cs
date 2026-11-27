@@ -26,7 +26,8 @@ public sealed class MainWindow : Window
     private static readonly IBrush AccentBrush = Brush("#E04B54");
     private static readonly IBrush AccentDarkBrush = Brush("#59252D");
 
-    private readonly StackPanel _content = new() { Spacing = 16 };
+    private readonly StackPanel _content = new() { Spacing = 14 };
+    private readonly ScrollViewer _pageScroller;
     private readonly TextBlock _status = new() { Text = "Ready", Foreground = MutedBrush };
     private readonly TextBlock _breadcrumb = Text("AMDNR  /  Library", 15, MutedBrush, FontWeight.SemiBold);
     private string _currentSection = "Library";
@@ -68,16 +69,16 @@ public sealed class MainWindow : Window
         var main = new Grid { RowDefinitions = new RowDefinitions("76,*,56") };
         Grid.SetColumn(main, 1);
         main.Children.Add(BuildHeader());
-        var scroller = new ScrollViewer
+        _pageScroller = new ScrollViewer
         {
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Content = _content,
-            // Extra bottom inset keeps the final control clear of the fixed status bar.
-            Padding = new Thickness(28, 12, 28, 96),
+            // Footer is outside the scroll area in its own grid row.
+            Padding = new Thickness(28, 10, 28, 22),
         };
-        Grid.SetRow(scroller, 1);
-        main.Children.Add(scroller);
+        Grid.SetRow(_pageScroller, 1);
+        main.Children.Add(_pageScroller);
         var statusBorder = new Border
         {
             BorderBrush = LineBrush,
@@ -198,12 +199,36 @@ public sealed class MainWindow : Window
         return header;
     }
 
+    private void AdjustWindowForContent(bool gameDetails)
+    {
+        if (WindowState != WindowState.Normal) return;
+        // Fit game details within the usable screen where possible, and scroll
+        // normally if content exceeds the desktop height.
+        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
+        if (screen is not null)
+        {
+            var limit = screen.WorkingArea.Height / screen.Scaling - 24;
+            MaxHeight = Math.Max(MinHeight, limit);
+        }
+        if (gameDetails)
+        {
+            SizeToContent = SizeToContent.Height;
+        }
+        else
+        {
+            SizeToContent = SizeToContent.Manual;
+            Height = Math.Min(750, MaxHeight);
+        }
+        _pageScroller.Offset = new Vector(0, 0);
+    }
+
     private void Clear(string section)
     {
         _content.Children.Clear();
         _currentSection = section;
         _breadcrumb.Text = "AMDNR  /  " + section;
         Highlight(section);
+        AdjustWindowForContent(false);
     }
 
     private void ShowLibrary()
@@ -445,9 +470,9 @@ public sealed class MainWindow : Window
         back.Click += (_, _) => ShowLibrary();
         _content.Children.Add(back);
 
-        var hero = new Grid { ColumnDefinitions = new ColumnDefinitions("240,*"), ColumnSpacing = 24 };
-        hero.Children.Add(GameArtwork(game, 245));
-        var summary = new StackPanel { Spacing = 14, VerticalAlignment = VerticalAlignment.Center };
+        var hero = new Grid { ColumnDefinitions = new ColumnDefinitions("205,*"), ColumnSpacing = 20 };
+        hero.Children.Add(GameArtwork(game, 190));
+        var summary = new StackPanel { Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
         summary.Children.Add(Text("STEAM  /  PROTON", 12, AccentBrush, FontWeight.SemiBold));
         summary.Children.Add(Text(game.Name, 31, ForegroundBrush, FontWeight.Bold));
         bool installed = HasInstallRecord();
@@ -578,19 +603,6 @@ public sealed class MainWindow : Window
         }
         _content.Children.Add(Panel(detail));
 
-        var manage = new StackPanel { Spacing = 10 };
-        manage.Children.Add(Text("INSTALLATION", 12, AccentBrush, FontWeight.Bold));
-        manage.Children.Add(Text(HasInstallRecord()
-            ? "An installation record exists for this executable. You can inspect it below."
-            : _exe is null
-                ? "Confirm the game executable before configuring installation."
-                : "No installation recorded for this executable.", 13, MutedBrush));
-        var openInstall = Button(HasInstallRecord() ? "MANAGE INSTALLATION" : "CONFIGURE INSTALLATION", true);
-        openInstall.IsEnabled = _exe is not null && File.Exists(_exe);
-        openInstall.Click += (_, _) => ShowInstall();
-        manage.Children.Add(openInstall);
-        _content.Children.Add(Panel(manage));
-
         if (HasInstallRecord())
         {
             var recordPanel = new StackPanel { Spacing = 10 };
@@ -659,6 +671,7 @@ public sealed class MainWindow : Window
             recordPanel.Children.Add(fileScroller);
             _content.Children.Add(Panel(recordPanel));
         }
+        AdjustWindowForContent(true);
     }
 
 
