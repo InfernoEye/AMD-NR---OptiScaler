@@ -1989,7 +1989,6 @@ public sealed class MainWindow : Window
         var componentActions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
         var loadComponents = Button("LOAD OFFICIAL COMPONENTS");
         var previewComponent = Button("DOWNLOAD & PREVIEW");
-        var getDaniel = Button("BROWSE DANIEL VERSIONS");
         var installComponent = Button("INSTALL PREVIEWED COMPONENT", true);
         var replaceComponent = Button("BACK UP & REPLACE CONFLICTS");
         previewComponent.IsEnabled = false;
@@ -1997,7 +1996,6 @@ public sealed class MainWindow : Window
         replaceComponent.IsEnabled = false;
         componentActions.Children.Add(loadComponents);
         componentActions.Children.Add(previewComponent);
-        componentActions.Children.Add(getDaniel);
         componentActions.Children.Add(installComponent);
         componentActions.Children.Add(replaceComponent);
         official.Children.Add(componentActions);
@@ -2008,16 +2006,55 @@ public sealed class MainWindow : Window
         official.Children.Add(managedComponents);
         _content.Children.Add(Panel(official));
 
+        // Daniel has its own version manager rather than sharing the
+        // Mochi/lmxxf/WrongGPU archive selector or install controls.
+        var danielSection = new StackPanel { Spacing = 11 };
+        danielSection.Children.Add(Text("DANIEL NEURAL RUNTIMES", 12, AccentBrush, FontWeight.Bold));
+        danielSection.Children.Add(Text(
+            "Official Daniel releases: select one runtime version per game. " +
+            "To switch versions, remove the old managed runtime first so backups are restored. " +
+            "Daniel 0.8.0 is a NeuralHub host and requires a separate installer; " +
+            "the legacy pass-DLL installer does not support it.", 12, MutedBrush));
+        var danielPicker = new ComboBox
+        {
+            PlaceholderText = "Load Daniel runtime versions",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        danielSection.Children.Add(danielPicker);
+        var danielButtons = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+        var loadDaniel = Button("LOAD DANIEL VERSIONS");
+        var previewDaniel = Button("DOWNLOAD & PREVIEW DANIEL");
+        var installDaniel = Button("INSTALL DANIEL", true);
+        var replaceDaniel = Button("BACK UP & REPLACE DANIEL FILES");
+        previewDaniel.IsEnabled = false;
+        installDaniel.IsEnabled = false;
+        replaceDaniel.IsEnabled = false;
+        danielButtons.Children.Add(loadDaniel);
+        danielButtons.Children.Add(previewDaniel);
+        danielButtons.Children.Add(installDaniel);
+        danielButtons.Children.Add(replaceDaniel);
+        danielSection.Children.Add(danielButtons);
+        var danielPreviewDetails = new StackPanel { Spacing = 6 };
+        danielSection.Children.Add(danielPreviewDetails);
+        danielSection.Children.Add(Text("INSTALLED DANIEL RUNTIME", 12, AccentBrush, FontWeight.Bold));
+        var installedDaniel = new StackPanel { Spacing = 8 };
+        danielSection.Children.Add(installedDaniel);
+        _content.Children.Add(Panel(danielSection));
+
         async Task ReloadManagedComponents()
         {
             if (_backend is null) return;
             managedComponents.Children.Clear();
+            installedDaniel.Children.Clear();
             try
             {
                 var installed = await _backend.InstalledComponentsAsync(selected);
                 if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
-                if (installed.Count == 0)
+                if (!installed.Any(x => !IsDanielRuntime(x.Asset)))
                     managedComponents.Children.Add(Text("No launcher-managed release components.",
+                        12, MutedBrush));
+                if (!installed.Any(x => IsDanielRuntime(x.Asset)))
+                    installedDaniel.Children.Add(Text("No managed Daniel runtime installed.",
                         12, MutedBrush));
                 foreach (var component in installed)
                 {
@@ -2049,13 +2086,15 @@ public sealed class MainWindow : Window
                         };
                         entry.Children.Add(remove);
                     }
-                    managedComponents.Children.Add(Panel(entry, new Thickness(10)));
+                    var destination = IsDanielRuntime(item.Asset) ? installedDaniel : managedComponents;
+                    destination.Children.Add(Panel(entry, new Thickness(10)));
                 }
             }
             catch (Exception ex)
             {
                 managedComponents.Children.Add(Text(
                     "Component inventory unavailable: " + ex.Message, 12, MutedBrush));
+                installedDaniel.Children.Add(Text("Daniel inventory unavailable.", 12, MutedBrush));
             }
         }
 
@@ -2081,7 +2120,8 @@ public sealed class MainWindow : Window
             {
                 var entries = await _backend.ComponentsAsync();
                 var visible = (_launcherSettings?.ShowPrereleases == true
-                    ? entries : entries.Where(x => !x.Prerelease)).ToArray();
+                    ? entries : entries.Where(x => !x.Prerelease))
+                    .Where(x => !IsDanielRuntime(x.Asset)).ToArray();
                 if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
                 componentPicker.ItemsSource = visible;
                 componentPicker.SelectedIndex = visible.Length > 0 ? 0 : -1;
@@ -2160,42 +2200,130 @@ public sealed class MainWindow : Window
             catch (Exception ex) { _status.Text = "Component preview failed: " + ex.Message; }
             finally { _busy = false; previewComponent.IsEnabled = true; }
         };
-        // Show all official Daniel runtimes in the existing version picker.
-        // Never install or replace an active version without explicit user action.
-        getDaniel.Click += async (_, _) =>
+        // Distinct Daniel version selection with independent preview/install state.
+        string? previewedDanielTag = null;
+        string? previewedDanielAsset = null;
+        bool danielCanReplace = false;
+        bool IsDanielRuntime(string asset) =>
+            asset.StartsWith("v", StringComparison.OrdinalIgnoreCase) &&
+            asset.EndsWith("-Runtime.zip", StringComparison.OrdinalIgnoreCase) &&
+            asset.Length > "v0.0.0-Runtime.zip".Length - 1;
+        danielPicker.SelectionChanged += (_, _) =>
+        {
+            previewedDanielTag = null;
+            previewedDanielAsset = null;
+            danielCanReplace = false;
+            installDaniel.IsEnabled = false;
+            replaceDaniel.IsEnabled = false;
+            danielPreviewDetails.Children.Clear();
+            previewDaniel.IsEnabled = danielPicker.SelectedItem is ReleaseEntry;
+        };
+        loadDaniel.Click += async (_, _) =>
         {
             if (_busy || _backend is null) return;
             _busy = true;
-            getDaniel.IsEnabled = false;
-            installComponent.IsEnabled = false;
-            replaceComponent.IsEnabled = false;
-            previewedTag = null;
-            previewedAsset = null;
-            previewReplaceable = false;
-            previewDetails.Children.Clear();
-            _status.Text = "Checking official upstream Daniel runtime history…";
+            loadDaniel.IsEnabled = false;
             try
             {
                 var entries = await _backend.ComponentsAsync();
-                var daniel = entries.Where(x =>
-                    x.Asset.StartsWith("v", StringComparison.OrdinalIgnoreCase) &&
-                    x.Asset.EndsWith("-Runtime.zip", StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
+                var versions = entries.Where(x => IsDanielRuntime(x.Asset) &&
+                    (_launcherSettings?.ShowPrereleases == true || !x.Prerelease)).ToArray();
                 if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
-                componentPicker.ItemsSource = daniel;
-                componentPicker.SelectedIndex = daniel.Length > 0 ? 0 : -1;
-                previewDetails.Children.Add(Text(
-                    "Select a Daniel version, then Download & Preview. " +
-                    "Only one Daniel runtime can be installed per game. " +
-                    "Remove the installed version using the managed Remove Component action " +
-                    "before switching, so its original files can be restored. " +
-                    "Older runtimes may not be compatible with the current AMDNR build.",
-                    12, MutedBrush));
-                _status.Text = daniel.Length + " official Daniel runtime versions found.";
+                danielPicker.ItemsSource = versions;
+                danielPicker.SelectedIndex = versions.Length > 0 ? 0 : -1;
+                _status.Text = versions.Length + " official Daniel runtimes found.";
             }
-            catch (Exception ex) { _status.Text = "Daniel version lookup failed: " + ex.Message; }
-            finally { _busy = false; getDaniel.IsEnabled = true; }
+            catch (Exception ex) { _status.Text = "Daniel versions unavailable: " + ex.Message; }
+            finally { _busy = false; loadDaniel.IsEnabled = true; }
         };
+        previewDaniel.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null || danielPicker.SelectedItem is not ReleaseEntry chosen)
+                return;
+            _busy = true;
+            previewDaniel.IsEnabled = false;
+            installDaniel.IsEnabled = false;
+            replaceDaniel.IsEnabled = false;
+            danielCanReplace = false;
+            previewedDanielTag = null;
+            previewedDanielAsset = null;
+            danielPreviewDetails.Children.Clear();
+            _status.Text = "Verifying official Daniel " + chosen.Name + " package…";
+            try
+            {
+                if (chosen.Asset == "v0.8.0-Runtime.zip")
+                {
+                    danielPreviewDetails.Children.Add(Text(
+                        "Daniel 0.8.0 is a NeuralHub host, not a legacy pass-DLL package. " +
+                        "It requires AMDNR-NeuralHub-080 setup and a data index. " +
+                        "Automatic installation is not supported yet; no files were changed.",
+                        12, MutedBrush));
+                    _status.Text = "Daniel 0.8.0 requires the NeuralHub-specific installation workflow.";
+                }
+                else
+                {
+                    var result = await _backend.PreviewComponentAsync(selected, chosen.Tag, chosen.Asset);
+                    if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                    danielPreviewDetails.Children.Add(Text(
+                        result.FileCount + " Daniel runtime files · " +
+                        result.NewFileCount + " new · " +
+                        result.IdenticalCount + " identical · " +
+                        result.ConflictCount + " conflicting. " +
+                        string.Join(", ", result.Files.Take(12)), 12, MutedBrush));
+                    if (result.Conflicts.Count > 0)
+                        danielPreviewDetails.Children.Add(Text(
+                            "Conflicts: " + string.Join(", ", result.Conflicts.Take(10)),
+                            12, MutedBrush));
+                    if (!result.SafetyLimitExceeded)
+                    {
+                        if (result.Installable)
+                        {
+                            previewedDanielTag = chosen.Tag;
+                            previewedDanielAsset = chosen.Asset;
+                            installDaniel.IsEnabled = true;
+                        }
+                        else if (result.ConflictCount > 0 &&
+                                 result.ConflictCount == result.ReplaceableCount)
+                        {
+                            previewedDanielTag = chosen.Tag;
+                            previewedDanielAsset = chosen.Asset;
+                            danielCanReplace = true;
+                            replaceDaniel.IsEnabled = true;
+                        }
+                    }
+                    _status.Text = result.Installable
+                        ? "Daniel verified; ready for explicit installation."
+                        : "Daniel install blocked by existing files or safety checks.";
+                }
+            }
+            catch (Exception ex) { _status.Text = "Daniel preview refused: " + ex.Message; }
+            finally { _busy = false; previewDaniel.IsEnabled = true; }
+        };
+        async Task InstallSelectedDaniel(bool replace)
+        {
+            if (_busy || _backend is null || danielPicker.SelectedItem is not ReleaseEntry chosen ||
+                previewedDanielTag != chosen.Tag || previewedDanielAsset != chosen.Asset ||
+                (replace && !danielCanReplace))
+                return;
+            _busy = true;
+            installDaniel.IsEnabled = false;
+            replaceDaniel.IsEnabled = false;
+            try
+            {
+                await _backend.InstallComponentAsync(selected, chosen.Tag, chosen.Asset,
+                    replaceConflicts: replace);
+                _status.Text = "Daniel runtime installed: " + chosen.Name +
+                    ". Restart the game to test initialization.";
+                previewedDanielTag = null;
+                previewedDanielAsset = null;
+                danielCanReplace = false;
+                danielPreviewDetails.Children.Clear();
+            }
+            catch (Exception ex) { _status.Text = "Daniel installation refused: " + ex.Message; }
+            finally { _busy = false; await ReloadManagedComponents(); }
+        }
+        installDaniel.Click += async (_, _) => await InstallSelectedDaniel(false);
+        replaceDaniel.Click += async (_, _) => await InstallSelectedDaniel(true);
         installComponent.Click += async (_, _) =>
         {
             if (_busy || _backend is null || componentPicker.SelectedItem is not ReleaseEntry chosen ||
