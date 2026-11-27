@@ -80,7 +80,7 @@ jobs:
             --verify-tag
 
   flatpak:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/feature/native-linux-launcher'
     needs: package
     runs-on: ubuntu-latest
     steps:
