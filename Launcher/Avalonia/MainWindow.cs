@@ -21,14 +21,14 @@ namespace Amdnr.Linux.Desktop;
 
 public sealed class MainWindow : Window
 {
-    private static readonly IBrush BackgroundBrush = Brush("#0D1119");
-    private static readonly IBrush SidebarBrush = Brush("#121A25");
-    private static readonly IBrush SurfaceBrush = Brush("#1B2533");
-    private static readonly IBrush LineBrush = Brush("#29384C");
-    private static readonly IBrush MutedBrush = Brush("#98A9BF");
-    private static readonly IBrush ForegroundBrush = Brush("#F3F7FC");
-    private static readonly IBrush AccentBrush = Brush("#E04B54");
-    private static readonly IBrush AccentDarkBrush = Brush("#59252D");
+    private static readonly IBrush BackgroundBrush = Brush("#111113");
+    private static readonly IBrush SidebarBrush = Brush("#151519");
+    private static readonly IBrush SurfaceBrush = Brush("#1E1E23");
+    private static readonly IBrush LineBrush = Brush("#353039");
+    private static readonly IBrush MutedBrush = Brush("#99969E");
+    private static readonly IBrush ForegroundBrush = Brush("#F4F2F4");
+    private static readonly IBrush AccentBrush = Brush("#C22E43");
+    private static readonly IBrush AccentDarkBrush = Brush("#52202B");
 
     private readonly StackPanel _content = new() { Spacing = 14 };
     private readonly ScrollViewer _pageScroller;
@@ -309,8 +309,8 @@ public sealed class MainWindow : Window
             Background = SurfaceBrush,
             BorderBrush = LineBrush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = padding ?? new Thickness(20),
+            CornerRadius = new CornerRadius(9),
+            Padding = padding ?? new Thickness(18),
             Child = child,
         };
 
@@ -331,7 +331,7 @@ public sealed class MainWindow : Window
     {
         var stack = new StackPanel { Spacing = 9, Margin = new Thickness(16, 25) };
         stack.Children.Add(Text("AMDNR", 31, AccentBrush, FontWeight.Bold));
-        stack.Children.Add(Text("NEURAL RENDERING", 11, MutedBrush, FontWeight.SemiBold));
+        stack.Children.Add(Text("LINUX LAUNCHER", 11, MutedBrush, FontWeight.SemiBold));
         stack.Children.Add(new Border { Height = 26 });
         AddNav(stack, "Library", ShowLibrary);
         AddNav(stack, "Installed", ShowInstalledGames);
@@ -700,9 +700,9 @@ public sealed class MainWindow : Window
     private void ShowLibrary()
     {
         Clear("Library");
-        _content.Children.Add(Text("Your games", 30, ForegroundBrush, FontWeight.Bold));
-        _content.Children.Add(Text("Detected Steam installations and saved custom games.",
-            14, MutedBrush));
+        _content.Children.Add(Text("YOUR LIBRARY", 28, ForegroundBrush, FontWeight.Bold));
+        _content.Children.Add(Text("Steam, Heroic, Lutris and your saved games · Choose a game to manage AMDNR.",
+            13, MutedBrush));
 
         var toolbar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), ColumnSpacing = 12 };
         _librarySearch = new TextBox
