@@ -24,6 +24,7 @@ modules:
       - cp -a backend/. /app/share/amdnr/
       - install -Dm755 amdnr-launcher /app/bin/amdnr-launcher
       - install -Dm644 amdnr-linux.desktop /app/share/applications/org.amdnr.LinuxLauncher.desktop
+      - sed -i "s/Icon=amdnr-linux/Icon=org.amdnr.LinuxLauncher/" /app/share/applications/org.amdnr.LinuxLauncher.desktop
       - python3 make_icon.py /app/share/icons/hicolor/128x128/apps/org.amdnr.LinuxLauncher.png
       - chmod +x /app/lib/amdnr/Amdnr.Avalonia
     sources:
