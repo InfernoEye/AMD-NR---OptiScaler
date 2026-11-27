@@ -153,6 +153,33 @@ public sealed class Backend
         if (exit != 0) throw new InvalidOperationException(output);
     }
 
+    public async Task<IReadOnlyList<InstalledGameSummary>> InstalledGamesAsync(
+        CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] { "--installed-games-json" }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var results = new List<InstalledGameSummary>();
+        foreach (var row in document.RootElement.EnumerateArray())
+        {
+            string? StringValue(string name) =>
+                row.TryGetProperty(name, out var item) &&
+                item.ValueKind == JsonValueKind.String ? item.GetString() : null;
+            var folder = StringValue("folder");
+            var executable = StringValue("executable");
+            if (string.IsNullOrWhiteSpace(folder) || string.IsNullOrWhiteSpace(executable))
+                continue;
+            results.Add(new InstalledGameSummary(
+                StringValue("name") ?? Path.GetFileName(folder),
+                folder, executable, StringValue("status") ?? "invalid_record",
+                StringValue("alias"),
+                row.GetProperty("tracked_files").GetInt32(),
+                StringValue("source_archive"),
+                row.GetProperty("custom").GetBoolean()));
+        }
+        return results;
+    }
+
     public async Task<InstallationReport> InstallationAsync(string executable)
     {
         var (exit, output) = await RunAsync(new[] { "--installation-json", "--exe", executable });
@@ -298,6 +325,10 @@ public sealed class Backend
 
 public sealed record SteamUserOptions(string Status, string? Existing,
     string? Preview, string? ComposeStatus);
+
+public sealed record InstalledGameSummary(string Name, string Folder,
+    string Executable, string Status, string? Alias, int TrackedFiles,
+    string? SourceArchive, bool Custom);
 
 public sealed record GameEntry(string Name, string Folder, string? Artwork, bool Custom = false);
 
