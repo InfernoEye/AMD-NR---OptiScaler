@@ -22,7 +22,7 @@ mkdir -p "$OUTPUT/usr/bin"
 cat > "$OUTPUT/usr/bin/python3" <<'PYSH'
 #!/usr/bin/env sh
 set -eu
-if [ -n "${APPDIR:-}" ]; then BASE="$APPDIR"; else BASE="$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)"; fi
+if [ -n "${APPDIR:-}" ]; then BASE="$APPDIR"; else BASE="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"; fi
 exec "$BASE/usr/lib/amdnr-python/bin/python3" "$@"
 PYSH
 chmod +x "$OUTPUT/usr/bin/python3"
@@ -47,7 +47,7 @@ chmod +x "$OUTPUT/AppRun" "$OUTPUT/usr/lib/amdnr/Amdnr.Avalonia"
 cat > "$OUTPUT/usr/bin/amdnr-launcher" <<'SH'
 #!/usr/bin/env sh
 set -eu
-BASE="$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)"
+BASE="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
 export AMDNR_AVALONIA_BACKEND="$BASE/usr/share/amdnr/amdnr_launcher.py"
 exec "$BASE/usr/lib/amdnr/Amdnr.Avalonia" "$@"
 SH
