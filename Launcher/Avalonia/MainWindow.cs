@@ -143,10 +143,9 @@ public sealed class MainWindow : Window
                 {
                     Key.D1 => ShowLibrary,
                     Key.D2 => ShowInstalledGames,
-                    Key.D3 => ShowInstall,
-                    Key.D4 => ShowDoctor,
-                    Key.D5 => ShowCompatibility,
-                    Key.D6 => ShowSettings,
+                    Key.D3 => ShowDoctor,
+                    Key.D4 => ShowCompatibility,
+                    Key.D5 => ShowSettings,
                     _ => null
                 };
                 if (page is not null)
