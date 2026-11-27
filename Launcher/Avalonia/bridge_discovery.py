@@ -191,6 +191,7 @@ def _proton_candidates(exe: Path) -> list[str]:
 
 
 def discover(exe: Path, *, include_library: bool = True) -> dict:
+    from bridge_deps import host_library_status
     if not exe.is_file() or exe.is_symlink() or exe.suffix.casefold() != ".exe":
         raise ValueError("Select an existing, regular Windows game executable.")
     devices = _gpu_devices()
@@ -207,5 +208,6 @@ def discover(exe: Path, *, include_library: bool = True) -> dict:
         "proton_active": "unknown; Steam launch options and actual runtime were not read or modified",
         "compiler_candidates": candidates,
         "compiler_note": "Candidates passed x64 DLL structure and Wine-builtin checks, but publisher is unverified. Wine/Proton compatdata DLLs are not suitable. A native Microsoft DLL from any game you own can be used without editing that game.",
+        "host_libraries": host_library_status(),
         "automatic_changes": False,
     }
