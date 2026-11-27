@@ -623,6 +623,27 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "previous AMDNR"):
             bridge.remove(exe, True, restore_previous=True, force=True)
 
+    def test_force_bridge_without_upstream_manager_uses_owned_file_quarantine(self):
+        exe = self.exe()
+        game = exe.parent
+        wrapper = game / "amdnr-linux/run.sh"
+        wrapper.parent.mkdir(parents=True)
+        wrapper.write_bytes(b"owned wrapper")
+        record = {"version": 1, "launcher": {"proxy_name": "winmm.dll"},
+                  "files": [{"path": "amdnr-linux/run.sh",
+                             "sha256": hashlib.sha256(b"owned wrapper").hexdigest(),
+                             "existed": False}],
+                  "installed": ["amdnr-linux/run.sh"]}
+        (game / bridge.OWN_RECORD).write_text(json.dumps(record))
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(bridge, "source_path", return_value=self.root / "missing-source"),
+              patch("launcher_maintenance._ensure_not_running")):
+            outcome = bridge.remove(exe, True, restore_previous=False, force=True)
+        self.assertTrue(outcome["prefix_recovery_required"])
+        self.assertFalse(wrapper.exists())
+        self.assertFalse((game / bridge.OWN_RECORD).exists())
+        self.assertTrue(Path(outcome["fallback"]["forced_quarantine"]).is_dir())
+
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
         self.assertEqual(bridge.VERSION, "0.3.7")
