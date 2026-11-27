@@ -12,11 +12,12 @@ cp -a "$PUBLISH/." "$OUTPUT/usr/lib/amdnr/"
 # Bundle relocatable CPython and its full stdlib. Never depend on a tester's
 # system Python version or on Python being installed at all.
 mapfile -t PYTHON_DIRS < <(find "$PYTHON_INSTALL" -mindepth 1 -maxdepth 1 -type d)
-if [ "${#PYTHON_DIRS[@]}" -ne 1 ] || [ ! -x "${PYTHON_DIRS[0]}/bin/python3" ]; then
-  echo "Expected exactly one uv-managed CPython with bin/python3" >&2
+if [ "${#PYTHON_DIRS[@]}" -ne 1 ] || [ ! -x "${PYTHON_DIRS[0]}/bin/python3.12" ]; then
+  echo "Expected exactly one uv-managed CPython with bin/python3.12" >&2
   exit 1
 fi
 cp -a "${PYTHON_DIRS[0]}" "$OUTPUT/usr/lib/amdnr-python"
+ln -sf python3.12 "$OUTPUT/usr/lib/amdnr-python/bin/python3"
 mkdir -p "$OUTPUT/usr/bin"
 cat > "$OUTPUT/usr/bin/python3" <<'PYSH'
 #!/usr/bin/env sh
