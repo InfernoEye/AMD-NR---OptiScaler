@@ -76,6 +76,24 @@ public sealed class Backend
         return games;
     }
 
+    public async Task<IReadOnlyList<ExecutableEntry>> ExecutablesAsync(
+        string gameFolder, CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] { "--exes-json", gameFolder }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var results = new List<ExecutableEntry>();
+        foreach (var item in document.RootElement.EnumerateArray())
+        {
+            var path = item.GetProperty("path").GetString();
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
+            results.Add(new ExecutableEntry(path,
+                item.GetProperty("recommended").GetBoolean(),
+                item.GetProperty("suspicious").GetBoolean()));
+        }
+        return results;
+    }
+
     public async Task<IReadOnlyList<ReleaseEntry>> ReleasesAsync(CancellationToken token = default)
     {
         var (exit, output) = await RunAsync(new[] { "--releases-json" }, token);
@@ -97,6 +115,13 @@ public sealed class Backend
 }
 
 public sealed record GameEntry(string Name, string Folder, string? Artwork);
+
+public sealed record ExecutableEntry(string Path, bool Recommended, bool Suspicious)
+{
+    public override string ToString() =>
+        (Recommended ? "★  " : Suspicious ? "⚠  " : "") + Path;
+}
+
 
 public sealed record ReleaseEntry(string Tag, string Name, string Asset, long Bytes, bool Prerelease)
 {
