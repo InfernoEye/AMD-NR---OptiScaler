@@ -391,25 +391,40 @@ public sealed class MainWindow : Window
             // Do not navigate to a different game after an asynchronous scan.
             if (_selectedGame?.Folder != game.Folder) return;
             _exeCandidates = results;
-            _status.Text = results.Count == 0
-                ? "No Windows executable detected. Choose one manually."
-                : $"Found {results.Count} executable candidates. Confirm the correct one.";
+            var saved = await _backend.SavedExecutableAsync(game.Folder);
+            if (_selectedGame?.Folder != game.Folder) return;
+            var chosen = saved ?? results.FirstOrDefault(e => e.AutoSelect)?.Path;
+            _exe = chosen;
+            _status.Text = saved is not null
+                ? "Restored saved executable: " + Path.GetFileName(saved)
+                : chosen is not null
+                    ? "Automatically selected likely game executable: " + Path.GetFileName(chosen)
+                    : results.Count == 0
+                        ? "No Windows executable detected. Choose one manually."
+                        : "Several possible executables found. Select the correct one.";
             ShowGameDetails();
         }
         catch (Exception ex) { _status.Text = "Executable scan failed: " + ex.Message; }
         finally { _busy = false; }
     }
 
-    private void ConfirmExecutable(string path)
+    private async Task ConfirmExecutableAsync(string path)
     {
+        if (_selectedGame is not { } game || _backend is null) return;
         if (!File.Exists(path) || !path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
         {
             _status.Text = "Selected executable is no longer available.";
             return;
         }
-        _exe = path;
-        _status.Text = "Confirmed game executable: " + path;
-        ShowGameDetails();
+        try
+        {
+            await _backend.RememberExecutableAsync(game.Folder, path);
+            if (_selectedGame?.Folder != game.Folder) return;
+            _exe = path;
+            _status.Text = "Saved executable preference: " + Path.GetFileName(path);
+            ShowGameDetails();
+        }
+        catch (Exception ex) { _status.Text = "Could not save executable choice: " + ex.Message; }
     }
 
     private bool HasInstallRecord()
@@ -480,7 +495,7 @@ public sealed class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(chosen) && File.Exists(chosen))
         {
             var selected = new StackPanel { Spacing = 5 };
-            selected.Children.Add(Text("✓  Confirmed game executable", 15,
+            selected.Children.Add(Text("✓  Selected game executable · change anytime", 15,
                 AccentBrush, FontWeight.SemiBold));
             selected.Children.Add(Text(Path.GetFileName(chosen), 20,
                 ForegroundBrush, FontWeight.SemiBold));
@@ -497,7 +512,7 @@ public sealed class MainWindow : Window
             suggestion.Children.Add(Text(Path.GetRelativePath(game.Folder, recommended.Path),
                 13, MutedBrush));
             var confirm = Button("USE THIS EXECUTABLE", true);
-            confirm.Click += (_, _) => ConfirmExecutable(recommended.Path);
+            confirm.Click += async (_, _) => await ConfirmExecutableAsync(recommended.Path);
             suggestion.Children.Add(confirm);
             detail.Children.Add(Panel(suggestion, new Thickness(14)));
         }
@@ -508,8 +523,8 @@ public sealed class MainWindow : Window
                 14, MutedBrush));
         }
 
-        detail.Children.Add(Text("Confirm the executable that Steam actually starts. " +
-            "Recommendations are heuristic, not verified installation targets.", 12, MutedBrush));
+        detail.Children.Add(Text("Likely game executables are selected automatically. " +
+            "Your manual choice is remembered per game. Check the path before installing.", 12, MutedBrush));
 
         var exeActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         var alternatives = _exeCandidates.Where(e => e.Path != chosen &&
@@ -530,7 +545,7 @@ public sealed class MainWindow : Window
         {
             var selected = await PickFileAsync("Select Windows game executable",
                 new FilePickerFileType("Windows executable") { Patterns = new[] { "*.exe" } });
-            if (selected is not null) ConfirmExecutable(selected);
+            if (selected is not null) await ConfirmExecutableAsync(selected);
         };
         exeActions.Children.Add(browse);
         var rescan = Button("RESCAN");
@@ -548,10 +563,10 @@ public sealed class MainWindow : Window
                 var select = Button((choice.Suspicious ? "⚠  " :
                     choice.Recommended ? "★  " : "") + relative +
                     (choice.Path == _exe ? "  ·  SELECTED" : ""));
-                select.Click += (_, _) =>
+                select.Click += async (_, _) =>
                 {
                     _showAlternativeExecutables = false;
-                    ConfirmExecutable(choice.Path);
+                    await ConfirmExecutableAsync(choice.Path);
                 };
                 entries.Children.Add(select);
             }
