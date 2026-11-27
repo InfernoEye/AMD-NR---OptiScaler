@@ -535,7 +535,7 @@ def _component_entries(archive: Path) -> list:
         for entry in source.infolist():
             name = entry.filename
             parts = name.rstrip("/").split("/")
-            if (not name or "\\" in name or name.startswith("/") or ":" in name
+            if (not name or chr(92) in name or name.startswith("/") or ":" in name
                     or any(p in ("", ".", "..") for p in parts)):
                 raise ValueError("Unsafe archive path")
             if entry.is_dir():
@@ -558,7 +558,7 @@ def _component_entries(archive: Path) -> list:
 def _component_target(root: Path, name: str) -> Path:
     dest = root.joinpath(*name.split("/"))
     relative = dest.relative_to(root)
-    if (not name or name.startswith("/") or "\\\\" in name or ":" in name or
+    if (not name or name.startswith("/") or chr(92) in name or ":" in name or
             any(part in ("", ".", "..") for part in name.split("/"))):
         raise ValueError("Unsafe recorded component path")
     parent = root
