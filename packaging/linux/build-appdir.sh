@@ -4,20 +4,26 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PUBLISH="$1"
 OUTPUT="$2"
-PYTHON_INSTALL="${3:?Pass the uv-managed CPython install directory as argument 3}"
+PYTHON_EXE="${3:?Pass the uv-managed CPython executable path as argument 3}"
 mkdir -p "$OUTPUT/usr/bin" "$OUTPUT/usr/lib/amdnr" \
   "$OUTPUT/usr/share/amdnr" "$OUTPUT/usr/share/applications" \
   "$OUTPUT/usr/share/icons/hicolor/128x128/apps"
 cp -a "$PUBLISH/." "$OUTPUT/usr/lib/amdnr/"
 # Bundle relocatable CPython and its full stdlib. Never depend on a tester's
 # system Python version or on Python being installed at all.
-mapfile -t PYTHON_DIRS < <(find "$PYTHON_INSTALL" -mindepth 1 -maxdepth 1 -type d)
-if [ "${#PYTHON_DIRS[@]}" -ne 1 ] || [ ! -x "${PYTHON_DIRS[0]}/bin/python3.12" ]; then
-  echo "Expected exactly one uv-managed CPython with bin/python3.12" >&2
+if [ ! -x "$PYTHON_EXE" ]; then
+  echo "Managed Python executable not found: $PYTHON_EXE" >&2
   exit 1
 fi
-cp -a "${PYTHON_DIRS[0]}" "$OUTPUT/usr/lib/amdnr-python"
-ln -sf python3.12 "$OUTPUT/usr/lib/amdnr-python/bin/python3"
+PYTHON_ROOT="$(dirname "$(dirname "$(readlink -f "$PYTHON_EXE")")")"
+if [ ! -d "$PYTHON_ROOT/lib" ]; then
+  echo "Managed Python installation lacks a standard library: $PYTHON_ROOT" >&2
+  exit 1
+fi
+cp -a "$PYTHON_ROOT" "$OUTPUT/usr/lib/amdnr-python"
+if [ ! -e "$OUTPUT/usr/lib/amdnr-python/bin/python3" ]; then
+  ln -s "$(basename "$PYTHON_EXE")" "$OUTPUT/usr/lib/amdnr-python/bin/python3"
+fi
 mkdir -p "$OUTPUT/usr/bin"
 cat > "$OUTPUT/usr/bin/python3" <<'PYSH'
 #!/usr/bin/env sh
