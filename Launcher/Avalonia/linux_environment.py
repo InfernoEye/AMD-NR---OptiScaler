@@ -131,7 +131,7 @@ def game_running(executable: Path, *, proc_root: Path = Path("/proc")) -> dict:
             try:
                 if proc.stat().st_uid != own_id:
                     continue
-                args = (proc / "cmdline").read_bytes()[:32768].split(b"\\x00")
+                args = (proc / "cmdline").read_bytes()[:32768].split(b"\x00")
                 argv = [arg.decode("utf-8", errors="replace") for arg in args if arg]
                 comm = (proc / "comm").read_text(encoding="utf-8", errors="replace")
                 try:
