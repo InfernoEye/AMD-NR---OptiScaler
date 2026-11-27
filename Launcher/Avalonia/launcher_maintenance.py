@@ -55,6 +55,12 @@ def write_json_atomic(path: Path, document: dict) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temp, path)
+        # Persist the rename as well as file contents for power-loss recovery.
+        directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         temp.unlink(missing_ok=True)
 
@@ -126,6 +132,11 @@ def _write_binary_atomic(source: Path, target: Path) -> None:
             dest.flush()
             os.fsync(dest.fileno())
         os.replace(tmp, target)
+        directory_fd = os.open(target.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -137,22 +148,39 @@ def restore_transaction(executable: Path) -> dict:
     if journal.is_symlink() or not journal.is_file() or journal.stat().st_size > MAX_JOURNAL_BYTES:
         raise ValueError("No safe recovery journal")
     doc = json.loads(journal.read_text())
+    if not isinstance(doc, dict):
+        raise ValueError("Invalid recovery journal")
     if doc.get("format") != 1 or not isinstance(doc.get("touched"), list):
         raise ValueError("Invalid recovery journal")
     snapshot = root / "AMDNR_backup" / TRANSACTION_DIR
     if snapshot.is_symlink() or not snapshot.is_dir():
         raise ValueError("Rollback snapshot missing or unsafe")
     operations = []
+    seen = set()
     for entry in doc["touched"]:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            raise ValueError("Malformed recovery entry")
         name = entry["path"]
+        if name.casefold() in seen:
+            raise ValueError("Duplicate recovery entry")
+        seen.add(name.casefold())
         target = safe_path(root, name)
         saved = safe_path(snapshot, name)
         if target.is_symlink():
             raise ValueError("Target changed to a symlink: " + name)
         old_sha = entry.get("previous_sha256")
         new_sha = entry.get("expected_sha256")
-        if new_sha is not None and (not isinstance(new_sha, str) or len(new_sha) != 64):
+        if (old_sha is not None and (not isinstance(old_sha, str) or len(old_sha) != 64)) or (
+                new_sha is not None and (not isinstance(new_sha, str) or len(new_sha) != 64)):
             raise ValueError("Malformed recovery entry")
+        for value in (old_sha, new_sha):
+            if value is not None:
+                try:
+                    int(value, 16)
+                except ValueError as exc:
+                    raise ValueError("Malformed recovery digest") from exc
+        if target.exists() and not target.is_file():
+            raise ValueError("Unsafe recovery destination: " + name)
         current = digest(target) if target.is_file() else None
         if current not in (old_sha, new_sha, None):
             raise ValueError("File changed independently; refusing rollback: " + name)
@@ -172,11 +200,16 @@ def restore_transaction(executable: Path) -> dict:
         raise ValueError("Original installation record snapshot missing")
     old_record_sha = doc.get("state_sha256")
     new_record_sha = doc.get("new_state_sha256")
+    if state_file.is_symlink() or (state_file.exists() and not state_file.is_file()):
+        raise ValueError("Unsafe installation record destination")
+    if not isinstance(old_record_sha, str) or len(old_record_sha) != 64:
+        raise ValueError("Malformed installation record checksum")
     if digest(old_state_file) != old_record_sha:
         raise ValueError("Installation record snapshot changed")
     current_state_sha = digest(state_file) if state_file.is_file() and not state_file.is_symlink() else None
     if current_state_sha not in (old_record_sha, new_record_sha):
         raise ValueError("Installation record changed; refusing rollback")
+    # No game file is modified until every target and rollback copy validates.
     for target, saved, old_sha, current in operations:
         if current == old_sha:
             continue
