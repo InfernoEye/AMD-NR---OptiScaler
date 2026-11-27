@@ -86,6 +86,43 @@ class AppInfoTests(unittest.TestCase):
         self.assertEqual(report["windows_missing"], ["game/bin/win64/cs2.exe"])
         self.assertEqual(report["linux_declared"], ["game/cs2.sh"])
 
+    def test_platform_neutral_exe_is_a_windows_candidate(self):
+        # Steamworks 'All OSes' launch options omit config.oslist.
+        data = {"appinfo": {"common": {"type": "Game"}, "config": {
+            "launch": {"0": {"executable": r"game\\bin\\win64\\cs2.exe"}}
+        }}}
+        report = steam.resolve_windows_launch(data, self.game)
+        self.assertEqual(report["reason"], "steam_primary")
+        self.assertEqual(report["selected"],
+                         str(self.game / "game/bin/win64/cs2.exe"))
+        self.assertEqual(report["windows_declared"], 1)
+        self.assertEqual(report["platform_neutral_declared"], 1)
+
+    def test_platform_neutral_linux_script_is_not_windows_candidate(self):
+        data = {"appinfo": {"common": {"type": "Game"}, "config": {
+            "launch": {"0": {"executable": "game/cs2.sh"}}
+        }}}
+        report = steam.resolve_windows_launch(data, self.game)
+        self.assertEqual(report["windows_declared"], 0)
+        self.assertIsNone(report["selected"])
+
+    def test_explicit_linux_exe_must_not_be_selected_as_windows(self):
+        data = {"appinfo": {"common": {"type": "Game"}, "config": {
+            "launch": {"0": {"executable": "editor.exe",
+                              "config": {"oslist": "linux"}}}
+        }}}
+        report = steam.resolve_windows_launch(data, self.game)
+        self.assertEqual(report["windows_declared"], 0)
+        self.assertIsNone(report["selected"])
+
+    def test_platform_neutral_missing_exe_is_reported_not_selected(self):
+        data = {"appinfo": {"common": {"type": "Game"}, "config": {
+            "launch": {"0": {"executable": "missing.exe"}}
+        }}}
+        report = steam.resolve_windows_launch(data, self.game)
+        self.assertEqual(report["windows_missing"], ["missing.exe"])
+        self.assertIsNone(report["selected"])
+
     def test_primary_windows_entry_ignores_linux_and_optional_launches(self):
         match = steam.resolve_windows_launch(sample_app(), self.game)
         self.assertEqual(match["reason"], "steam_primary")
