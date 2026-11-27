@@ -71,7 +71,7 @@ public sealed class MainWindow : Window
     private readonly Dictionary<string, string> _indexedExecutables = new(StringComparer.Ordinal);
     private string _auditFilter = "All games";
     private bool _auditSnapshotLoaded;
-    private readonly Grid _shell = new() { RowDefinitions = new RowDefinitions("Auto,*") };
+    private readonly Grid _shell = new() { RowDefinitions = new RowDefinitions("54,Auto,*,30") };
     private Grid? _workspace;
     private Control? _sideNavigation;
     private Control? _topNavigation;
@@ -108,8 +108,11 @@ public sealed class MainWindow : Window
         _workspace = app;
         _sideNavigation = BuildSidebar();
         _topNavigation = BuildTopNavigation();
+        var globalBar = BuildHeader();
+        _shell.Children.Add(globalBar);
+        Grid.SetRow(_topNavigation, 1);
         _shell.Children.Add(_topNavigation);
-        Grid.SetRow(app, 1);
+        Grid.SetRow(app, 2);
         _shell.Children.Add(app);
         // Steam Deck compact mode: keep navigation available at 800 px
         // logical width and let long sections wrap/scroll.
@@ -157,9 +160,8 @@ public sealed class MainWindow : Window
         };
         app.Children.Add(_sideNavigation);
         // Status lives in the header; the content viewport must never sit behind a footer.
-        var main = new Grid { RowDefinitions = new RowDefinitions("90,*") };
+        var main = new Grid { RowDefinitions = new RowDefinitions("*") };
         Grid.SetColumn(main, 1);
-        main.Children.Add(BuildHeader());
         // The trailing spacer is real scroll content, not ScrollViewer padding.
         // It guarantees the final controls can scroll well above the window edge.
         var scrollBody = new StackPanel { Spacing = 0 };
@@ -172,9 +174,24 @@ public sealed class MainWindow : Window
             Content = scrollBody,
             Padding = new Thickness(28, 10, 28, 12),
         };
-        Grid.SetRow(_pageScroller, 1);
+        Grid.SetRow(_pageScroller, 0);
         main.Children.Add(_pageScroller);
         app.Children.Add(main);
+        var statusBar = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            Background = SidebarBrush,
+            Margin = new Thickness(0),
+        };
+        _status.Margin = new Thickness(18, 3, 10, 3);
+        _status.VerticalAlignment = VerticalAlignment.Center;
+        statusBar.Children.Add(_status);
+        var runtimeLabel = Text("AMDNR LINUX  •  PROTON", 10, MutedBrush);
+        runtimeLabel.Margin = new Thickness(12, 3, 18, 3);
+        Grid.SetColumn(runtimeLabel, 1);
+        statusBar.Children.Add(runtimeLabel);
+        Grid.SetRow(statusBar, 3);
+        _shell.Children.Add(statusBar);
         Content = _shell;
         _tour = new OnboardingTour(_shell, PrepareTourStep, ShowLibrary, _onboardingPath);
         UpdateNavigationLayout(Width);
@@ -505,32 +522,40 @@ public sealed class MainWindow : Window
 
     private Control BuildHeader()
     {
+        // The global toolbar matches the reference launcher hierarchy:
+        // brand at left, current workspace, compact mode/actions at right.
         var header = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
-            RowDefinitions = new RowDefinitions("Auto,Auto"),
-            RowSpacing = 5,
-            Margin = new Thickness(28, 13, 28, 10),
+            ColumnDefinitions = new ColumnDefinitions("88,*,Auto"),
+            Background = BackgroundBrush,
+            ColumnSpacing = 10,
+            Margin = new Thickness(15, 5, 15, 4),
         };
+        var logo = new StackPanel { Spacing = -5, VerticalAlignment = VerticalAlignment.Center };
+        logo.Children.Add(Text("AMD", 16, ForegroundBrush, FontWeight.Bold));
+        logo.Children.Add(Text("NR", 21, AccentBrush, FontWeight.Bold));
+        header.Children.Add(logo);
+        _breadcrumb.FontSize = 12;
+        _breadcrumb.Foreground = MutedBrush;
+        _breadcrumb.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(_breadcrumb, 1);
         header.Children.Add(_breadcrumb);
-        _status.FontSize = 12;
-        _status.MaxLines = 2;
+        _status.FontSize = 11;
+        _status.MaxLines = 1;
         _status.TextTrimming = TextTrimming.CharacterEllipsis;
-        _status.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetRow(_status, 1);
-        header.Children.Add(_status);
+
         var headerActions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 6,
+            Spacing = 5,
             VerticalAlignment = VerticalAlignment.Center,
         };
         var gridView = Button("▦ " + UiLanguage.Translate("Grid"));
         var listView = Button("☰ " + UiLanguage.Translate("List"));
         _gridViewButton = gridView;
         _listViewButton = listView;
-        gridView.Padding = new Thickness(11, 8);
-        listView.Padding = new Thickness(11, 8);
+        gridView.Padding = new Thickness(10, 6);
+        listView.Padding = new Thickness(10, 6);
         gridView.Click += (_, _) => SwitchLibraryView(true);
         listView.Click += (_, _) => SwitchLibraryView(false);
         void SetViewColors()
@@ -543,22 +568,24 @@ public sealed class MainWindow : Window
         listView.Click += (_, _) => SetViewColors();
         headerActions.Children.Add(gridView);
         headerActions.Children.Add(listView);
-        var refresh = Button("↻  " + UiLanguage.Translate("Refresh"));
+        var refresh = Button("↻", false);
         _refreshButton = refresh;
-        refresh.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetRowSpan(refresh, 2);
+        refresh.Padding = new Thickness(12, 6);
         refresh.Click += async (_, _) =>
         {
-            // Refresh always returns to the library; it must never reselect a game.
             _selectedGame = null;
             await RefreshGamesAsync();
         };
-        refresh.Padding = new Thickness(11, 8);
         headerActions.Children.Add(refresh);
-        Grid.SetColumn(headerActions, 1);
-        Grid.SetRowSpan(headerActions, 2);
+        Grid.SetColumn(headerActions, 2);
         header.Children.Add(headerActions);
-        return header;
+        return new Border
+        {
+            Background = BackgroundBrush,
+            BorderBrush = LineBrush,
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            Child = header,
+        };
     }
 
     private void Clear(string section)
