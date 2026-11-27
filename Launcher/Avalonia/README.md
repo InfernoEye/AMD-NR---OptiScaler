@@ -84,6 +84,30 @@ python3 Launcher/Avalonia/amdnr_launcher.py --remove-custom-game "/path/to/game"
 
 The registry only stores the game's display name and local installation folder. Game installation files are never modified when adding, editing, or forgetting the entry.
 
+## Installed Games dashboard
+
+Select **Installed** in the sidebar for a compact inventory of AMDNR
+installation records associated with saved game executables. The dashboard
+reads the existing differential library index and only checks each selected
+executable's adjacent `.amdnr-linux-install.json` record. It shows the
+recorded proxy DLL, tracked file count, original archive name (when known),
+and flags unreadable or malformed records. Use **Open Game** to manage the
+selected installation or **Open Folder** to inspect its location.
+
+This page **does not** perform Steam discovery, recursively scan games, hash
+DLLs, change game files, or prove that the installation works under Proton.
+For a real integrity check, use Doctor or **Verify Installed Files**.
+
+Terminal equivalent:
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --installed-games-json
+```
+
+Games without a remembered Windows EXE are not included until selected or
+analyzed; offline custom games remain in the Library but cannot have their
+installed files checked while their drives are unavailable.
+
 ## Per-game quick setup
 
 The selected-game page includes a **GAME SETUP / QUICK ACTIONS** panel:
