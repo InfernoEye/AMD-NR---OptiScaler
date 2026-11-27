@@ -1,0 +1,24 @@
+name: Avalonia Linux build
+
+on:
+  push:
+    paths:
+      - "Launcher/Avalonia/**"
+      - ".github/workflows/avalonia-linux.yml"
+  pull_request:
+    paths:
+      - "Launcher/Avalonia/**"
+      - ".github/workflows/avalonia-linux.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Restore
+        run: dotnet restore Launcher/Avalonia/Amdnr.Avalonia.csproj
+      - name: Build Avalonia desktop
+        run: dotnet build Launcher/Avalonia/Amdnr.Avalonia.csproj -c Release --no-restore

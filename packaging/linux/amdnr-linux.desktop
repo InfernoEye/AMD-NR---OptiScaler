@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AMDNR Linux Launcher
+GenericName=Neural Rendering Installer
+Comment=Manage AMDNR game installations on Linux and Proton
+Exec=amdnr-launcher
+Icon=amdnr-linux
+Terminal=false
+Categories=Game;Utility;
+StartupNotify=true

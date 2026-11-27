@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+export AMDNR_AVALONIA_BACKEND="/app/share/amdnr/amdnr_launcher.py"
+exec /app/lib/amdnr/Amdnr.Avalonia "$@"
