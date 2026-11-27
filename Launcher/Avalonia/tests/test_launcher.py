@@ -168,6 +168,70 @@ class LauncherTests(unittest.TestCase):
             self.assertTrue(existing.exists())
             self.assertFalse((self.game / "plugins/new.bin").exists())
 
+    def test_component_backup_replacement_restores_original_on_removal(self):
+        tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
+        cache = self.root / tag
+        cache.mkdir()
+        archive = cache / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("dlssnr-amd/shaders/accumulation.txt", b"new constant")
+            stream.writestr("dlssnr-amd/shaders/new.nrp", b"new shader")
+        original = self.game / "dlssnr-amd/shaders/accumulation.txt"
+        original.parent.mkdir(parents=True)
+        original.write_bytes(b"old constant")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertEqual(preview["conflict_count"], 1)
+            self.assertEqual(preview["replaceable_count"], 1)
+            with self.assertRaisesRegex(ValueError, "overwrite"):
+                launcher.install_component(self.exe, tag, asset)
+            result = launcher.install_component(self.exe, tag, asset, replace_conflicts=True)
+            self.assertEqual(result["replaced_files"], 1)
+            self.assertEqual(original.read_bytes(), b"new constant")
+            self.assertEqual(launcher.installed_components(self.exe)[0]["modified"], [])
+            launcher.remove_component(self.exe, asset)
+            self.assertEqual(original.read_bytes(), b"old constant")
+            self.assertFalse((original.parent / "new.nrp").exists())
+
+    def test_component_replacement_refuses_symlink_and_later_edit(self):
+        tag, asset = "Alpha1", "AMDNR-WrongGPU-1.zip"
+        cache = self.root / tag
+        cache.mkdir()
+        archive = cache / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("settings.txt", b"new")
+        original = self.game / "settings.txt"
+        original.write_bytes(b"old")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
+            launcher.install_component(self.exe, tag, asset, replace_conflicts=True)
+            original.write_bytes(b"edited by user")
+            with self.assertRaisesRegex(ValueError, "modified"):
+                launcher.remove_component(self.exe, asset)
+            self.assertEqual(original.read_bytes(), b"edited by user")
+            original.write_bytes(b"new")
+            launcher.remove_component(self.exe, asset)
+            self.assertEqual(original.read_bytes(), b"old")
+
+            original.unlink()
+            original.symlink_to(self.exe)
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertEqual(preview["replaceable_count"], 0)
+            with self.assertRaisesRegex(ValueError, "overwrite"):
+                launcher.install_component(self.exe, tag, asset, replace_conflicts=True)
+            self.assertTrue(original.is_symlink())
+
+    def test_component_registry_handles_many_installed_files(self):
+        files = {f"dlssnr/records/file_{i:04d}.nrp": "a" * 64 for i in range(2325)}
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}):
+            launcher._save_component_records(self.exe, {
+                "AMDNR-Mochi-1-component.zip": {"tag": "Alpha1", "files": files}})
+            self.assertEqual(len(launcher._component_records(self.exe)[
+                "AMDNR-Mochi-1-component.zip"]["files"]), 2325)
+
     def test_component_differs_from_existing_and_must_not_overwrite(self):
         tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
         archive = self.root / asset
