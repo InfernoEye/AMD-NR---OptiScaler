@@ -2010,12 +2010,16 @@ public sealed class MainWindow : Window
                     (result.ExtractedBytes / (1024.0 * 1024 * 1024)).ToString("F2") +
                     " GiB extracted. Sample paths: " + string.Join(", ", result.Files.Take(12)) +
                     (result.FileCount > 12 ? "…" : ""), 12, MutedBrush));
+                previewDetails.Children.Add(Text(
+                    result.NewFileCount + " new files · " + result.IdenticalCount +
+                    " identical existing files (preserved) · " + result.ConflictCount +
+                    " differing/unsafe files (installation blocked)", 12, MutedBrush));
                 if (result.SafetyLimitExceeded)
                 {
                     previewDetails.Children.Add(Text(
                         "SAFETY BLOCK: " +
-                        (result.TooManyFiles ? "Archive has over 500 files. " : "") +
-                        "Extraction limits: 12 GiB total, 8 GiB per file, 500 files. " +
+                        (result.TooManyFiles ? "Archive has over 10,000 files. " : "") +
+                        "Extraction limits: 12 GiB total, 8 GiB per file, 10,000 files. " +
                         "Preview only; installation disabled.", 13, AccentBrush, FontWeight.Bold));
                     foreach (var file in result.LargestFiles)
                         previewDetails.Children.Add(Text(file.Name + " — " +
@@ -2033,7 +2037,7 @@ public sealed class MainWindow : Window
                     installComponent.IsEnabled = true;
                 }
                 _status.Text = result.Installable
-                    ? "Component verified. Review the file list and select Install."
+                    ? "Component verified. Existing identical files will be preserved."
                     : result.SafetyLimitExceeded
                         ? "Archive size exceeds extraction limits; inspect the largest files below."
                         : "Component install blocked by existing files.";
