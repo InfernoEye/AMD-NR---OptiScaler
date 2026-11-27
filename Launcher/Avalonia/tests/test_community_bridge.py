@@ -188,6 +188,56 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse(report["system_packages_will_be_installed"])
         self.assertTrue(report["private_rocm_required"])
 
+    def test_release_check_marks_newer_versions_unreviewed(self):
+        releases = [
+            {"tag_name": "linux-v0.4.0", "draft": False, "prerelease": False,
+             "published_at": "2026-12-01T00:00:00Z",
+             "assets": [{"name": "AMDNR-Linux-v0.4.0.tar.gz"}]},
+            {"tag_name": "linux-v0.3.7", "draft": False, "prerelease": False,
+             "assets": [{"name": "AMDNR-Linux-v0.3.7.tar.gz"}]},
+            {"tag_name": "linux-v9.9.9", "draft": True,
+             "assets": [{"name": "AMDNR-Linux-v9.9.9.tar.gz"}]},
+            {"tag_name": "linux-v0.4.1-preview",
+             "assets": [{"name": "AMDNR-Linux-v0.4.1-preview.tar.gz"}]},
+            {"tag_name": "linux-v0.4.2",
+             "assets": [{"name": "unrelated.zip"}]},
+        ]
+        class Response(io.BytesIO):
+            def geturl(self):
+                return "https://api.github.com/repos/hassanm0301/AMDNR-Linux/releases"
+        def opener(request, timeout):
+            self.assertEqual(timeout, 15)
+            self.assertIn("api.github.com", request.full_url)
+            return Response(json.dumps(releases).encode())
+        outcome = bridge.check_releases(opener=opener)
+        self.assertEqual(outcome["latest_upstream_version"], "0.4.0")
+        self.assertTrue(outcome["newer_upstream_available"])
+        self.assertFalse(outcome["updated_automatically"])
+        self.assertEqual([x["version"] for x in outcome["releases"]], ["0.4.0", "0.3.7"])
+        self.assertFalse(outcome["releases"][0]["download_allowed"])
+        self.assertEqual(outcome["releases"][0]["compatibility"], "requires_review")
+        self.assertTrue(outcome["releases"][1]["download_allowed"])
+
+    def test_release_check_fails_closed_on_oversized_or_insecure_response(self):
+        class Response(io.BytesIO):
+            def __init__(self, data, url):
+                super().__init__(data)
+                self.url = url
+            def geturl(self):
+                return self.url
+        with self.assertRaisesRegex(ValueError, "insecure"):
+            bridge.check_releases(opener=lambda *_a, **_kw: Response(b"[]", "http://example.test/"))
+        with self.assertRaisesRegex(ValueError, "size limit"):
+            bridge.check_releases(opener=lambda *_a, **_kw: Response(
+                b"x" * (256 * 1024 + 1), "https://api.github.com/releases"))
+
+    def test_release_status_never_fetches_updates_implicitly(self):
+        with patch.object(bridge.urllib.request, "urlopen",
+                          side_effect=AssertionError("unexpected network")):
+            result = bridge.status()
+        self.assertEqual(result["release_approval"], "reviewed_sha256_pin")
+        self.assertFalse(result["updates_checked_online"])
+
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
         self.assertEqual(bridge.VERSION, "0.3.7")
