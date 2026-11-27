@@ -378,10 +378,11 @@ public sealed class Backend
     }
 
     public async Task RemoveComponentAsync(string executable, string asset,
-        CancellationToken token = default)
+        CancellationToken token = default, bool backupModified = false)
     {
-        var (exit, output) = await RunAsync(new[] {
-            "--remove-component", asset, "--exe", executable }, token);
+        var args = new List<string> { "--remove-component", asset, "--exe", executable };
+        if (backupModified) args.Add("--backup-modified-component");
+        var (exit, output) = await RunAsync(args, token);
         if (exit != 0) throw new InvalidOperationException(output);
     }
 
