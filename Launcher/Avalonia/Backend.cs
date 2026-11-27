@@ -363,7 +363,9 @@ public sealed class Backend
             root.GetProperty("largest_files").EnumerateArray()
                 .Select(x => new ComponentFileSize(
                     x.GetProperty("name").GetString() ?? "",
-                    x.GetProperty("bytes").GetInt64())).ToArray());
+                    x.GetProperty("bytes").GetInt64())).ToArray(),
+            root.GetProperty("managed_conflicts").EnumerateArray()
+                .Select(x => x.GetString() ?? "").ToArray());
     }
 
     public async Task InstallComponentAsync(string executable, string tag,
@@ -641,7 +643,8 @@ public sealed record ComponentFileSize(string Name, long Bytes);
 public sealed record ComponentPreview(string Asset, IReadOnlyList<string> Files,
     IReadOnlyList<string> Conflicts, bool Installable, long ExtractedBytes,
     bool SafetyLimitExceeded, int FileCount, int ConflictCount, int ReplaceableCount, bool TooManyFiles,
-    int IdenticalCount, int NewFileCount, IReadOnlyList<ComponentFileSize> LargestFiles);
+    int IdenticalCount, int NewFileCount, IReadOnlyList<ComponentFileSize> LargestFiles,
+    IReadOnlyList<string> ManagedConflicts);
 
 public sealed record ExtensionEntry(string Name, long Bytes, bool Managed, bool Modified);
 public sealed record ExtensionInventory(string Folder,
