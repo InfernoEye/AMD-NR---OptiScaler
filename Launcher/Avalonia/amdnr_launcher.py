@@ -2666,12 +2666,14 @@ def main() -> int:
                         help="Move existing AMDNR/ReShade hooks into a recoverable snapshot before bridge install")
     parser.add_argument("--bridge-remove", action="store_true",
                         help="Use community manager to restore an installed bridge with consent")
+    parser.add_argument("--bridge-recover-migration", action="store_true",
+                        help="Recover interrupted backup-and-replace migration when no bridge is installed")
     parser.add_argument("--approve-bridge-remove", action="store_true",
                         help="Explicit consent to remove the separately managed community bridge")
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
-    if args.bridge_discover_json or args.bridge_status_json or args.bridge_check_updates_json or args.bridge_prepare is not None or args.bridge_install or args.bridge_remove:
+    if args.bridge_discover_json or args.bridge_status_json or args.bridge_check_updates_json or args.bridge_prepare is not None or args.bridge_install or args.bridge_remove or args.bridge_recover_migration:
         try:
             import community_bridge
             if args.bridge_discover_json:
@@ -2691,6 +2693,8 @@ def main() -> int:
                 if args.bridge_install:
                     result = community_bridge.install(args.exe, args.approve_bridge_install, args.bridge_runtime,
                                                       replace_existing=args.bridge_backup_and_replace)
+                elif args.bridge_recover_migration:
+                    result = community_bridge.recover_migration(args.exe, args.approve_bridge_remove)
                 else:
                     result = community_bridge.remove(args.exe, args.approve_bridge_remove)
             print(json.dumps(result, ensure_ascii=False))
