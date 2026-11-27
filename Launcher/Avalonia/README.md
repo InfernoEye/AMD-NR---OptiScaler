@@ -53,6 +53,32 @@ A five-step skippable Linux-specific introduction appears on first run; it can
 be replayed from Settings. Introduction and view preferences are user-local
 under the XDG configuration directory, separate from game files.
 
+## Reference UI corrections (November 2026)
+
+Based on screenshots of the official Windows launcher, this pass corrects
+two important problems found in the initial Avalonia redesign:
+
+- **The introduction is an anchored walkthrough, not isolated windows.**
+  Its steps navigate to actual Library, Installed, Install, Doctor, Settings and
+  Help screens. Actual navigation and search controls are highlighted; Back,
+  Next and Skip work without performing installs or modifying game files.
+  The new walkthrough uses the user-local `onboarding-v2.txt` marker so
+  users who saw the old disconnected version see the fixed tour once.
+  Settings and Help can replay the tour. In List mode/narrow layouts,
+  callouts anchor below the horizontal navigation.
+- **The shell follows the official launcher hierarchy.** A compact AMD/NR
+  identity and Grid/List controls share the fixed top toolbar. Grid uses an
+  icon-labelled left sidebar; List puts navigation in the same top toolbar
+  with horizontal overflow scrolling. The fixed footer holds status.
+  On the Library page, games and search are prioritized, quick filter tabs
+  are visible and advanced readiness auditing is folded away by default.
+  Artwork cards have more prominent images and less intrusive actions.
+
+These changes are written exclusively under `Launcher/Avalonia/`.
+They are **not a claim of pixel-perfect Windows parity** and still require
+a real Avalonia desktop screenshot review and Steam Deck/controller
+interaction testing. No Windows launcher code or external project was changed.
+
 ## Current UI functionality and verification
 
 - **English/Polish:** Language selector in Settings, saved under XDG configuration.
