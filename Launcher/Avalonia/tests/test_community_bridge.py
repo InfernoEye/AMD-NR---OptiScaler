@@ -330,6 +330,36 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(len(bridge.LMXXF_SHA256), 64)
         self.assertNotEqual(bridge.prepared_path(), bridge.cache_dir() / "package")
 
+    def test_daniel_runtime_choices_are_pinned_to_060_or_older(self):
+        self.assertIn("lmxxf", bridge.RUNTIME_CHOICES)
+        self.assertIn("0.6.0", bridge.RUNTIME_CHOICES)
+        self.assertIn("0.4.0", bridge.RUNTIME_CHOICES)
+        self.assertNotIn("0.8.0", bridge.RUNTIME_CHOICES)
+        self.assertNotIn("0.9.0", bridge.RUNTIME_CHOICES)
+        with self.assertRaisesRegex(ValueError, "Unsupported neural runtime"):
+            bridge.validate_runtime("0.8.0")
+
+    def test_daniel_packages_have_separate_verified_receipts(self):
+        original = bridge.prepared_path()
+        daniel = bridge.prepared_path("0.6.0")
+        self.assertNotEqual(original, daniel)
+        (daniel / "amdnr-linux").mkdir(parents=True)
+        (daniel / "amdnr-linux/run.sh").write_text("run")
+        (daniel / "d3d12.dll").write_bytes(b"stub")
+        (daniel / "amdnr-linux/SOURCE.txt").write_text(
+            f"Host/runtime: AMDNR {bridge.HOST_VERSION}, upstream\n"
+            f"Archive SHA-256: {bridge.HOST_SHA256}\n"
+            f"lmxxf archive: upstream, SHA-256 {bridge.LMXXF_SHA256}\n"
+        )
+        receipt = daniel / "amdnr-linux/components.json"
+        receipt.write_text(json.dumps({"neural_runtime": "daniel",
+                                       "daniel": {"version": "0.6.0"}}))
+        self.assertTrue(bridge.package_is_ready(daniel, "0.6.0"))
+        self.assertFalse(bridge.package_is_ready(daniel, "lmxxf"))
+        self.assertFalse(bridge.package_is_ready(daniel, "0.5.1"))
+        with self.assertRaisesRegex(ValueError, "Unsupported neural runtime"):
+            bridge.status(runtime="0.8.0")
+
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
         self.assertEqual(bridge.VERSION, "0.3.7")
