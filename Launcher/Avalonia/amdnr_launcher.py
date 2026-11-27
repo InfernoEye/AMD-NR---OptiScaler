@@ -986,7 +986,7 @@ def release_catalog(limit: int = 12) -> list[dict[str, object]]:
     return found
 
 
-def _release_asset(tag: str, asset_name: str) -> tuple[str, str, int]:
+def _release_asset(tag: str, asset_name: str) -> tuple[str, str, int, str | None]:
     """Resolve a selected release again; never trust a caller-supplied download URL."""
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", tag):
         raise ValueError("Invalid release tag")
@@ -1010,7 +1010,11 @@ def _release_asset(tag: str, asset_name: str) -> tuple[str, str, int]:
     root = f"https://github.com/{RELEASE_REPO}/releases/download/{tag}/"
     # Construct release URLs instead of accepting arbitrary URLs from API JSON.
     from urllib.parse import quote
-    return root + quote(asset_name), root + "SHA256SUMS.txt", size
+    metadata_digest = archive.get("digest")
+    metadata_sha256 = None
+    if isinstance(metadata_digest, str) and re.fullmatch(r"sha256:[0-9a-fA-F]{64}", metadata_digest):
+        metadata_sha256 = metadata_digest[7:].lower()
+    return root + quote(asset_name), root + "SHA256SUMS.txt", size, metadata_sha256
 
 
 def _release_cache_dir() -> Path:
@@ -1019,7 +1023,7 @@ def _release_cache_dir() -> Path:
 
 def download_release(tag: str, asset_name: str) -> Path:
     """Download a checksum-verified AMDNR ZIP to the user's cache, never to a game."""
-    archive_url, sums_url, size = _release_asset(tag, asset_name)
+    archive_url, sums_url, size, metadata_sha256 = _release_asset(tag, asset_name)
     request = urllib.request.Request(sums_url, headers={"User-Agent": "AMDNR-Avalonia-Linux/1.0"})
     with urllib.request.urlopen(request, timeout=20) as response:
         sums = response.read(256 * 1024 + 1)
@@ -1033,7 +1037,14 @@ def download_release(tag: str, asset_name: str) -> Path:
             expected = match.group(1).lower()
             break
     if expected is None:
-        raise ValueError("SHA256SUMS.txt does not contain the selected ZIP")
+        # Some official historical release manifests omit separately uploaded
+        # runtime ZIPs. GitHub's release-asset digest is also an upstream
+        # SHA-256 checksum, returned for this exact asset by the GitHub API.
+        if metadata_sha256 is None:
+            raise ValueError("No SHA-256 checksum for selected ZIP in release manifest or asset metadata")
+        expected = metadata_sha256
+    elif metadata_sha256 is not None and expected != metadata_sha256:
+        raise ValueError("Official release SHA-256 manifest conflicts with asset metadata")
 
     cache = _release_cache_dir() / tag
     destination = cache / asset_name
