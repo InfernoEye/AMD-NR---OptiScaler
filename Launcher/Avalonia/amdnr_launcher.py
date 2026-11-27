@@ -475,6 +475,45 @@ def download_release(tag: str, asset_name: str) -> Path:
         temporary.unlink(missing_ok=True)
 
 
+def executable_candidates(directory: Path) -> list[dict[str, object]]:
+    """Suggest likely Windows game EXEs, but never silently install to a guess."""
+    if not directory.is_dir():
+        return []
+    bad = ("unins", "setup", "crash", "redist", "vcredist",
+           "unitycrash", "easyanticheat", "benchmark", "updater",
+           "anticheat", "uninstall")
+    candidates: list[tuple[int, Path]] = []
+    root = directory.resolve()
+    try:
+        # Stay inside this game tree; avoid scanning other Steam installations.
+        for path in directory.rglob("*"):
+            if not path.is_file() or path.suffix.lower() != ".exe" or path.is_symlink():
+                continue
+            relative = path.resolve().relative_to(root)
+            if len(relative.parts) > 7:
+                continue
+            lower = str(relative).lower()
+            score = 0
+            if any(part in path.name.lower() for part in bad):
+                score -= 100
+            if "shipping" in path.name.lower():
+                score += 45
+            if "binaries/win64" in lower.replace("\\", "/"):
+                score += 30
+            if "win64" in lower or "x64" in lower:
+                score += 10
+            if path.stem.lower() == directory.name.lower():
+                score += 20
+            score -= len(relative.parts) * 2
+            candidates.append((score, path))
+    except (OSError, ValueError):
+        return []
+    candidates.sort(key=lambda v: (-v[0], str(v[1]).casefold()))
+    return [{"path": str(path), "recommended": rank == 0 and score > -50,
+             "suspicious": score <= -50} for rank, (score, path)
+            in enumerate(candidates[:50])]
+
+
 def guess_executable(directory: Path) -> Path | None:
     options: list[Path] = []
     try:
@@ -666,8 +705,9 @@ def uninstall(executable: Path) -> tuple[int, list[str]]:
 def doctor_report(executable: Path | None, archive: Path | None) -> dict[str, object]:
     """Read-only checks; never modify a game or claim Proton GPU compatibility."""
     checks: list[dict[str, object]] = []
-    def add_check(name: str, ok: bool, detail: str) -> None:
-        checks.append({"name": name, "ok": ok, "detail": detail})
+    def add_check(name: str, ok: bool, detail: str, pending: bool = False) -> None:
+        checks.append({"name": name, "ok": ok, "status": "not_selected" if pending else
+                       ("ok" if ok else "problem"), "detail": detail})
 
     add_check("Linux", sys.platform.startswith("linux"),
               "Native Linux launcher (not a Windows GPU runtime test)")
@@ -676,17 +716,18 @@ def doctor_report(executable: Path | None, archive: Path | None) -> dict[str, ob
     add_check("Game executable", executable is not None and executable.is_file()
               and executable.suffix.lower() == ".exe",
               "Windows game executable selected" if executable and executable.is_file()
-              else "Select a valid Windows .exe")
+              else "Select a valid Windows .exe", pending=executable is None)
     add_check("AMDNR release ZIP", archive is not None and archive.is_file()
               and zipfile.is_zipfile(archive),
               "Valid ZIP archive selected" if archive and archive.is_file()
-              and zipfile.is_zipfile(archive) else "Select a valid release ZIP")
+              and zipfile.is_zipfile(archive) else "Select a valid release ZIP", pending=archive is None)
     if executable and executable.is_file():
         root = executable.resolve().parent
         state_path = root / STATE_NAME
         if not state_path.exists():
             add_check("Installation record", False,
-                      "No installation managed by this Linux launcher was found beside the EXE")
+                      "No installation managed by this Linux launcher was found beside the EXE",
+                      pending=True)
         else:
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -794,6 +835,7 @@ def main() -> int:
     parser.add_argument("--list", action="store_true", help="List detected Steam games")
     parser.add_argument("--releases-json", action="store_true", help="Show upstream AMDNR release packages as JSON")
     parser.add_argument("--doctor-json", action="store_true", help="Read-only launcher and installation diagnostics")
+    parser.add_argument("--exes-json", type=Path, metavar="GAME_DIR", help="Find game executable candidates")
     parser.add_argument("--download-release", metavar="TAG", help="Download and verify selected AMDNR release")
     parser.add_argument("--release-asset", metavar="ZIP", help="Archive filename for --download-release")
     parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
@@ -807,7 +849,9 @@ def main() -> int:
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
-    if args.doctor_json:
+    if args.exes_json is not None:
+        print(json.dumps(executable_candidates(args.exes_json), ensure_ascii=False))
+    elif args.doctor_json:
         print(json.dumps(doctor_report(args.exe, args.archive), ensure_ascii=False))
     elif args.releases_json or args.download_release:
         try:
