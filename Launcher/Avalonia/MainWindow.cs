@@ -2991,6 +2991,90 @@ public sealed class MainWindow : Window
                 finally { _busy = false; save.IsEnabled = true; }
             };
             panel.Children.Add(save);
+            panel.Children.Add(Text("LINUX LAUNCHER UPDATES", 12, AccentBrush, FontWeight.Bold));
+            panel.Children.Add(Text(
+                "Checks independent Linux launcher releases from your fork. AMDNR game files still " +
+                "download exclusively from official upstream. Packages are SHA-256 verified; " +
+                "AppImage replacement is opt-in and preserves a previous launcher copy.",
+                12, MutedBrush));
+            var checkUpdate = Button("CHECK FOR LAUNCHER UPDATES");
+            var getUpdate = Button("DOWNLOAD VERIFIED APPIMAGE");
+            var applyUpdate = Button("INSTALL DOWNLOADED APPIMAGE");
+            getUpdate.IsEnabled = false;
+            applyUpdate.IsEnabled = false;
+            var updateSummary = Text("No update check performed.", 12, MutedBrush);
+            var updateActions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+            updateActions.Children.Add(checkUpdate);
+            updateActions.Children.Add(getUpdate);
+            updateActions.Children.Add(applyUpdate);
+            panel.Children.Add(updateActions);
+            panel.Children.Add(updateSummary);
+            string? verifiedDownloaded = null;
+            checkUpdate.Click += async (_, _) =>
+            {
+                if (_busy || _backend is null) return;
+                _busy = true;
+                checkUpdate.IsEnabled = false;
+                try
+                {
+                    var (exit, output) = await _backend.RunAsync(new[]
+                        { "--check-launcher-updates" });
+                    if (exit != 0) throw new InvalidOperationException(output);
+                    using var doc = JsonDocument.Parse(output);
+                    var root = doc.RootElement;
+                    var available = root.GetProperty("available").GetBoolean();
+                    var latest = root.GetProperty("latest");
+                    updateSummary.Text = "Installed: " + root.GetProperty("current").GetString() +
+                        " · Latest: " + (latest.ValueKind == JsonValueKind.Null
+                            ? "No packaged release yet" : latest.GetProperty("tag").GetString()) +
+                        (available ? " · Verified update available" : " · No newer release found");
+                    getUpdate.IsEnabled = available;
+                    applyUpdate.IsEnabled = false;
+                    verifiedDownloaded = null;
+                }
+                catch (Exception ex) { _status.Text = "Launcher update lookup failed: " + ex.Message; }
+                finally { _busy = false; checkUpdate.IsEnabled = true; }
+            };
+            getUpdate.Click += async (_, _) =>
+            {
+                if (_busy || _backend is null) return;
+                _busy = true;
+                getUpdate.IsEnabled = false;
+                try
+                {
+                    var (exit, output) = await _backend.RunAsync(new[]
+                        { "--download-launcher-update" });
+                    if (exit != 0) throw new InvalidOperationException(output);
+                    using var doc = JsonDocument.Parse(output);
+                    var data = doc.RootElement;
+                    if (data.GetProperty("status").GetString() != "downloaded")
+                        throw new InvalidOperationException("No newer published package.");
+                    verifiedDownloaded = data.GetProperty("file").GetString();
+                    updateSummary.Text = "Verified launcher update downloaded: " + verifiedDownloaded +
+                        ". Installation only works for a user-owned AppImage.";
+                    applyUpdate.IsEnabled = !string.IsNullOrWhiteSpace(verifiedDownloaded);
+                }
+                catch (Exception ex) { _status.Text = "Verified update download failed: " + ex.Message; }
+                finally { _busy = false; getUpdate.IsEnabled = true; }
+            };
+            applyUpdate.Click += async (_, _) =>
+            {
+                if (_busy || _backend is null || string.IsNullOrWhiteSpace(verifiedDownloaded)) return;
+                _busy = true;
+                applyUpdate.IsEnabled = false;
+                try
+                {
+                    var (exit, output) = await _backend.RunAsync(new[]
+                        { "--apply-launcher-update", verifiedDownloaded,
+                          "--accept-launcher-update" });
+                    if (exit != 0) throw new InvalidOperationException(output);
+                    updateSummary.Text = "Update applied. Quit and restart the AppImage. " +
+                        "Your previous executable was preserved as .amdnr-previous.";
+                    _status.Text = "Launcher update applied; restart required.";
+                }
+                catch (Exception ex) { _status.Text = "Launcher update not applied: " + ex.Message; }
+                finally { _busy = false; }
+            };
         }
         catch (Exception ex)
         {
