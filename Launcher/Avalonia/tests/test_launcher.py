@@ -77,6 +77,72 @@ class LauncherTests(unittest.TestCase):
             }])
             self.assertEqual(launcher.installed_games_overview(), [])
 
+    def test_official_component_catalog_filters_and_deduplicates(self):
+        releases = [
+            {"tag_name": "Alpha2", "draft": False, "assets": [
+                {"name": "SHA256SUMS.txt", "size": 20},
+                {"name": "AMDNR-Mochi-1-component.zip", "size": 120},
+                {"name": "AMDNR-v1.zip", "size": 150},
+                {"name": "AMDNR-Launcher.exe", "size": 40}]},
+            {"tag_name": "Alpha1", "draft": False, "assets": [
+                {"name": "SHA256SUMS.txt", "size": 20},
+                {"name": "AMDNR-Mochi-1-component.zip", "size": 120},
+                {"name": "AMDNR-lmxxf-2.zip", "size": 150}]}
+        ]
+        with patch.object(launcher, "_github_json", return_value=releases):
+            result = launcher.component_catalog()
+        self.assertEqual([x["asset"] for x in result],
+                         ["AMDNR-Mochi-1-component.zip", "AMDNR-lmxxf-2.zip"])
+        self.assertEqual(result[0]["tag"], "Alpha2")
+        self.assertEqual(launcher.RELEASE_REPO, "3zwr1/AMD-NR---OptiScaler")
+
+    def test_official_component_install_preview_and_safe_remove(self):
+        tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
+        cache = self.root / "cache" / tag
+        cache.mkdir(parents=True)
+        archive = cache / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("components/MochizukiNrRuntime.dll", b"official runtime")
+            stream.writestr("components/LICENSE.txt", b"license")
+        state = self.root / "state"
+        with patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}), \\
+                patch.object(launcher, "download_release", return_value=archive), \\
+                patch.object(launcher, "_release_cache_dir", return_value=cache.parent):
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertTrue(preview["installable"])
+            self.assertEqual(len(preview["files"]), 2)
+            result = launcher.install_component(self.exe, tag, asset)
+            self.assertEqual(result["files"], 2)
+            self.assertEqual(len(launcher.installed_components(self.exe)), 1)
+            with self.assertRaisesRegex(ValueError, "overwrite"):
+                launcher.install_component(self.exe, tag, asset)
+            target = self.game / "components" / "MochizukiNrRuntime.dll"
+            target.write_bytes(b"modified externally")
+            with self.assertRaisesRegex(ValueError, "modified"):
+                launcher.remove_component(self.exe, asset)
+            self.assertTrue(target.exists())
+            target.write_bytes(b"official runtime")
+            launcher.remove_component(self.exe, asset)
+            self.assertFalse(target.exists())
+            self.assertFalse((self.game / "components" / "LICENSE.txt").exists())
+            self.assertEqual(launcher.installed_components(self.exe), [])
+
+    def test_official_component_rejects_conflicts_and_zip_traversal(self):
+        tag, asset = "Alpha1", "AMDNR-WrongGPU-1.zip"
+        archive = self.root / asset
+        (self.game / "present.dll").write_bytes(b"existing")
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("present.dll", b"replacement")
+        with patch.object(launcher, "download_release", return_value=archive):
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertEqual(preview["conflicts"], ["present.dll"])
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("../escaped.dll", b"evil")
+        with patch.object(launcher, "download_release", return_value=archive):
+            with self.assertRaisesRegex(ValueError, "Unsafe"):
+                launcher.component_preview(self.exe, tag, asset)
+        self.assertFalse((self.root / "escaped.dll").exists())
+
     def test_extension_inventory_loader_toggle_and_backup(self):
         ini = self.game / "OptiScaler.ini"
         ini.write_text("[Other]\nKey=1\n[Plugins]\nLoadAsiPlugins=false\n")
