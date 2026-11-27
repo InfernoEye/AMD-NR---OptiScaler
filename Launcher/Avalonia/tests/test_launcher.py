@@ -169,13 +169,15 @@ class LauncherTests(unittest.TestCase):
         fake_zip.__enter__.return_value = fake_zip
         fake_zip.infolist.return_value = [entry]
         with patch.object(launcher.zipfile, "ZipFile", return_value=fake_zip):
-            with self.assertRaisesRegex(ValueError, "oversized"):
+            with self.assertRaisesRegex(ValueError, "exceeds"):
                 launcher._component_entries(self.root / "oversized.zip")
 
     def test_component_install_refuses_insufficient_space(self):
         import shutil
         tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
-        archive = self.root / asset
+        cache = self.root / tag
+        cache.mkdir()
+        archive = cache / asset
         with zipfile.ZipFile(archive, "w") as stream:
             stream.writestr("components/runtime.dll", b"component")
         fake_usage = shutil._ntuple_diskusage(total=100, used=90, free=10)
