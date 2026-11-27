@@ -154,6 +154,29 @@ Modified bridge files additionally have a preserved snapshot under
 `~/.local/state/amdnr/bridge-force-recovery/`). Neither force removal
 nor regular removal deletes recovery snapshots automatically.
 
+## Mochi add-on conflict checks
+
+For official `AMDNR-Mochi-0.0.9-component.zip`, the game's Apply Changes
+flow now previews individual destinations rather than treating every existing
+file as a fatal conflict. Unmanaged ordinary files that can be replaced
+safely are listed by name and require explicit **back up and replace**
+approval. Their original bytes are preserved in the per-component managed
+backup. Files tracked by another installed component or the Linux bridge
+are never blindly overwritten. To switch between conflicting add-ons,
+uncheck the old one and check Mochi, then Apply Changes: the installer
+removes the old managed component and rechecks the new archive before any
+write. If another conflict remains, it reports its actual filename.
+
+The optional component list shows the latest published Mochi package by
+default; previously installed older versions remain visible for removal.
+The Mochi ZIP alone does not prepare all model weights. A separate verified
+source/model preparation step may still be necessary before runtime use.
+
+The Steam preview also discards stale `WINEDLLOVERRIDES=dxgi=n,b` when an
+AMDNR-Linux wrapper is selected, because the wrapper itself enforces its
+required DXGI override. Other Proton flags and launch wrappers remain
+unchanged and Steam properties are never edited automatically.
+
 ## Apply checked add-ons and full AMDNR uninstall
 
 The per-game add-on checkboxes reflect **actual installed component records**:
