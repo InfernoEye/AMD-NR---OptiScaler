@@ -2744,16 +2744,17 @@ public sealed class MainWindow : Window
         var inspection = new StackPanel { Spacing = 9 };
         inspection.Children.Add(Text("1   DETECT & CHECK", 13, AccentBrush, FontWeight.Bold));
         inspection.Children.Add(Text("Selected game: " + selection, 13, ForegroundBrush));
+        var advancedEnvironment = new StackPanel { Spacing = 7 };
         var hostInfo = Text("Checking GPU, Steam library and local compiler candidates…",
             13, MutedBrush);
-        inspection.Children.Add(hostInfo);
+        advancedEnvironment.Children.Add(hostInfo);
         var distroInfo = Text("Checking installed system libraries (no system changes)…", 12, MutedBrush);
-        inspection.Children.Add(distroInfo);
+        advancedEnvironment.Children.Add(distroInfo);
         var systemInstallPreview = Text("", 12, MutedBrush);
-        inspection.Children.Add(systemInstallPreview);
+        advancedEnvironment.Children.Add(systemInstallPreview);
         var copySystemCommand = Button("COPY DISTRO INSTALL COMMAND");
         copySystemCommand.IsVisible = false;
-        inspection.Children.Add(copySystemCommand);
+        advancedEnvironment.Children.Add(copySystemCommand);
         string suggestedSystemCommand = "";
         copySystemCommand.Click += async (_, _) =>
         {
@@ -2766,9 +2767,9 @@ public sealed class MainWindow : Window
         var releaseState = Text(
             "Bridge release: approved SHA-256 pin. New upstream releases are not automatically trusted.",
             12, MutedBrush);
-        inspection.Children.Add(releaseState);
+        advancedEnvironment.Children.Add(releaseState);
         var checkReleases = Button("CHECK UPSTREAM BRIDGE UPDATES");
-        inspection.Children.Add(checkReleases);
+        advancedEnvironment.Children.Add(checkReleases);
         checkReleases.Click += async (_, _) =>
         {
             if (_backend is null) return;
@@ -2799,10 +2800,25 @@ public sealed class MainWindow : Window
                 checkReleases.IsEnabled = true;
             }
         };
-        var problems = Text("", 13, AccentBrush);
-        inspection.Children.Add(problems);
-        var scan = Button("SCAN GAME AND LOCAL DEPENDENCIES", true);
-        inspection.Children.Add(scan);
+        var issueSummary = Text("", 13, AccentBrush);
+        inspection.Children.Add(issueSummary);
+        var problems = Text("", 12, MutedBrush);
+        var conflictDetails = new Expander
+        {
+            Header = "Existing game-file conflicts (details)",
+            IsExpanded = false,
+            Content = problems,
+            IsVisible = false,
+        };
+        inspection.Children.Add(conflictDetails);
+        var scan = Button("SCAN GAME AND LOCAL DEPENDENCIES");
+        advancedEnvironment.Children.Add(scan);
+        inspection.Children.Add(new Expander
+        {
+            Header = "Advanced: environment scan, Ubuntu packages and bridge updates",
+            IsExpanded = false,
+            Content = advancedEnvironment,
+        });
         _content.Children.Add(Panel(inspection));
 
         // Step 2: read-only discovery may suggest a file; user checks provenance
@@ -2979,6 +2995,12 @@ public sealed class MainWindow : Window
                 var conflicts = state.GetProperty("conflicts").EnumerateArray()
                     .Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToArray();
                 blocked = conflicts.Length > 0 || migrationPending;
+                conflictDetails.IsVisible = conflicts.Length > 0;
+                issueSummary.Text = migrationPending
+                    ? "Migration recovery required before another installation."
+                    : conflicts.Length > 0
+                    ? $"{conflicts.Length} existing AMDNR/ReShade items. Backup and replace to install."
+                    : "No existing game-file conflicts detected.";
                 var hostVersion = state.GetProperty("host_version").GetString() ?? "?";
                 var runtimeName = state.GetProperty("selected_runtime").GetString() ?? "lmxxf";
                 packageState.Text = $"Verified release archive: {(archiveVerified ? "ready" : "not downloaded")} · " +
