@@ -190,10 +190,18 @@ public sealed class Backend
             missingWindows);
     }
 
-    public async Task<IReadOnlyList<LibraryAuditEntry>> AuditLibraryAsync(
+    public Task<IReadOnlyList<LibraryAuditEntry>> AuditLibraryAsync(
         CancellationToken token = default)
+        => ReadLibraryAuditAsync("--library-audit-json", token);
+
+    public Task<IReadOnlyList<LibraryAuditEntry>> SavedLibraryAuditAsync(
+        CancellationToken token = default)
+        => ReadLibraryAuditAsync("--library-audit-cache-json", token);
+
+    private async Task<IReadOnlyList<LibraryAuditEntry>> ReadLibraryAuditAsync(
+        string command, CancellationToken token)
     {
-        var (exit, output) = await RunAsync(new[] { "--library-audit-json" }, token);
+        var (exit, output) = await RunAsync(new[] { command }, token);
         if (exit != 0) throw new InvalidOperationException(output);
         using var document = JsonDocument.Parse(output);
         var entries = new List<LibraryAuditEntry>();
