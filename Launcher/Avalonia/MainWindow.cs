@@ -2714,241 +2714,352 @@ public sealed class MainWindow : Window
     private async void ShowCommunityBridge()
     {
         Clear("Compatibility");
-        _content.Children.Add(Text("EXPERIMENTAL LINUX ROCm BRIDGE",
-            28, ForegroundBrush, FontWeight.Bold));
+        _content.Children.Add(Text("LINUX NEURAL RENDERING  /  EXPERIMENTAL",
+            26, ForegroundBrush, FontWeight.Bold));
         _content.Children.Add(Text(
-            "Optional, separately managed AMDNR-Linux pipeline by hassanm0301. " +
-            "This is NOT our ordinary AMDNR install; it uses GPL-3.0+ Wine PE/Unixlib HIP bridge, " +
-            "patched vkd3d-proton graphics DLLs and a user-local ROCm runtime.",
+            "Guided setup for the separately maintained AMDNR-Linux ROCm/HIP bridge. " +
+            "Detection is automatic and read-only; downloads require your approval, and " +
+            "installation is a separate, explicit action. Nothing edits Steam launch options.",
             14, MutedBrush));
 
         var gameExe = _exe;
         if (_backend is null || string.IsNullOrEmpty(gameExe) || !File.Exists(gameExe))
         {
-            _content.Children.Add(Text(
-                "Select and confirm the actual Windows game executable first. For Unreal Engine " +
-                "games, it is commonly under Binaries/Win64 rather than the top-level Steam launcher.",
-                14, AccentBrush));
+            _content.Children.Add(Panel(Text(
+                "Select the real Windows game executable in Library first. " +
+                "For Unreal Engine experimental builds this may be Binaries/Win64/*-Win64-Test.exe.",
+                14, AccentBrush)));
             return;
         }
-        var overview = new StackPanel { Spacing = 9 };
-        overview.Children.Add(Text("REQUIRED ENVIRONMENT", 12, AccentBrush, FontWeight.Bold));
-        overview.Children.Add(Text("Selected executable: " + gameExe, 13, ForegroundBrush));
-        overview.Children.Add(Text("Community release: linux-v0.3.7, SHA-256 pinned. " +
-            "Wine 11-based Proton (tested GE-Proton11-9), x86-64 Linux, AMD Vulkan, /dev/kfd " +
-            "and GPU render node required. The published gameplay baseline is RX 9070 XT, " +
-            "NOT a verified Subnautica 2 configuration.", 13, MutedBrush));
-        overview.Children.Add(Text("Requires a Microsoft x64 d3dcompiler_47.dll from a game you own, " +
-            "Python 3.12+, several GB of disk space, and upstream downloads. " +
-            "This separate install can change game files only after approval. Its wrapper " +
-            "will modify the existing Proton prefix on the next launch; NEVER create a new prefix.",
+
+        // Step 1: purely local inspection, including the final game-directory DLLs.
+        var selection = gameExe;
+        var inspection = new StackPanel { Spacing = 9 };
+        inspection.Children.Add(Text("1   DETECT & CHECK", 13, AccentBrush, FontWeight.Bold));
+        inspection.Children.Add(Text("Selected game: " + selection, 13, ForegroundBrush));
+        var hostInfo = Text("Checking GPU, Steam library and local compiler candidates…",
+            13, MutedBrush);
+        inspection.Children.Add(hostInfo);
+        var packageState = Text("Checking bridge package and installation…", 13, MutedBrush);
+        inspection.Children.Add(packageState);
+        var problems = Text("", 13, AccentBrush);
+        inspection.Children.Add(problems);
+        var scan = Button("SCAN GAME AND LOCAL DEPENDENCIES", true);
+        inspection.Children.Add(scan);
+        _content.Children.Add(Panel(inspection));
+
+        // Step 2: read-only discovery may suggest a file; user checks provenance
+        // and approves downloads before the upstream prepare script is executed.
+        var preparation = new StackPanel { Spacing = 10 };
+        preparation.Children.Add(Text("2   PREPARE DEPENDENCIES", 13, AccentBrush, FontWeight.Bold));
+        preparation.Children.Add(Text(
+            "Compiler candidates are searched automatically in this Steam library. " +
+            "A matching x64 PE header is not proof of Microsoft origin: review the chosen " +
+            "file and use only a copy from a game you own.",
             13, MutedBrush));
-        overview.Children.Add(Text("Source, corresponding source archives, notices, and GPL/LGPL " +
-            "terms: https://github.com/hassanm0301/AMDNR-Linux", 12, MutedBrush));
-        _content.Children.Add(Panel(overview));
-
-        var availability = new StackPanel { Spacing = 10 };
-        var state = Text("Checking local bridge package and game conflicts…", 13, MutedBrush);
-        availability.Children.Add(Text("READ-ONLY STATUS", 12, AccentBrush, FontWeight.Bold));
-        availability.Children.Add(state);
-        var conflicts = Text("", 12, AccentBrush);
-        availability.Children.Add(conflicts);
-        var check = Button("REFRESH BRIDGE STATUS");
-        availability.Children.Add(check);
-        _content.Children.Add(Panel(availability));
-
-        var steps = new StackPanel { Spacing = 12 };
-        steps.Children.Add(Text("1  /  PREPARE COMMUNITY PACKAGE", 12, AccentBrush, FontWeight.Bold));
-        var compilerPicker = new TextBox
+        var compilerChoices = new ComboBox
         {
-            Watermark = "Select your own native x64 d3dcompiler_47.dll",
-            Background = BackgroundBrush, Foreground = ForegroundBrush,
+            MinWidth = 250,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            IsVisible = false,
         };
-        steps.Children.Add(compilerPicker);
-        var browseCompiler = Button("BROWSE SHADER COMPILER");
+        preparation.Children.Add(compilerChoices);
+        var compilerPath = new TextBox
+        {
+            Watermark = "Compiler path (auto-discovered, or browse to your own d3dcompiler_47.dll)",
+            Foreground = ForegroundBrush,
+            Background = BackgroundBrush,
+        };
+        compilerChoices.SelectionChanged += (_, _) =>
+        {
+            if (compilerChoices.SelectedItem is string selected)
+                compilerPath.Text = selected;
+        };
+        preparation.Children.Add(compilerPath);
+        var browseCompiler = Button("BROWSE FOR COMPILER");
         browseCompiler.Click += async (_, _) =>
         {
-            var path = await PickFileAsync("Select native Microsoft d3dcompiler_47.dll",
+            var path = await PickFileAsync("Select your own native x64 d3dcompiler_47.dll",
                 new FilePickerFileType("DLL") { Patterns = new[] { "*.dll" } });
-            if (path is not null) compilerPicker.Text = path;
+            if (path is not null) compilerPath.Text = path;
         };
-        steps.Children.Add(browseCompiler);
-        var acceptSource = new CheckBox
+        preparation.Children.Add(browseCompiler);
+        var provenance = new CheckBox
         {
-            Content = "I approve downloading and running the pinned third-party GPL release " +
-                      "preparation scripts and separately pinned AMDNR/ROCm dependencies. " +
-                      "This preparation changes no game or Steam settings.",
+            Content = "I verified that the selected compiler is a native x64 Microsoft DLL " +
+                      "from software I own and have permission to use.",
             Foreground = ForegroundBrush, IsChecked = false,
         };
-        steps.Children.Add(acceptSource);
-        var prepare = Button("DOWNLOAD / VERIFY / PREPARE BRIDGE", true);
-        steps.Children.Add(prepare);
-        var prepareProgress = Text("No bridge preparation requested.", 12, MutedBrush);
-        steps.Children.Add(prepareProgress);
-        _content.Children.Add(Panel(steps));
+        preparation.Children.Add(provenance);
+        var approval = new CheckBox
+        {
+            Content = "I approve downloading and running the separately maintained GPL bridge " +
+                      "preparation scripts and their pinned AMDNR/ROCm dependencies. " +
+                      "This preparation changes no game, Proton prefix or Steam settings.",
+            Foreground = ForegroundBrush, IsChecked = false,
+        };
+        preparation.Children.Add(approval);
+        var prepare = Button("DOWNLOAD & PREPARE BRIDGE", true);
+        preparation.Children.Add(prepare);
+        var prepareState = Text("Requires Python 3.12+ with zstd, a compatible AMD GPU and " +
+            "several GB of storage. Reference test: RX 9070 XT / GE-Proton11-9. " +
+            "Your game and GPU are NOT yet validated.", 12, MutedBrush);
+        preparation.Children.Add(prepareState);
+        _content.Children.Add(Panel(preparation));
 
-        var installation = new StackPanel { Spacing = 12 };
-        installation.Children.Add(Text("2  /  REVIEW AND INSTALL", 12, AccentBrush, FontWeight.Bold));
-        installation.Children.Add(Text(
-            "The adapter refuses known existing AMDNR installs, ReShade hooks, and occupied " +
-            "DLL names. Remove conflicting mods using their own verified uninstaller first; " +
-            "do not manually delete backed-up or modified files. CLOSE THE GAME before installation.",
-            13, MutedBrush));
-        var approveInstall = new CheckBox
+        // Step 3: never auto-install; conflicts must be resolved separately.
+        var installation = new StackPanel { Spacing = 11 };
+        installation.Children.Add(Text("3   REVIEW CHANGES TO THE GAME", 13, AccentBrush, FontWeight.Bold));
+        var installReview = Text(
+            "Installation is locked until the prepared package is verified and all existing " +
+            "AMDNR/ReShade/proxy-DLL conflicts are resolved. Existing files are never silently overwritten.",
+            13, MutedBrush);
+        installation.Children.Add(installReview);
+        var consent = new CheckBox
         {
-            Content = "I approve installing the separate GPL community bridge next to the selected " +
-                      "game executable, including its managed backups. " +
-                      "I will review and copy the Steam wrapper option myself.",
+            Content = "Game is closed. I approve a separate community-managed installation " +
+                      "into the selected executable's folder and have reviewed its backup behavior.",
             Foreground = ForegroundBrush, IsChecked = false,
         };
-        installation.Children.Add(approveInstall);
-        var installBridge = Button("INSTALL EXPERIMENTAL BRIDGE", true);
-        installBridge.IsEnabled = false;
-        installation.Children.Add(installBridge);
-        var launchOption = Text("", 13, ForegroundBrush);
-        installation.Children.Add(launchOption);
-        var copyWrapper = Button("COPY PROPOSED STEAM LAUNCH OPTION");
-        copyWrapper.IsVisible = false;
-        installation.Children.Add(copyWrapper);
+        installation.Children.Add(consent);
+        var install = Button("INSTALL BRIDGE IN THIS GAME", true);
+        install.IsEnabled = false;
+        installation.Children.Add(install);
+        var installResult = Text("", 13, ForegroundBrush);
+        installation.Children.Add(installResult);
+        var copy = Button("COPY MANUAL STEAM LAUNCH OPTION");
+        copy.IsVisible = false;
+        installation.Children.Add(copy);
+        var restoreControls = new StackPanel { Spacing = 8 };
+        restoreControls.Children.Add(Text(
+            "Restore an existing community bridge using its own managed backups. " +
+            "Remove its Steam wrapper manually before restoring.",
+            12, MutedBrush));
+        var restoreConsent = new CheckBox
+        {
+            Content = "I approve managed removal with the community project's restore tool.",
+            Foreground = ForegroundBrush, IsChecked = false,
+        };
+        restoreControls.Children.Add(restoreConsent);
+        var restore = Button("RESTORE COMMUNITY INSTALLATION");
+        restore.IsEnabled = false;
+        restoreControls.Children.Add(restore);
+        installation.Children.Add(new Expander
+        {
+            Header = "Advanced: restore separately managed bridge",
+            IsExpanded = false,
+            Content = restoreControls,
+        });
         _content.Children.Add(Panel(installation));
 
-        var removal = new StackPanel { Spacing = 10 };
-        removal.Children.Add(Text("3  /  COMMUNITY-MANAGED RESTORE", 12, AccentBrush, FontWeight.Bold));
-        removal.Children.Add(Text(
-            "To restore an installed bridge, first close the game and remove its wrapper " +
-            "from Steam launch options manually. The community manager refuses modified tracked " +
-            "files rather than silently discarding them.",
+        var footer = new StackPanel { Spacing = 5 };
+        footer.Children.Add(Text(
+            "Third-party credits: hassanm0301/AMDNR-Linux (GPL-3.0+), patched vkd3d-proton " +
+            "(LGPL) and separately licensed AMDNR/ROCm/model assets. The release is fetched " +
+            "from GitHub with a pinned SHA-256; bridge binaries are not bundled.",
             12, MutedBrush));
-        var approveRemoval = new CheckBox
-        {
-            Content = "I approve restoring this bridge's managed backups using its own manager.",
-            Foreground = ForegroundBrush, IsChecked = false,
-        };
-        removal.Children.Add(approveRemoval);
-        var removeBridge = Button("RESTORE COMMUNITY BRIDGE INSTALLATION");
-        removeBridge.IsEnabled = false;
-        removal.Children.Add(removeBridge);
-        _content.Children.Add(Panel(removal));
+        footer.Children.Add(Text(
+            "After installation, Steam's launch-option text is provided for manual copy. " +
+            "Using the wrapper can modify the EXISTING Proton prefix on game launch; " +
+            "do not create a replacement prefix. Subnautica 2 rendering is unverified.",
+            12, MutedBrush));
+        _content.Children.Add(Panel(footer));
 
-        var selection = gameExe;
-        async Task RefreshBridge()
+        bool ready = false;
+        bool blocked = true;
+        bool communityInstalled = false;
+        string launchOptionText = "";
+        void UpdateButtons()
+        {
+            install.IsEnabled = !_busy && ready && !blocked && !communityInstalled;
+            restore.IsEnabled = !_busy && communityInstalled;
+            scan.IsEnabled = !_busy;
+            prepare.IsEnabled = !_busy && !ready;
+        }
+        async Task CheckStatusAsync()
         {
             if (_backend is null) return;
-            check.IsEnabled = false;
             try
             {
                 var (exit, raw) = await _backend.RunAsync(
                     new[] { "--bridge-status-json", "--exe", selection });
                 if (exit != 0) throw new InvalidOperationException(raw);
-                using var document = JsonDocument.Parse(raw);
-                var root = document.RootElement;
-                var ready = root.GetProperty("prepared").GetBoolean();
-                var downloaded = root.GetProperty("release_verified").GetBoolean();
-                var active = root.GetProperty("community_installed").GetBoolean();
-                var blocking = root.GetProperty("conflicts").EnumerateArray()
+                using var result = JsonDocument.Parse(raw);
+                var state = result.RootElement;
+                ready = state.GetProperty("prepared").GetBoolean();
+                communityInstalled = state.GetProperty("community_installed").GetBoolean();
+                var archiveVerified = state.GetProperty("release_verified").GetBoolean();
+                var conflicts = state.GetProperty("conflicts").EnumerateArray()
                     .Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToArray();
-                state.Text = $"Pinned archive verified: {(downloaded ? "yes" : "not downloaded")} · " +
-                    $"Staged bridge: {(ready ? "yes" : "not prepared")} · " +
-                    $"Community wrapper installed: {(active ? "yes" : "no")}";
-                conflicts.Text = blocking.Length == 0 ? "No known conflicting files detected. " +
-                    "Actual Proton/GPU compatibility is still unverified." :
-                    "INSTALL BLOCKED BY EXISTING FILES:\n" +
-                    string.Join("\n", blocking.Take(14));
-                installBridge.IsEnabled = ready && blocking.Length == 0 && !active;
-                removeBridge.IsEnabled = active;
+                blocked = conflicts.Length > 0;
+                packageState.Text = $"Verified release archive: {(archiveVerified ? "ready" : "not downloaded")} · " +
+                    $"Prepared bridge: {(ready ? "ready" : "not prepared")} · " +
+                    $"Community wrapper: {(communityInstalled ? "installed" : "not installed")}";
+                problems.Text = blocked
+                    ? "INSTALL BLOCKED — EXISTING FILES MUST BE REVIEWED:\n" +
+                      string.Join("\n", conflicts.Take(12)) +
+                      "\nUse the original installation's managed uninstaller; do not delete hooks manually."
+                    : "No known conflicting proxy DLLs or AMDNR backups detected. " +
+                      "This does not prove in-game compatibility.";
+                installReview.Text = blocked
+                    ? "Installation disabled: preserve and review the existing files shown above. " +
+                      "The launcher will not remove ReShade or previous AMDNR installations."
+                    : ready ? "Prepared package available. Review the selected executable, backups, " +
+                      "the experimental runtime warning and the separate consent checkbox below."
+                    : "Prepare the package above before attempting installation. " +
+                      "No changes have been made to the game.";
             }
             catch (Exception ex)
             {
-                state.Text = "Bridge status unavailable: " + ex.Message;
-                installBridge.IsEnabled = false;
-                removeBridge.IsEnabled = false;
+                blocked = true;
+                ready = false;
+                communityInstalled = false;
+                packageState.Text = "Read-only status failed: " + ex.Message;
+                problems.Text = "Installation blocked until checks complete successfully.";
             }
-            finally { check.IsEnabled = true; }
+            UpdateButtons();
         }
-        check.Click += async (_, _) => await RefreshBridge();
+
+        async Task CheckHostAsync()
+        {
+            if (_backend is null) return;
+            scan.IsEnabled = false;
+            hostInfo.Text = "Scanning selected Steam library and local hardware (read-only)…";
+            try
+            {
+                var (exit, raw) = await _backend.RunAsync(
+                    new[] { "--bridge-discover-json", "--exe", selection });
+                if (exit != 0) throw new InvalidOperationException(raw);
+                using var result = JsonDocument.Parse(raw);
+                var root = result.RootElement;
+                var amd = root.GetProperty("amd_gpu_detected").GetBoolean();
+                var kfd = root.GetProperty("kfd_present").GetBoolean();
+                var render = root.GetProperty("render_nodes_present").GetBoolean();
+                var versions = root.GetProperty("proton_installations").EnumerateArray()
+                    .Select(x => x.GetString() ?? "").Take(6).ToArray();
+                var candidates = root.GetProperty("compiler_candidates").EnumerateArray()
+                    .Select(x => x.GetProperty("path").GetString() ?? "")
+                    .Where(x => x.Length > 0).ToArray();
+                hostInfo.Text = $"AMD GPU: {(amd ? "detected" : "not detected")} · " +
+                    $"/dev/kfd: {(kfd ? "present" : "missing")} · " +
+                    $"GPU render node: {(render ? "present" : "missing")}\n" +
+                    $"Proton installs (not active versions): {(versions.Length == 0 ? "not found" : string.Join(", ", versions))}\n" +
+                    $"Local x64 compiler candidates: {candidates.Length} " +
+                    "(PE architecture checked; publisher unverified).";
+                compilerChoices.IsVisible = candidates.Length > 0;
+                compilerChoices.ItemsSource = candidates;
+                if (candidates.Length > 0 && string.IsNullOrWhiteSpace(compilerPath.Text))
+                    compilerChoices.SelectedIndex = 0;
+            }
+            catch (Exception ex)
+            {
+                hostInfo.Text = "Local detection unavailable: " + ex.Message +
+                    ". You can still browse to a compiler, but installation remains gated by conflict checks.";
+            }
+            finally { scan.IsEnabled = !_busy; }
+        }
+
+        scan.Click += async (_, _) =>
+        {
+            await CheckHostAsync();
+            await CheckStatusAsync();
+        };
         prepare.Click += async (_, _) =>
         {
             if (_busy || _backend is null) return;
-            if (acceptSource.IsChecked != true)
+            if (approval.IsChecked != true || provenance.IsChecked != true)
             {
-                prepareProgress.Text = "Consent to third-party source preparation is required.";
+                prepareState.Text = "Confirm both the third-party preparation consent and your compiler's provenance.";
                 return;
             }
-            var compiler = compilerPicker.Text?.Trim() ?? "";
+            var compiler = compilerPath.Text?.Trim() ?? "";
             if (Path.GetFileName(compiler).ToLowerInvariant() != "d3dcompiler_47.dll" ||
                 !File.Exists(compiler))
             {
-                prepareProgress.Text = "Choose an existing native d3dcompiler_47.dll from your game.";
+                prepareState.Text = "Choose a valid local d3dcompiler_47.dll from software you own.";
                 return;
             }
             _busy = true;
-            prepare.IsEnabled = false;
-            prepareProgress.Text = "Preparing verified ROCm bridge and AMDNR components… " +
-                "This needs several GB and downloads from the component authors.";
+            UpdateButtons();
+            prepareState.Text = "Downloading and verifying the pinned release, preparing " +
+                "ROCm assets and shader compiler. Game and Steam settings remain unchanged…";
             try
             {
-                var (exit, raw) = await _backend.RunAsync(new[] { "--bridge-prepare", compiler });
-                if (exit != 0) throw new InvalidOperationException(raw);
-                prepareProgress.Text = "Community package prepared. Review conflicts before installing.";
-                await RefreshBridge();
+                var (exit, output) = await _backend.RunAsync(
+                    new[] { "--bridge-prepare", compiler });
+                if (exit != 0) throw new InvalidOperationException(output);
+                prepareState.Text = "Bridge prepared and checked. Review the installation conflicts below.";
+                await CheckStatusAsync();
             }
-            catch (Exception ex) { prepareProgress.Text = "Preparation stopped: " + ex.Message; }
-            finally { _busy = false; prepare.IsEnabled = true; }
+            catch (Exception ex) { prepareState.Text = "Preparation stopped: " + ex.Message; }
+            finally { _busy = false; UpdateButtons(); }
         };
-        installBridge.Click += async (_, _) =>
+        install.Click += async (_, _) =>
         {
-            if (_busy || _backend is null || approveInstall.IsChecked != true)
+            if (_busy || _backend is null || consent.IsChecked != true)
             {
-                _status.Text = "Explicit community bridge installation approval is required.";
+                installResult.Text = "Explicit reviewed game-install approval is required.";
                 return;
             }
             _busy = true;
-            installBridge.IsEnabled = false;
+            UpdateButtons();
             try
             {
-                var (exit, raw) = await _backend.RunAsync(
+                // Refuse stale decisions in both the Avalonia UI and Python adapter.
+                await CheckStatusAsync();
+                if (blocked || !ready || communityInstalled)
+                    throw new InvalidOperationException("Game files changed or installation is not ready.");
+                var (exit, output) = await _backend.RunAsync(
                     new[] { "--bridge-install", "--approve-bridge-install", "--exe", selection });
-                if (exit != 0) throw new InvalidOperationException(raw);
-                using var document = JsonDocument.Parse(raw);
-                var root = document.RootElement;
-                var option = root.GetProperty("launch_option_preview").GetString() ?? "";
-                launchOption.Text = "Install completed. Review this launch-option preview " +
-                    "(it will modify your existing Proton prefix when used):\n" + option +
-                    "\nNothing was inserted into Steam automatically.";
-                copyWrapper.IsVisible = option.Length > 0;
-                copyWrapper.Click += async (_, _) =>
-                    await CopyToClipboardAsync(option, "Proposed Steam launch option copied.");
-                _status.Text = "Community bridge installed; Steam launch settings unchanged.";
-                await RefreshBridge();
+                if (exit != 0) throw new InvalidOperationException(output);
+                using var result = JsonDocument.Parse(output);
+                launchOptionText = result.RootElement.GetProperty("launch_option_preview").GetString() ?? "";
+                installResult.Text = "Bridge installation completed. Review the Steam option below:\n" +
+                    launchOptionText + "\nNothing was entered into Steam automatically.";
+                copy.IsVisible = !string.IsNullOrWhiteSpace(launchOptionText);
+                await CheckStatusAsync();
             }
             catch (Exception ex)
             {
-                launchOption.Text = "Bridge install refused or failed: " + ex.Message;
-                await RefreshBridge();
+                installResult.Text = "Installation refused or stopped: " + ex.Message;
+                await CheckStatusAsync();
             }
-            finally { _busy = false; }
+            finally { _busy = false; UpdateButtons(); }
         };
-        removeBridge.Click += async (_, _) =>
+        copy.Click += async (_, _) =>
         {
-            if (_busy || _backend is null || approveRemoval.IsChecked != true)
+            if (!string.IsNullOrWhiteSpace(launchOptionText))
+                await CopyToClipboardAsync(launchOptionText, "Proposed Steam option copied.");
+        };
+        restore.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null || restoreConsent.IsChecked != true)
             {
-                _status.Text = "Explicit managed removal approval is required.";
+                installResult.Text = "Confirm managed removal before restoring.";
                 return;
             }
             _busy = true;
-            removeBridge.IsEnabled = false;
+            UpdateButtons();
             try
             {
-                var (exit, raw) = await _backend.RunAsync(
+                var (exit, output) = await _backend.RunAsync(
                     new[] { "--bridge-remove", "--approve-bridge-remove", "--exe", selection });
-                if (exit != 0) throw new InvalidOperationException(raw);
-                _status.Text = "Community bridge restored. Remove Steam wrapper manually.";
-                launchOption.Text = "Managed bridge files restored. Steam launch options unchanged.";
+                if (exit != 0) throw new InvalidOperationException(output);
+                installResult.Text = "Community-managed backups restored. Remove the wrapper " +
+                    "from Steam launch options manually.";
+                launchOptionText = "";
+                copy.IsVisible = false;
+                await CheckStatusAsync();
             }
-            catch (Exception ex) { launchOption.Text = "Managed removal stopped: " + ex.Message; }
-            finally { _busy = false; await RefreshBridge(); }
+            catch (Exception ex)
+            {
+                installResult.Text = "Managed restore stopped: " + ex.Message;
+                await CheckStatusAsync();
+            }
+            finally { _busy = false; UpdateButtons(); }
         };
-        await RefreshBridge();
+        await CheckStatusAsync();
+        await CheckHostAsync();
     }
 
     private async void ShowCompatibility()
