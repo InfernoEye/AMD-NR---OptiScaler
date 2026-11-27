@@ -73,7 +73,8 @@ public sealed class MainWindow : Window
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Content = _content,
-            Padding = new Thickness(28, 12, 28, 24),
+            // Extra bottom inset keeps the final control clear of the fixed status bar.
+            Padding = new Thickness(28, 12, 28, 96),
         };
         Grid.SetRow(scroller, 1);
         main.Children.Add(scroller);
@@ -592,8 +593,9 @@ public sealed class MainWindow : Window
 
         if (HasInstallRecord())
         {
-            var recordPanel = new StackPanel { Spacing = 9 };
+            var recordPanel = new StackPanel { Spacing = 10 };
             recordPanel.Children.Add(Text("RECORDED INSTALLATION", 12, AccentBrush, FontWeight.Bold));
+            var trackedFiles = new List<string>();
             try
             {
                 var stateFile = Path.Combine(Path.GetDirectoryName(_exe!)!,
@@ -606,13 +608,14 @@ public sealed class MainWindow : Window
                     files.ValueKind == JsonValueKind.Array)
                 {
                     recordPanel.Children.Add(Text($"Tracked files: {files.GetArrayLength()}", 14));
-                    foreach (var file in files.EnumerateArray().Take(8))
+                    foreach (var file in files.EnumerateArray())
                     {
-                        if (file.TryGetProperty("path", out var name))
-                            recordPanel.Children.Add(Text("•  " + name.GetString(), 12, MutedBrush));
+                        if (file.ValueKind == JsonValueKind.Object &&
+                            file.TryGetProperty("path", out var name) &&
+                            name.ValueKind == JsonValueKind.String &&
+                            name.GetString() is { } path)
+                            trackedFiles.Add(path);
                     }
-                    if (files.GetArrayLength() > 8)
-                        recordPanel.Children.Add(Text("Further files available in Doctor diagnostics.", 12, MutedBrush));
                 }
             }
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
@@ -620,12 +623,44 @@ public sealed class MainWindow : Window
                 recordPanel.Children.Add(Text("Could not read installation record: " + ex.Message,
                     12, MutedBrush));
             }
+
+            // Do not fill the whole game page with dozens of installed filenames.
+            // Expand on demand, with an independent capped file-list viewport.
+            var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+            var fileList = new StackPanel { Spacing = 6 };
+            var fileScroller = new ScrollViewer
+            {
+                Content = fileList,
+                MaxHeight = 240,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                IsVisible = false,
+            };
+            if (trackedFiles.Count > 0)
+            {
+                var showFiles = Button($"SHOW TRACKED FILES ({trackedFiles.Count})");
+                showFiles.Click += (_, _) =>
+                {
+                    fileScroller.IsVisible = !fileScroller.IsVisible;
+                    showFiles.Content = fileScroller.IsVisible
+                        ? "HIDE TRACKED FILES" : $"SHOW TRACKED FILES ({trackedFiles.Count})";
+                    if (fileScroller.IsVisible && fileList.Children.Count == 0)
+                    {
+                        foreach (var name in trackedFiles)
+                            fileList.Children.Add(Text("•  " + name, 12, MutedBrush));
+                    }
+                };
+                controls.Children.Add(showFiles);
+            }
             var runDoctor = Button("CHECK FILE INTEGRITY");
             runDoctor.Click += (_, _) => ShowDoctor();
-            recordPanel.Children.Add(runDoctor);
+            controls.Children.Add(runDoctor);
+            recordPanel.Children.Add(controls);
+            recordPanel.Children.Add(fileScroller);
             _content.Children.Add(Panel(recordPanel));
         }
     }
+
 
     private void ShowInstall()
     {
