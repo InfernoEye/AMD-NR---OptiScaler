@@ -68,7 +68,8 @@ public sealed class MainWindow : Window
 
         var app = new Grid { ColumnDefinitions = new ColumnDefinitions("232,*") };
         app.Children.Add(BuildSidebar());
-        var main = new Grid { RowDefinitions = new RowDefinitions("76,*,56") };
+        // Status lives in the header; the content viewport must never sit behind a footer.
+        var main = new Grid { RowDefinitions = new RowDefinitions("90,*") };
         Grid.SetColumn(main, 1);
         main.Children.Add(BuildHeader());
         _pageScroller = new ScrollViewer
@@ -76,20 +77,11 @@ public sealed class MainWindow : Window
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Content = _content,
-            // Footer is outside the scroll area in its own grid row.
-            Padding = new Thickness(28, 10, 28, 22),
+            // A small end inset allows the last action to scroll fully into view.
+            Padding = new Thickness(28, 10, 28, 26),
         };
         Grid.SetRow(_pageScroller, 1);
         main.Children.Add(_pageScroller);
-        var statusBorder = new Border
-        {
-            BorderBrush = LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(28, 15, 20, 12),
-            Child = _status,
-        };
-        Grid.SetRow(statusBorder, 2);
-        main.Children.Add(statusBorder);
         app.Children.Add(main);
         Content = app;
         try { _backend = new Backend(); }
@@ -187,9 +179,23 @@ public sealed class MainWindow : Window
 
     private Control BuildHeader()
     {
-        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(28, 20, 28, 10) };
+        var header = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            RowDefinitions = new RowDefinitions("Auto,Auto"),
+            RowSpacing = 5,
+            Margin = new Thickness(28, 13, 28, 10),
+        };
         header.Children.Add(_breadcrumb);
+        _status.FontSize = 12;
+        _status.MaxLines = 1;
+        _status.TextTrimming = TextTrimming.CharacterEllipsis;
+        _status.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetRow(_status, 1);
+        header.Children.Add(_status);
         var refresh = Button("↻  Refresh");
+        refresh.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetRowSpan(refresh, 2);
         refresh.Click += async (_, _) =>
         {
             // Refresh always returns to the library; it must never reselect a game.
@@ -223,7 +229,8 @@ public sealed class MainWindow : Window
                     WindowState != WindowState.Normal) return;
                 _content.Measure(new Size(Math.Max(500, Bounds.Width - 290),
                     double.PositiveInfinity));
-                var desired = _content.DesiredSize.Height + 76 + 56 + 10 + 22;
+                // Header is the only fixed chrome. Status cannot obscure the page.
+                var desired = _content.DesiredSize.Height + 90 + 10 + 26;
                 SizeToContent = SizeToContent.Manual;
                 Height = Math.Clamp(desired, MinHeight, MaxHeight);
             }, DispatcherPriority.Loaded);
