@@ -2878,20 +2878,27 @@ public sealed class MainWindow : Window
         var installation = new StackPanel { Spacing = 11 };
         installation.Children.Add(Text("3   REVIEW CHANGES TO THE GAME", 13, AccentBrush, FontWeight.Bold));
         var installReview = Text(
-            "Installation is locked until the prepared package is verified and all existing " +
-            "AMDNR/ReShade/proxy-DLL conflicts are resolved. Existing files are never silently overwritten.",
+            "Existing AMDNR/ReShade hooks can be backed up before installing the prepared Linux bridge.",
             13, MutedBrush);
         installation.Children.Add(installReview);
         var consent = new CheckBox
         {
-            Content = "Game is closed. I approve a separate community-managed installation " +
-                      "into the selected executable's folder and have reviewed its backup behavior.",
+            Content = "Game is closed. I approve installing the prepared Linux ROCm Bridge.",
             Foreground = ForegroundBrush, IsChecked = false,
         };
         installation.Children.Add(consent);
-        var install = Button("INSTALL BRIDGE IN THIS GAME", true);
+        var replacementConsent = new CheckBox
+        {
+            Content = "Move conflicting AMDNR/ReShade files and records into a recoverable backup " +
+                      "before installing. I approve replacing the current game hooks.",
+            Foreground = ForegroundBrush, IsChecked = false,
+        };
+        installation.Children.Add(replacementConsent);
+        var install = Button("INSTALL PREPARED LINUX BRIDGE", true);
         install.IsEnabled = false;
         installation.Children.Add(install);
+        replacementConsent.Checked += (_, _) => UpdateButtons();
+        replacementConsent.Unchecked += (_, _) => UpdateButtons();
         var installResult = Text("", 13, ForegroundBrush);
         installation.Children.Add(installResult);
         var copy = Button("COPY MANUAL STEAM LAUNCH OPTION");
@@ -2938,7 +2945,8 @@ public sealed class MainWindow : Window
         string launchOptionText = "";
         void UpdateButtons()
         {
-            install.IsEnabled = !_busy && ready && !blocked && !communityInstalled;
+            install.IsEnabled = !_busy && ready && !communityInstalled &&
+                (!blocked || replacementConsent.IsChecked == true);
             restore.IsEnabled = !_busy && communityInstalled;
             scan.IsEnabled = !_busy;
             prepare.IsEnabled = !_busy && !ready;
@@ -2965,18 +2973,14 @@ public sealed class MainWindow : Window
                     $"AMDNR {hostVersion} / {runtimeName} prepared: {(ready ? "ready" : "not prepared")} · " +
                     $"Community wrapper: {(communityInstalled ? "installed" : "not installed")}";
                 problems.Text = blocked
-                    ? "INSTALL BLOCKED — EXISTING FILES MUST BE REVIEWED:\n" +
-                      string.Join("\n", conflicts.Take(12)) +
-                      "\nUse the original installation's managed uninstaller; do not delete hooks manually."
-                    : "No known conflicting proxy DLLs or AMDNR backups detected. " +
-                      "This does not prove in-game compatibility.";
-                installReview.Text = blocked
-                    ? "Installation disabled: preserve and review the existing files shown above. " +
-                      "The launcher will not remove ReShade or previous AMDNR installations."
-                    : ready ? "Prepared package available. Review the selected executable, backups, " +
-                      "the experimental runtime warning and the separate consent checkbox below."
-                    : "Prepare the package above before attempting installation. " +
-                      "No changes have been made to the game.";
+                    ? "Existing hooks will be backed up if you approve replacement:\n" +
+                      string.Join("\n", conflicts.Take(12))
+                    : "No known conflicting hooks. Game/GPU compatibility remains unverified.";
+                installReview.Text = !ready
+                    ? "Prepare a Linux bridge runtime before installing."
+                    : blocked
+                    ? "Existing files detected. Check the backup-and-replace approval to install."
+                    : "Prepared bridge ready. Review and approve installation.";
             }
             catch (Exception ex)
             {
@@ -3096,15 +3100,23 @@ public sealed class MainWindow : Window
             {
                 // Refuse stale decisions in both the Avalonia UI and Python adapter.
                 await CheckStatusAsync();
-                if (blocked || !ready || communityInstalled)
-                    throw new InvalidOperationException("Game files changed or installation is not ready.");
-                var (exit, output) = await _backend.RunAsync(
-                    new[] { "--bridge-install", "--approve-bridge-install", "--bridge-runtime", SelectedBridgeRuntime(), "--exe", selection });
+                if (!ready || communityInstalled || (blocked && replacementConsent.IsChecked != true))
+                    throw new InvalidOperationException("Review installation and approve replacement where needed.");
+                var command = new List<string> {
+                    "--bridge-install", "--approve-bridge-install",
+                    "--bridge-runtime", SelectedBridgeRuntime(), "--exe", selection
+                };
+                if (blocked && replacementConsent.IsChecked == true)
+                    command.Add("--bridge-backup-and-replace");
+                var (exit, output) = await _backend.RunAsync(command);
                 if (exit != 0) throw new InvalidOperationException(output);
                 using var result = JsonDocument.Parse(output);
                 launchOptionText = result.RootElement.GetProperty("launch_option_preview").GetString() ?? "";
-                installResult.Text = "Bridge installation completed. Review the Steam option below:\n" +
-                    launchOptionText + "\nNothing was entered into Steam automatically.";
+                var snapshot = result.RootElement.TryGetProperty("migration_snapshot", out var migration)
+                    ? migration.GetString() : null;
+                installResult.Text = "Linux bridge installed. " +
+                    (string.IsNullOrEmpty(snapshot) ? "" : "Recovery snapshot: " + snapshot + "\n") +
+                    "Steam launch option (copy manually):\n" + launchOptionText;
                 copy.IsVisible = !string.IsNullOrWhiteSpace(launchOptionText);
                 await CheckStatusAsync();
             }
