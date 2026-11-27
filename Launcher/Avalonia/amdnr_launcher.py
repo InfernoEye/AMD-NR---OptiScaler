@@ -650,6 +650,92 @@ def save_launcher_settings(data: object) -> dict[str, object]:
     return {key: value for key, value in output.items() if key != "format"}
 
 
+def extension_inventory(executable: Path) -> dict[str, object]:
+    """Inventory plugin files without loading DLLs, altering files or scanning games."""
+    if not executable.is_file() or executable.is_symlink() or \
+            executable.suffix.casefold() != ".exe":
+        raise ValueError("Select an existing Windows executable")
+    root = executable.resolve().parent
+    plugins = root / "plugins"
+    ini = root / "OptiScaler.ini"
+    result: dict[str, object] = {
+        "folder": str(plugins), "plugins": [], "enabled": None,
+        "ini_present": ini.is_file() and not ini.is_symlink(),
+    }
+    if plugins.is_dir() and not plugins.is_symlink():
+        found = []
+        for candidate in sorted(plugins.iterdir(), key=lambda p: p.name.casefold()):
+            if candidate.suffix.lower() not in (".asi", ".dll") or \
+                    not candidate.is_file() or candidate.is_symlink():
+                continue
+            found.append({"name": candidate.name, "size": candidate.stat().st_size})
+            if len(found) >= 500:
+                break
+        result["plugins"] = found
+    if ini.is_file() and not ini.is_symlink() and ini.stat().st_size <= 512 * 1024:
+        content = ini.read_text(encoding="utf-8-sig", errors="replace")
+        section = None
+        values = []
+        for line in content.splitlines():
+            match = re.match(r"^\s*\[([^\]]+)\]\s*$", line)
+            if match:
+                section = match.group(1).strip().lower()
+                continue
+            if line.lstrip().startswith((";", "#")):
+                continue
+            match = re.match(r"^\s*LoadAsiPlugins\s*=\s*(true|false|1|0)\s*$",
+                             line, re.IGNORECASE)
+            if match and section == "plugins":
+                values.append(match.group(1).lower() in ("true", "1"))
+        if len(values) == 1:
+            result["enabled"] = values[0]
+    return result
+
+
+def set_extension_loader(executable: Path, expected_sha: str, enabled: bool) -> dict[str, str]:
+    """Set one [Plugins] LoadAsiPlugins entry through the backup-aware INI editor."""
+    if not isinstance(enabled, bool):
+        raise ValueError("Invalid extension loader state")
+    snapshot = ini_snapshot(executable)
+    if snapshot["sha256"] != expected_sha.casefold():
+        raise ValueError("INI changed since it was opened. Reload before saving")
+    text = str(snapshot["text"])
+    lines = text.splitlines(keepends=True)
+    in_plugins = False
+    matches: list[int] = []
+    section_locations: list[int] = []
+    for i, line in enumerate(lines):
+        section = re.match(r"^\s*\[([^\]\r\n]+)\]\s*$", line.rstrip("\r\n"))
+        if section:
+            in_plugins = section.group(1).strip().casefold() == "plugins"
+            if in_plugins:
+                section_locations.append(i)
+            continue
+        if in_plugins and not line.lstrip().startswith((";", "#")) and \
+                re.match(r"^\s*LoadAsiPlugins\s*=", line, re.IGNORECASE):
+            matches.append(i)
+    if len(section_locations) > 1 or len(matches) > 1:
+        raise ValueError("Multiple plugin settings; edit manually")
+    value = "true" if enabled else "false"
+    newline = "\r\n" if "\r\n" in text else "\n"
+    if matches:
+        i = matches[0]
+        line = lines[i]
+        replacement = re.sub(
+            r"(?i)(^\s*LoadAsiPlugins\s*=\s*)[^;\r\n]*",
+            lambda m: m.group(1) + value, line, count=1)
+        lines[i] = replacement
+    elif section_locations:
+        i = section_locations[0] + 1
+        lines.insert(i, "LoadAsiPlugins=" + value + newline)
+    else:
+        if text and not text.endswith(("\n", "\r")):
+            lines.append(newline)
+        lines.append("[Plugins]" + newline)
+        lines.append("LoadAsiPlugins=" + value + newline)
+    return save_game_ini(executable, expected_sha, "".join(lines))
+
+
 def _game_ini_path(executable: Path) -> Path:
     if not executable.is_file() or executable.is_symlink() or \
             executable.suffix.casefold() != ".exe":
@@ -1686,6 +1772,8 @@ def main() -> int:
     parser.add_argument("--settings-json", action="store_true", help="Read persistent launcher preferences")
     parser.add_argument("--save-settings-base64", metavar="JSON_B64", help="Save validated launcher preferences")
     parser.add_argument("--ini-json", action="store_true", help="Read OptiScaler.ini beside --exe")
+    parser.add_argument("--extensions-json", action="store_true", help="Read installed ASI/DLL plugins and loader state")
+    parser.add_argument("--set-extension-loader", choices=("true", "false"), help="Enable/disable ASI loader with backed-up INI edit")
     parser.add_argument("--save-ini-base64", metavar="TEXT_B64", help="Save OptiScaler.ini with backup")
     parser.add_argument("--ini-expected-sha", metavar="SHA256", help="Checksum from previous --ini-json read")
     parser.add_argument("--exes-json", type=Path, metavar="GAME_DIR", help="Find game executable candidates")
@@ -1750,6 +1838,20 @@ def main() -> int:
                     raise ValueError("Settings payload too large")
                 print(json.dumps(save_launcher_settings(json.loads(payload)), ensure_ascii=False))
         except (OSError, ValueError, TypeError, UnicodeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.extensions_json or args.set_extension_loader is not None:
+        if args.exe is None:
+            parser.error("--extensions-json/--set-extension-loader require --exe")
+        try:
+            if args.extensions_json:
+                print(json.dumps(extension_inventory(args.exe), ensure_ascii=False))
+            else:
+                if not args.ini_expected_sha:
+                    parser.error("--set-extension-loader requires --ini-expected-sha")
+                print(json.dumps(set_extension_loader(args.exe, args.ini_expected_sha,
+                    args.set_extension_loader == "true"), ensure_ascii=False))
+        except (OSError, ValueError, UnicodeError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     elif args.ini_json or args.save_ini_base64 is not None:
