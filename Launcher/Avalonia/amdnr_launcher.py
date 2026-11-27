@@ -16,6 +16,7 @@ import shutil
 import sys
 import tempfile
 import zipfile
+import uuid
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
@@ -913,7 +914,7 @@ def installed_components(executable: Path) -> list:
     return output
 
 
-def remove_component(executable: Path, asset: str) -> dict:
+def remove_component(executable: Path, asset: str, *, backup_modified: bool = False) -> dict:
     records = _component_records(executable)
     if asset not in records:
         raise ValueError("Component not managed")
@@ -921,9 +922,49 @@ def remove_component(executable: Path, asset: str) -> dict:
     rec = records[asset]
     installed = installed_components(executable)
     match = next(x for x in installed if x["asset"] == asset)
-    if match["modified"]:
-        raise ValueError("Component modified or backup missing; refusing removal: " + match["modified"][0])
+    if match["modified"] and not backup_modified:
+        raise ValueError("Component modified or backup missing; approval for preserved removal required: " +
+                         match["modified"][0])
     backup_dir = _component_backup_dir(executable, asset)
+    modified_snapshot = None
+    if match["modified"]:
+        # Preserve current bytes of every changed tracked file before altering
+        # managed paths. Fail closed on symlinks, missing replacement backups or
+        # incomplete copies; never silently destroy a user's modifications.
+        state_dir = _component_manifest(executable).parent / "removed-modified"
+        if state_dir.is_symlink():
+            raise ValueError("Unsafe modified-component recovery directory")
+        state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        modified_snapshot = state_dir / (hashlib.sha256(asset.encode()).hexdigest() +
+                                         "-" + uuid.uuid4().hex)
+        modified_snapshot.mkdir(mode=0o700)
+        preserved = []
+        for name in sorted(set(match["modified"])):
+            dest = _component_target(root, name)
+            if dest.is_symlink() or not dest.is_file():
+                raise ValueError("Modified managed file missing or unsafe: " + name)
+            target = _component_target(modified_snapshot, name)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            before = _digest(dest)
+            with dest.open("rb") as incoming, target.open("xb") as outgoing:
+                shutil.copyfileobj(incoming, outgoing)
+                outgoing.flush()
+                os.fsync(outgoing.fileno())
+            if _digest(dest) != before or _digest(target) != before:
+                raise ValueError("Modified file changed during preservation: " + name)
+            preserved.append({"path": name, "sha256": before})
+        (modified_snapshot / "manifest.json").write_text(json.dumps({
+            "asset": asset, "files": preserved, "game": str(root),
+            "purpose": "Preserved modified managed files before removal",
+        }, indent=2))
+        # An absent original backup cannot be reconstructed. Even an approved
+        # removal must not silently erase the earlier game file.
+        for name, info in rec.get("replaced", {}).items():
+            backup = _component_target(backup_dir, name)
+            if backup.is_symlink() or not backup.is_file() or _digest(backup) != info.get("original_sha256"):
+                raise ValueError("Original component backup missing or modified; preserved current files at " +
+                                 str(modified_snapshot))
+
     # Copy originals to temporary files before making any change. Never delete backups
     # until the registry is saved; recovery remains possible after an interrupted removal.
     staged = []
@@ -953,7 +994,8 @@ def remove_component(executable: Path, asset: str) -> dict:
         except OSError:
             pass
     return {"status": "removed", "asset": asset,
-            "files": len(rec["files"]), "restored": len(rec.get("replaced", {}))}
+            "files": len(rec["files"]), "restored": len(rec.get("replaced", {})),
+            "preserved_modified": str(modified_snapshot) if modified_snapshot else None}
 
 
 def prepare_mochi_model(executable: Path, source: Path) -> dict[str, object]:
@@ -2598,6 +2640,8 @@ def main() -> int:
     parser.add_argument("--install-component", metavar="TAG")
     parser.add_argument("--replace-component-conflicts", action="store_true")
     parser.add_argument("--remove-component", metavar="ZIP")
+    parser.add_argument("--backup-modified-component", action="store_true",
+                        help="Explicit consent to preserve modified managed files before removal")
     parser.add_argument("--component-asset", metavar="ZIP")
     parser.add_argument("--extensions-json", action="store_true", help="Read installed ASI/DLL plugins and loader state")
     parser.add_argument("--import-extension", type=Path, metavar="ASI", help="Import a local ASI extension without overwrites")
@@ -2797,7 +2841,8 @@ def main() -> int:
                 if args.installed_components_json:
                     result = installed_components(args.exe)
                 elif args.remove_component:
-                    result = remove_component(args.exe, args.remove_component)
+                    result = remove_component(args.exe, args.remove_component,
+                                              backup_modified=args.backup_modified_component)
                 else:
                     if not args.component_asset:
                         parser.error("Component preview/install requires --component-asset")
