@@ -673,6 +673,47 @@ def _game_binary_scan(directory: Path) -> tuple[list[Path], list[str], bool]:
     return windows, native[:12], unreadable or visited >= 30000
 
 
+def steam_launch_options_for_directory(directory: Path, alias: str) -> dict[str, object]:
+    """Get read-only user launch options and a proposed combined Steam command."""
+    import importlib.util
+    source = Path(__file__).with_name("steam_user_launch.py")
+    spec = importlib.util.spec_from_file_location("amdnr_steam_user_launch", source)
+    if spec is None or spec.loader is None:
+        return {"status": "unavailable", "existing": None, "preview": None,
+                "reason": "parser_unavailable"}
+    parser = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(parser)
+    folder = directory.resolve()
+    if folder.parent.name != "common" or folder.parent.parent.name != "steamapps":
+        return {"status": "not_steam_install", "existing": None, "preview": None}
+    appid = None
+    for manifest in folder.parent.parent.glob("appmanifest_*.acf"):
+        try:
+            if manifest.stat().st_size > 1024 * 1024:
+                continue
+            content = manifest.read_text(encoding="utf-8-sig", errors="replace")
+            if vdf_value(content, "installdir") != folder.name:
+                continue
+            found = vdf_value(content, "appid") or manifest.stem.removeprefix("appmanifest_")
+            if found.isdecimal():
+                appid = int(found)
+                break
+        except OSError:
+            continue
+    if appid is None:
+        return {"status": "manifest_missing", "existing": None, "preview": None}
+    report = parser.read_launch_options(appid, steam_roots())
+    report["appid"] = appid
+    if report["status"] in ("empty", "found"):
+        report.update(parser.preview_launch_options(report["existing"], alias))
+        # Compose status is separate from read status.
+        report["compose_status"] = report.pop("status")
+        report["status"] = "found" if report["existing"] else "empty"
+    else:
+        report["preview"] = None
+    return report
+
+
 def steam_launch_for_directory(directory: Path) -> dict[str, object]:
     """Resolve Windows launch target from the installed Steam app's cached AppID."""
     missing = {"source": "steam_cache", "windows_candidates": [],
@@ -1427,6 +1468,7 @@ def main() -> int:
     parser.add_argument("--exes-json", type=Path, metavar="GAME_DIR", help="Find game executable candidates")
     parser.add_argument("--exe-scan-json", type=Path, metavar="GAME_DIR", help="Scan Windows executables and report Linux-native builds")
     parser.add_argument("--steam-launch-json", type=Path, metavar="GAME_DIR", help="Read cached Steam launch configuration for game")
+    parser.add_argument("--steam-user-options-json", type=Path, metavar="GAME_DIR", help="Read existing Steam launch options and preview combined Proton override")
     parser.add_argument("--saved-exe", type=Path, metavar="GAME_DIR", help="Get a remembered executable")
     parser.add_argument("--remember-exe", type=Path, metavar="GAME_DIR", help="Remember executable selected with --exe")
     parser.add_argument("--download-release", metavar="TAG", help="Download and verify selected AMDNR release")
@@ -1486,6 +1528,13 @@ def main() -> int:
             return 1
     elif args.saved_exe is not None:
         print(saved_executable(args.saved_exe) or "")
+    elif args.steam_user_options_json is not None:
+        try:
+            print(json.dumps(steam_launch_options_for_directory(args.steam_user_options_json,
+                args.alias), ensure_ascii=False))
+        except (OSError, ValueError, ImportError) as exc:
+            print(json.dumps({"status": "unavailable", "existing": None,
+                              "preview": None, "reason": str(exc)}))
     elif args.steam_launch_json is not None:
         print(json.dumps(steam_launch_for_directory(args.steam_launch_json), ensure_ascii=False))
     elif args.exe_scan_json is not None:
