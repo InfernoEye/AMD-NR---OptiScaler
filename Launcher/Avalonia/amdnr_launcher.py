@@ -677,6 +677,13 @@ def _component_existing_matches(source: zipfile.ZipFile, entry: zipfile.ZipInfo,
 
 
 def component_preview(executable: Path, tag: str, asset: str) -> dict:
+    # Select the installation backend before network I/O. NeuralHub requires
+    # a different, currently unavailable Linux GPU/driver integration; never
+    # download its ZIP and pretend it is a legacy pass-DLL component.
+    if _daniel_version(asset) == "0.8.0":
+        raise ValueError(
+            "Daniel 0.8.0 uses NeuralHub and requires Windows AMD GPU driver "
+            "interfaces not implemented by this Proton launcher. No files changed.")
     if not executable.is_file() or executable.is_symlink() or executable.suffix.lower() != ".exe":
         raise ValueError("Select a Windows game executable")
     if not _is_component_zip(asset):
