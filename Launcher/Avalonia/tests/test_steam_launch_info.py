@@ -123,6 +123,49 @@ class AppInfoTests(unittest.TestCase):
         self.assertEqual(report["windows_missing"], ["missing.exe"])
         self.assertIsNone(report["selected"])
 
+    def test_single_labeled_steam_option_is_selected_when_unrestricted(self):
+        # Actual Steam installations may give their sole launch entry a type
+        # and a display description, without making it an alternate game.
+        data = {"appinfo": {"common": {"type": "Game"}, "config": {
+            "launch": {"0": {"executable": r"game\\bin\\win64\\cs2.exe",
+                              "type": "option1", "description": "Play game"}}
+        }}}
+        report = steam.resolve_windows_launch(data, self.game)
+        self.assertEqual(report["reason"], "steam_unique_option")
+        self.assertEqual(report["selected"],
+                         str(self.game / "game/bin/win64/cs2.exe"))
+        self.assertEqual(report["windows_optional"], 1)
+
+    def test_single_beta_only_steam_option_is_not_auto_selected(self):
+        data = {"appinfo": {"common": {"type": "Game"}, "config": {
+            "launch": {"0": {"executable": "legacy.exe",
+                              "type": "option1",
+                              "config": {"betakey": "older"}}}
+        }}}
+        report = steam.resolve_windows_launch(data, self.game)
+        self.assertIsNone(report["selected"])
+        self.assertEqual(report["reason"], "steam_optional_only")
+
+    def test_single_dlc_or_other_realm_option_not_auto_selected(self):
+        for config in ({"ownsdlc": "123"}, {"realm": "steamchina"}):
+            with self.subTest(config=config):
+                data = {"appinfo": {"common": {"type": "Game"}, "config": {
+                    "launch": {"0": {"executable": "editor.exe",
+                                      "type": "option1",
+                                      "config": config}}
+                }}}
+                report = steam.resolve_windows_launch(data, self.game)
+                self.assertIsNone(report["selected"])
+
+    def test_multiple_labeled_windows_options_stay_unselected(self):
+        data = {"appinfo": {"common": {"type": "Game"}, "config": {
+            "launch": {"0": {"executable": "editor.exe", "type": "option1"},
+                       "1": {"executable": "legacy.exe", "type": "option2"}}
+        }}}
+        report = steam.resolve_windows_launch(data, self.game)
+        self.assertIsNone(report["selected"])
+        self.assertEqual(report["reason"], "steam_optional_only")
+
     def test_primary_windows_entry_ignores_linux_and_optional_launches(self):
         match = steam.resolve_windows_launch(sample_app(), self.game)
         self.assertEqual(match["reason"], "steam_primary")
