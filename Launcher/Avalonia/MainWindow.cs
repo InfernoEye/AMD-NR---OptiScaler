@@ -35,6 +35,8 @@ public sealed class MainWindow : Window
     private IReadOnlyList<ExecutableEntry> _exeCandidates = Array.Empty<ExecutableEntry>();
     private IReadOnlyList<string> _nativeExecutables = Array.Empty<string>();
     private string _exeScanReason = "";
+    private string? _steamPreferredExe;
+    private string? _steamLaunchReason;
     private bool _exeScanPartial;
     private bool _showAlternativeExecutables;
     private readonly Dictionary<string, Button> _navigation = new();
@@ -556,6 +558,8 @@ public sealed class MainWindow : Window
         _exeCandidates = Array.Empty<ExecutableEntry>();
         _nativeExecutables = Array.Empty<string>();
         _exeScanReason = "";
+        _steamPreferredExe = null;
+        _steamLaunchReason = null;
         _exeScanPartial = false;
         _showAlternativeExecutables = false;
         ShowGameDetails();
@@ -576,6 +580,8 @@ public sealed class MainWindow : Window
             _exeCandidates = results;
             _nativeExecutables = scan.NativeFiles;
             _exeScanReason = scan.Reason;
+            _steamPreferredExe = scan.SteamPreferred;
+            _steamLaunchReason = scan.SteamReason;
             _exeScanPartial = scan.Partial;
             var saved = await _backend.SavedExecutableAsync(game.Folder);
             if (_selectedGame?.Folder != game.Folder) return;
@@ -584,7 +590,9 @@ public sealed class MainWindow : Window
             _status.Text = saved is not null
                 ? "Restored saved executable: " + Path.GetFileName(saved)
                 : chosen is not null
-                    ? "Automatically selected likely game executable: " + Path.GetFileName(chosen)
+                    ? scan.SteamPreferred == chosen
+                        ? "Selected Steam's primary Windows executable: " + Path.GetFileName(chosen)
+                        : "Automatically selected likely game executable: " + Path.GetFileName(chosen)
                     : results.Count == 0
                         ? scan.Reason == "native_linux_files"
                             ? "Native Linux executables found; no Windows .exe detected."
@@ -691,7 +699,9 @@ public sealed class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(chosen) && File.Exists(chosen))
         {
             var selected = new StackPanel { Spacing = 5 };
-            selected.Children.Add(Text("✓  Selected game executable · change anytime", 15,
+            selected.Children.Add(Text(_steamPreferredExe == chosen
+                ? "✓  Steam launch configuration · Windows executable"
+                : "✓  Selected game executable · change anytime", 15,
                 AccentBrush, FontWeight.SemiBold));
             selected.Children.Add(Text(Path.GetFileName(chosen), 20,
                 ForegroundBrush, FontWeight.SemiBold));
@@ -701,7 +711,9 @@ public sealed class MainWindow : Window
         else if (recommended is not null)
         {
             var suggestion = new StackPanel { Spacing = 9 };
-            suggestion.Children.Add(Text("★  Recommended executable · not yet confirmed",
+            suggestion.Children.Add(Text(_steamPreferredExe == recommended.Path
+                ? "★  Steam-declared Windows executable"
+                : "★  Recommended executable · not yet confirmed",
                 13, AccentBrush, FontWeight.SemiBold));
             suggestion.Children.Add(Text(Path.GetFileName(recommended.Path), 20,
                 ForegroundBrush, FontWeight.SemiBold));
