@@ -341,10 +341,10 @@ UPSTREAM_HOST_ENTRY = '    "a11143327ede14ff4d7fe50ea0ce9d148320aeec4cd163f11c8c
 UPDATED_HOST_ENTRY = f'    "{HOST_SHA256}": "{HOST_VERSION}",'
 UPSTREAM_LMXXF_ENTRY = 'LMXXF_ARCHIVES = {'
 UPDATED_LMXXF_ENTRY = (
-    'LMXXF_ARCHIVES = {\\n'
-    f'    "{HOST_VERSION}": runtimes.Download(\\n'
-    f'        "{LMXXF_ARCHIVE}", "{LMXXF_VERSION}",\\n'
-    f'        "{HOST_RELEASE_URL}/{LMXXF_ARCHIVE}",\\n'
+    'LMXXF_ARCHIVES = {\n'
+    f'    "{HOST_VERSION}": runtimes.Download(\n'
+    f'        "{LMXXF_ARCHIVE}", "{LMXXF_VERSION}",\n'
+    f'        "{HOST_RELEASE_URL}/{LMXXF_ARCHIVE}",\n'
     f'        "{LMXXF_SHA256}", {LMXXF_SIZE}),'
 )
 
@@ -376,7 +376,7 @@ def apply_current_amdnr_pin(src: Path) -> bool:
             original_setup.count(UPSTREAM_DEFAULT_HOST) != 1):
         raise ValueError("Unexpected upstream host-staging interface; refusing current AMDNR override.")
     amended_manager = original_manager.replace(
-        UPSTREAM_HOST_ENTRY, UPSTREAM_HOST_ENTRY + "\\n" + UPDATED_HOST_ENTRY, 1
+        UPSTREAM_HOST_ENTRY, UPSTREAM_HOST_ENTRY + "\n" + UPDATED_HOST_ENTRY, 1
     ).replace(UPSTREAM_LMXXF_ENTRY, UPDATED_LMXXF_ENTRY, 1)
     amended_setup = original_setup.replace(UPSTREAM_DEFAULT_HOST, UPDATED_DEFAULT_HOST, 1)
     # Both files live solely under the already checksum-verified private source.
