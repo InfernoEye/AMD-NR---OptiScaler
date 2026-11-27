@@ -59,6 +59,7 @@ public sealed class MainWindow : Window
     private StackPanel? _libraryResults;
     private TextBox? _librarySearch;
     private readonly Dictionary<string, LibraryAuditEntry> _libraryAudit = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _indexedExecutables = new(StringComparer.Ordinal);
     private string _auditFilter = "All games";
     private bool _auditSnapshotLoaded;
 
@@ -661,6 +662,28 @@ public sealed class MainWindow : Window
         _steamMissingWindows = Array.Empty<string>();
         _exeScanPartial = false;
         _showAlternativeExecutables = false;
+        if (_indexedExecutables.TryGetValue(Path.GetFullPath(game.Folder), out var cached) &&
+            File.Exists(cached))
+        {
+            _exe = cached;
+            _status.Text = "Restored indexed executable: " + Path.GetFileName(cached) +
+                " · Rescan for updated candidates.";
+            ShowGameDetails();
+            return;
+        }
+        // Native / no-EXE results from a completed audit do not require another
+        // expensive binary crawl when opening the same game.
+        if (_libraryAudit.TryGetValue(Path.GetFullPath(game.Folder), out var audit) &&
+            audit.Status is "native_linux" or "no_windows_exe" or "scan_incomplete")
+        {
+            _exeScanReason = audit.Status == "native_linux"
+                ? "native_linux_files" : audit.Status;
+            _status.Text = audit.Status == "native_linux"
+                ? "Restored native Linux detection from saved audit · Rescan to update."
+                : "Restored executable scan result from saved audit · Rescan to update.";
+            ShowGameDetails();
+            return;
+        }
         ShowGameDetails();
         await FindExecutablesAsync(game);
     }
@@ -687,6 +710,14 @@ public sealed class MainWindow : Window
             if (_selectedGame?.Folder != game.Folder) return;
             var chosen = saved ?? results.FirstOrDefault(e => e.AutoSelect)?.Path;
             _exe = chosen;
+            if (chosen is not null && File.Exists(chosen))
+            {
+                _indexedExecutables[Path.GetFullPath(game.Folder)] = chosen;
+                // The indexed choice is distinct from a manual preference: saving
+                // automatic discovery must not override explicit manual selection.
+                try { await _backend.IndexLibraryExecutableAsync(game.Folder, chosen); }
+                catch (Exception) { /* Valid in-session selection still works. */ }
+            }
             _status.Text = saved is not null
                 ? "Restored saved executable: " + Path.GetFileName(saved)
                 : chosen is not null
@@ -726,6 +757,9 @@ public sealed class MainWindow : Window
             await _backend.RememberExecutableAsync(game.Folder, path);
             if (_selectedGame?.Folder != game.Folder) return;
             _exe = path;
+            _indexedExecutables[Path.GetFullPath(game.Folder)] = path;
+            try { await _backend.IndexLibraryExecutableAsync(game.Folder, path); }
+            catch (Exception) { /* Manual choice was already saved independently. */ }
             _status.Text = "Saved executable preference: " + Path.GetFileName(path);
             ShowGameDetails();
         }
@@ -1382,12 +1416,14 @@ public sealed class MainWindow : Window
     private async Task ReloadGamesAsync()
     {
         if (_backend is null) return;
-        var steam = await _backend.GamesAsync();
-        var custom = await _backend.CustomGamesAsync();
-        var seen = new HashSet<string>(steam.Select(g => Path.GetFullPath(g.Folder)),
-            StringComparer.Ordinal);
-        _games = steam.Concat(custom.Where(g => seen.Add(Path.GetFullPath(g.Folder))))
-            .OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var current = await _backend.DifferentialGamesAsync();
+        _games = current.Select(item => item.Game).ToList();
+        _indexedExecutables.Clear();
+        foreach (var item in current)
+            if (item.Executable is not null)
+                _indexedExecutables[Path.GetFullPath(item.Game.Folder)] = item.Executable;
+        // New / removed Steam entries are reconciled via manifests; no binary
+        // scan occurs here. Temporarily missing custom folders are retained.
         // Preserve the saved audit snapshot across ordinary Library refreshes.
         // Newly discovered games simply show no readiness label until Rescan.
     }
@@ -1396,7 +1432,7 @@ public sealed class MainWindow : Window
     {
         if (_busy || _backend is null) return;
         _busy = true;
-        _status.Text = "Scanning Steam libraries…";
+        _status.Text = "Checking saved library against Steam manifests…";
         try
         {
             await ReloadGamesAsync();
@@ -1414,7 +1450,7 @@ public sealed class MainWindow : Window
                     _status.Text = "Saved audit unavailable: " + ex.Message;
                 }
             }
-            _status.Text = $"Loaded {_games.Count} entries ({_games.Count(g => g.Custom)} custom)" +
+            _status.Text = $"Differential update: {_games.Count} entries ({_games.Count(g => g.Custom)} custom)" +
                 (_libraryAudit.Count > 0 ? $" · {_libraryAudit.Count} saved audit results" : "");
             // Scan changes should update the list, not navigate to a selected game.
             // Keep this deterministic even if the previous page was Game Details.
