@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -180,6 +181,66 @@ public sealed class Backend
         return results;
     }
 
+    public async Task<LauncherSettings> SettingsAsync(CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] { "--settings-json" }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
+        return new LauncherSettings(
+            root.GetProperty("default_alias").GetString() ?? "dxgi.dll",
+            root.GetProperty("download_directory").GetString() ?? "",
+            root.GetProperty("show_prereleases").GetBoolean());
+    }
+
+    public async Task<LauncherSettings> SaveSettingsAsync(LauncherSettings settings,
+        CancellationToken token = default)
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            default_alias = settings.DefaultAlias,
+            download_directory = settings.DownloadDirectory,
+            show_prereleases = settings.ShowPrereleases,
+        });
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(payload));
+        var (exit, output) = await RunAsync(new[] { "--save-settings-base64", encoded }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        return await SettingsAsync(token);
+    }
+
+    public async Task<IniSnapshot> ReadIniAsync(string exe, CancellationToken token = default)
+    {
+        var (exit, output) = await RunAsync(new[] { "--ini-json", "--exe", exe }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
+        var sections = root.GetProperty("sections").EnumerateArray()
+            .Select(s => new IniSection(
+                s.GetProperty("name").GetString() ?? "(Unnamed)",
+                s.GetProperty("keys").EnumerateArray()
+                    .Select(k => k.GetString() ?? "").ToArray())).ToArray();
+        return new IniSnapshot(root.GetProperty("path").GetString() ?? "",
+            root.GetProperty("text").GetString() ?? "",
+            root.GetProperty("sha256").GetString() ?? "", sections);
+    }
+
+    public async Task<IniSaveResult> SaveIniAsync(string exe, string previousSha,
+        string content, CancellationToken token = default)
+    {
+        var bytes = Encoding.UTF8.GetBytes(content);
+        if (bytes.Length > 512 * 1024) throw new InvalidOperationException("INI too large");
+        var encoded = Convert.ToBase64String(bytes);
+        var (exit, output) = await RunAsync(new[] {
+            "--save-ini-base64", encoded, "--ini-expected-sha", previousSha, "--exe", exe
+        }, token);
+        if (exit != 0) throw new InvalidOperationException(output);
+        using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
+        return new IniSaveResult(root.GetProperty("status").GetString() ?? "",
+            root.GetProperty("backup").GetString() ?? "",
+            root.GetProperty("sha256").GetString() ?? "");
+    }
+
     public async Task<InstallationReport> InstallationAsync(string executable)
     {
         var (exit, output) = await RunAsync(new[] { "--installation-json", "--exe", executable });
@@ -329,6 +390,14 @@ public sealed record SteamUserOptions(string Status, string? Existing,
 public sealed record InstalledGameSummary(string Name, string Folder,
     string Executable, string Status, string? Alias, int TrackedFiles,
     string? SourceArchive, bool Custom);
+
+public sealed record LauncherSettings(string DefaultAlias, string DownloadDirectory,
+    bool ShowPrereleases);
+
+public sealed record IniSection(string Name, IReadOnlyList<string> Keys);
+public sealed record IniSnapshot(string Path, string Text, string Sha256,
+    IReadOnlyList<IniSection> Sections);
+public sealed record IniSaveResult(string Status, string Backup, string Sha256);
 
 public sealed record GameEntry(string Name, string Folder, string? Artwork, bool Custom = false);
 
