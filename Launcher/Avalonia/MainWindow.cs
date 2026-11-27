@@ -2064,6 +2064,8 @@ public sealed class MainWindow : Window
                     addonCatalogueState.Text = "No additional verified add-on packages published.";
                     return;
                 }
+                var already = (await _backend.InstalledComponentsAsync(gameExe))
+                    .Select(x => x.Asset).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 addonCatalogueState.Text = "Official optional add-ons (none selected by default):";
                 foreach (var release in supported)
                 {
@@ -2071,7 +2073,11 @@ public sealed class MainWindow : Window
                     {
                         Content = release.Name + " (verified official package)",
                         Foreground = ForegroundBrush, IsChecked = false,
+                        IsEnabled = !already.Contains(release.Asset),
                     };
+                    if (already.Contains(release.Asset))
+                        toggle.Content = release.Name + " (already installed)";
+                    toggle.IsCheckedChanged += (_, _) => Buttons();
                     extraAddonOptions.Children.Add(toggle);
                     selectedAddons.Add((release, toggle));
                 }
@@ -2084,9 +2090,12 @@ public sealed class MainWindow : Window
 
         void Buttons()
         {
-            install.IsEnabled = !busy && !bridgeInstalled && !migrationPending &&
-                (!conflicts || replaceApproval.IsChecked == true) &&
-                (ready || compilerApproval.IsChecked == true);
+            bool addOnsSelected = selectedAddons.Any(x =>
+                x.Option.IsEnabled && x.Option.IsChecked == true);
+            install.IsEnabled = !busy && !migrationPending &&
+                (bridgeInstalled ? addOnsSelected :
+                    (!conflicts || replaceApproval.IsChecked == true) &&
+                    (ready || compilerApproval.IsChecked == true));
             uninstall.IsEnabled = !busy && bridgeInstalled;
             refresh.IsEnabled = !busy;
             addonDaniel.IsEnabled = !busy && !bridgeInstalled;
@@ -2175,7 +2184,8 @@ public sealed class MainWindow : Window
                 replaceApproval.IsVisible = conflicts && !bridgeInstalled;
                 compilerApproval.IsVisible = !ready && !bridgeInstalled;
                 compilerSource.IsVisible = !ready && !bridgeInstalled;
-                install.Content = ready ? "INSTALL AMDNR" : "PREPARE & INSTALL AMDNR";
+                install.Content = bridgeInstalled ? "INSTALL CHECKED ADD-ONS" :
+                    ready ? "INSTALL AMDNR" : "PREPARE & INSTALL AMDNR";
                 state.Text = bridgeInstalled ? "Linux ROCm Bridge installed."
                     : migrationPending ? "Interrupted migration: recover from Advanced."
                     : ready ? "Verified bridge is prepared. Ready to install."
@@ -2211,13 +2221,15 @@ public sealed class MainWindow : Window
 
         async Task RunInstall()
         {
-            if (busy || migrationPending || bridgeInstalled) return;
-            if (conflicts && replaceApproval.IsChecked != true)
+            if (busy || migrationPending) return;
+            if (bridgeInstalled && !selectedAddons.Any(x =>
+                    x.Option.IsEnabled && x.Option.IsChecked == true)) return;
+            if (!bridgeInstalled && conflicts && replaceApproval.IsChecked != true)
             {
                 feedback.Text = "Approve backup and replacement of old hooks first.";
                 return;
             }
-            if (!ready && (compilerApproval.IsChecked != true ||
+            if (!bridgeInstalled && !ready && (compilerApproval.IsChecked != true ||
                            string.IsNullOrWhiteSpace(compiler) || !File.Exists(compiler)))
             {
                 feedback.Text = "Confirm compiler provenance. If none was detected, open Advanced.";
@@ -2228,6 +2240,8 @@ public sealed class MainWindow : Window
             try
             {
                 // Backend validates approvals, source hashes and conflicts again.
+                if (!bridgeInstalled)
+                {
                 if (!ready)
                 {
                     state.Text = "Preparing AMDNR and the Linux bridge…";
@@ -2248,6 +2262,7 @@ public sealed class MainWindow : Window
                     args.Add("--bridge-backup-and-replace");
                 var (exit, result) = await _backend.RunAsync(args);
                 if (exit != 0) throw new InvalidOperationException(result);
+                }
                 var added = new List<string>();
                 var skipped = new List<string>();
                 foreach (var (release, checkbox) in selectedAddons)
@@ -2268,6 +2283,9 @@ public sealed class MainWindow : Window
                         await _backend.InstallComponentAsync(
                             gameExe, release.Tag, release.Asset);
                         added.Add(release.Name);
+                        checkbox.IsChecked = false;
+                        checkbox.IsEnabled = false;
+                        checkbox.Content = release.Name + " (installed)";
                     }
                     catch (Exception addonError)
                     {
