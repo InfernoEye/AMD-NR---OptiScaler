@@ -504,7 +504,7 @@ public sealed class MainWindow : Window
                 _status.Text = "ASI plugins require a compatible loader; no DLL override to copy.";
                 return;
             }
-            var value = $"WINEDLLOVERRIDES=\\"{Path.GetFileNameWithoutExtension(_alias).ToLowerInvariant()}=n,b\\" %command%";
+            var value = $"WINEDLLOVERRIDES=\"{Path.GetFileNameWithoutExtension(_alias).ToLowerInvariant()}=n,b\" %command%";
             await Clipboard.SetTextAsync(value);
             _status.Text = "Steam launch options copied to clipboard.";
         };
