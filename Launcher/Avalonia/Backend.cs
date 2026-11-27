@@ -259,6 +259,7 @@ public sealed class Backend
             root.GetProperty("safety_limit_exceeded").GetBoolean(),
             root.GetProperty("file_count").GetInt32(),
             root.GetProperty("conflict_count").GetInt32(),
+            root.GetProperty("replaceable_count").GetInt32(),
             root.GetProperty("too_many_files").GetBoolean(),
             root.GetProperty("identical_count").GetInt32(),
             root.GetProperty("new_file_count").GetInt32(),
@@ -269,11 +270,13 @@ public sealed class Backend
     }
 
     public async Task InstallComponentAsync(string executable, string tag,
-        string asset, CancellationToken token = default)
+        string asset, bool replaceConflicts = false, CancellationToken token = default)
     {
-        var (exit, output) = await RunAsync(new[] {
+        var args = new List<string> {
             "--install-component", tag, "--component-asset", asset,
-            "--exe", executable }, token);
+            "--exe", executable };
+        if (replaceConflicts) args.Add("--replace-component-conflicts");
+        var (exit, output) = await RunAsync(args, token);
         if (exit != 0) throw new InvalidOperationException(output);
     }
 
@@ -538,7 +541,7 @@ public sealed record ManagedComponent(string Asset, string Tag, int FileCount,
 public sealed record ComponentFileSize(string Name, long Bytes);
 public sealed record ComponentPreview(string Asset, IReadOnlyList<string> Files,
     IReadOnlyList<string> Conflicts, bool Installable, long ExtractedBytes,
-    bool SafetyLimitExceeded, int FileCount, int ConflictCount, bool TooManyFiles,
+    bool SafetyLimitExceeded, int FileCount, int ConflictCount, int ReplaceableCount, bool TooManyFiles,
     int IdenticalCount, int NewFileCount, IReadOnlyList<ComponentFileSize> LargestFiles);
 
 public sealed record ExtensionEntry(string Name, long Bytes, bool Managed, bool Modified);
