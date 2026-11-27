@@ -571,8 +571,10 @@ public sealed class MainWindow : Window
         _breadcrumb.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(_breadcrumb, 1);
         header.Children.Add(_breadcrumb);
-        Grid.SetColumn(_topNavigation, 1);
-        header.Children.Add(_topNavigation);
+        var topNavigation = _topNavigation
+            ?? throw new InvalidOperationException("Top navigation must be initialized before the header.");
+        Grid.SetColumn(topNavigation, 1);
+        header.Children.Add(topNavigation);
         _status.FontSize = 11;
         _status.MaxLines = 1;
         _status.TextTrimming = TextTrimming.CharacterEllipsis;
