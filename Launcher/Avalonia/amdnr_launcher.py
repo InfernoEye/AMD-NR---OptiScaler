@@ -517,48 +517,111 @@ def remember_executable(directory: Path, executable: Path) -> str:
     return str(executable.resolve())
 
 
-def executable_candidates(directory: Path) -> list[dict[str, object]]:
-    """Suggest likely Windows game EXEs, but never silently install to a guess."""
+def _game_binary_scan(directory: Path) -> tuple[list[Path], list[str], bool]:
+    """Bounded, symlink-free traversal with per-directory error recovery."""
     if not directory.is_dir():
-        return []
+        return [], [], False
+    root = directory.resolve()
+    folders = [(root, 0)]
+    windows: list[Path] = []
+    native: list[str] = []
+    unreadable = False
+    visited = 0
+    # Vendor/dependency subtrees cannot contain the game's launcher. Avoid
+    # walking entire embedded development SDKs or Windows redistributables.
+    skip = {"__pycache__", ".git", "node_modules", "steamapps",
+            "redist", "_commonredist", "redistributables"}
+    while folders and visited < 30000 and len(windows) < 200:
+        folder, depth = folders.pop()
+        try:
+            with os.scandir(folder) as entries:
+                children = sorted(list(entries), key=lambda e: e.name.casefold())
+        except OSError:
+            unreadable = True
+            continue
+        for entry in children:
+            visited += 1
+            if visited > 30000:
+                break
+            try:
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    if depth < 14 and entry.name.casefold() not in skip:
+                        folders.append((Path(entry.path), depth + 1))
+                    continue
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                name = entry.name.casefold()
+                path = Path(entry.path)
+                if name.endswith(".exe"):
+                    windows.append(path)
+                elif depth <= 3 and (
+                    name.endswith((".x86_64", ".x86", ".sh", ".appimage"))
+                    or (depth <= 1 and "." not in name)
+                ):
+                    # Only inspect the first few bytes; do not execute candidates.
+                    with path.open("rb") as stream:
+                        magic = stream.read(4)
+                    if magic == b"\x7fELF" or (
+                        magic.startswith(b"#!") and
+                        name.endswith((".sh", ".x86_64", ".x86"))
+                    ):
+                        native.append(str(path.relative_to(root)))
+            except OSError:
+                unreadable = True
+                continue
+    return windows, native[:12], unreadable or visited >= 30000
+
+
+def executable_scan(directory: Path) -> dict[str, object]:
+    """Windows EXE candidates plus honest native-game/partial-scan diagnostics."""
+    windows, native, partial = _game_binary_scan(directory)
+    if not directory.is_dir():
+        return {"candidates": [], "native": [], "reason": "missing_directory",
+                "partial": False}
     bad = ("unins", "setup", "crash", "redist", "vcredist",
            "unitycrash", "easyanticheat", "benchmark", "updater",
            "anticheat", "uninstall", "vconsole", "editor", "crashhandler")
-    candidates: list[tuple[int, Path]] = []
     root = directory.resolve()
-    try:
-        # Stay inside this game tree; avoid scanning other Steam installations.
-        for path in directory.rglob("*"):
-            if not path.is_file() or path.suffix.lower() != ".exe" or path.is_symlink():
-                continue
-            relative = path.resolve().relative_to(root)
-            if len(relative.parts) > 7:
-                continue
-            lower = str(relative).lower()
-            score = 0
-            if any(part in path.name.lower() for part in bad):
-                score -= 100
-            if "shipping" in path.name.lower():
-                score += 45
-            if "binaries/win64" in lower.replace("\\", "/"):
-                score += 30
-            if "win64" in lower or "x64" in lower:
-                score += 10
-            if path.stem.lower() == directory.name.lower():
-                score += 20
-            score -= len(relative.parts) * 2
-            candidates.append((score, path))
-    except (OSError, ValueError):
-        return []
-    candidates.sort(key=lambda v: (-v[0], str(v[1]).casefold()))
-    best_score = candidates[0][0] if candidates else -999
-    runner_up = candidates[1][0] if len(candidates) > 1 else -999
-    confident = best_score > -50 and (
-        len(candidates) == 1 or (best_score >= 15 and best_score - runner_up >= 15))
-    return [{"path": str(path), "recommended": rank == 0 and score > -50,
-             "auto_select": rank == 0 and confident,
-             "suspicious": score <= -50} for rank, (score, path)
-            in enumerate(candidates[:50])]
+    ranked: list[tuple[int, Path]] = []
+    for path in windows:
+        relative = path.relative_to(root)
+        lower = str(relative).lower().replace("\\", "/")
+        score = 0
+        if any(part in path.name.casefold() for part in bad):
+            score -= 100
+        if "shipping" in path.name.casefold():
+            score += 45
+        if "binaries/win64" in lower:
+            score += 30
+        if "win64" in lower or "x64" in lower:
+            score += 10
+        if path.stem.casefold() == directory.name.casefold():
+            score += 20
+        score -= len(relative.parts) * 2
+        ranked.append((score, path))
+    ranked.sort(key=lambda v: (-v[0], str(v[1]).casefold()))
+    best = ranked[0][0] if ranked else -999
+    runner = ranked[1][0] if len(ranked) > 1 else -999
+    confident = best > -50 and (
+        len(ranked) == 1 or (best >= 15 and best - runner >= 15))
+    candidates = [
+        {"path": str(path), "recommended": rank == 0 and score > -50,
+         "auto_select": rank == 0 and confident,
+         "suspicious": score <= -50}
+        for rank, (score, path) in enumerate(ranked[:50])
+    ]
+    reason = ("found_windows_exe" if candidates else
+              "native_linux_files" if native else
+              "partial_scan" if partial else "no_windows_exe")
+    return {"candidates": candidates, "native": native,
+            "reason": reason, "partial": partial}
+
+
+def executable_candidates(directory: Path) -> list[dict[str, object]]:
+    """Backwards-compatible candidate list for the Linux GUI and CLI."""
+    return executable_scan(directory)["candidates"]
 
 
 def guess_executable(directory: Path) -> Path | None:
@@ -927,6 +990,7 @@ def main() -> int:
     parser.add_argument("--doctor-json", action="store_true", help="Read-only launcher and installation diagnostics")
     parser.add_argument("--installation-json", action="store_true", help="Inspect installed files, backups and archive origin")
     parser.add_argument("--exes-json", type=Path, metavar="GAME_DIR", help="Find game executable candidates")
+    parser.add_argument("--exe-scan-json", type=Path, metavar="GAME_DIR", help="Scan Windows executables and report Linux-native builds")
     parser.add_argument("--saved-exe", type=Path, metavar="GAME_DIR", help="Get a remembered executable")
     parser.add_argument("--remember-exe", type=Path, metavar="GAME_DIR", help="Remember executable selected with --exe")
     parser.add_argument("--download-release", metavar="TAG", help="Download and verify selected AMDNR release")
@@ -960,6 +1024,8 @@ def main() -> int:
             return 1
     elif args.saved_exe is not None:
         print(saved_executable(args.saved_exe) or "")
+    elif args.exe_scan_json is not None:
+        print(json.dumps(executable_scan(args.exe_scan_json), ensure_ascii=False))
     elif args.exes_json is not None:
         print(json.dumps(executable_candidates(args.exes_json), ensure_ascii=False))
     elif args.doctor_json:
