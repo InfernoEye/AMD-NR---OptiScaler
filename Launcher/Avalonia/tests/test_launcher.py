@@ -275,8 +275,8 @@ class LauncherTests(unittest.TestCase):
         self.assertFalse(launcher._is_component_zip("v0.8.0-other.zip"))
 
     def test_daniel_switch_requires_removing_existing_version_first(self):
-        tag = "Alpha0.3.5.8"
-        asset = "v0.8.0-Runtime.zip"
+        tag = "Alpha0.3.5.1"
+        asset = "v0.5.1-Runtime.zip"
         archive = self.root / asset
         with zipfile.ZipFile(archive, "w") as stream:
             for i in range(1, 4):
@@ -291,6 +291,14 @@ class LauncherTests(unittest.TestCase):
             self.assertGreater(preview["conflict_count"], preview["replaceable_count"])
             with self.assertRaisesRegex(ValueError, "Remove installed Daniel"):
                 launcher.install_component(self.exe, tag, asset, replace_conflicts=True)
+
+    def test_daniel_080_requires_separate_neuralhub_installer(self):
+        archive = self.root / "v0.8.0-Runtime.zip"
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("neuralhub_host.dll", b"host")
+        with patch.object(launcher, "download_release", return_value=archive):
+            with self.assertRaisesRegex(ValueError, "NeuralHub"):
+                launcher.component_preview(self.exe, "Alpha0.3.5.8", archive.name)
 
     def test_daniel_runtime_installs_required_files_to_game_root_only(self):
         tag, asset = "Alpha0.3.5.5R4", "v0.6.0-Runtime.zip"
