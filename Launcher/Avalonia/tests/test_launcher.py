@@ -77,6 +77,91 @@ class LauncherTests(unittest.TestCase):
             }])
             self.assertEqual(launcher.installed_games_overview(), [])
 
+    def test_community_mochi_requires_explicit_opt_in(self):
+        with patch.object(launcher, "_github_json") as metadata:
+            with self.assertRaisesRegex(ValueError, "explicit user opt-in"):
+                launcher.prepare_mochi_from_community(self.exe)
+            metadata.assert_not_called()
+
+    def test_community_mochi_verifies_zip_and_dll_before_preparation(self):
+        import hashlib
+        import io
+        dll = b"example known test DLL content"
+        memory = io.BytesIO()
+        with zipfile.ZipFile(memory, "w") as archive:
+            archive.writestr("payload/nvngx_dlssnr.dll", dll)
+        payload = memory.getvalue()
+        zip_digest = hashlib.sha256(payload).hexdigest()
+        dll_digest = hashlib.sha256(dll).hexdigest()
+        metadata = {"tag_name": launcher.MOCHI_COMMUNITY_TAG,
+                    "assets": [{"name": launcher.MOCHI_COMMUNITY_ASSET,
+                                "size": len(payload),
+                                "digest": "sha256:" + zip_digest}]}
+        class Response:
+            def __init__(self):
+                self.stream = io.BytesIO(payload)
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                pass
+            def read(self, size=-1):
+                return self.stream.read(size)
+        def extract_verified(_exe, source):
+            self.assertEqual(source.name, "nvngx_dlssnr.dll")
+            self.assertEqual(source.read_bytes(), dll)
+            return {"status": "prepared", "models": {"dlssnr.bin": {
+                "bytes": 42, "sha256": "a" * 64}}}
+        with (patch.object(launcher, "MOCHI_COMMUNITY_ZIP_SHA256", zip_digest),
+              patch.object(launcher, "MOCHI_EXPECTED_DLL_SHA256", dll_digest),
+              patch.object(launcher, "_github_json", return_value=metadata),
+              patch.object(launcher.urllib.request, "urlopen", return_value=Response()),
+              patch.object(launcher, "prepare_mochi_model", side_effect=extract_verified) as prepare):
+            result = launcher.prepare_mochi_from_community(self.exe, consent=True)
+        self.assertEqual(result["status"], "prepared")
+        self.assertEqual(result["community_mirror"], "RankFTW/rhi-repo")
+        prepare.assert_called_once()
+        self.assertFalse(any(self.game.glob(".amdnr-community-*")))
+        self.assertFalse((self.game / "nvngx_dlssnr.dll").exists())
+
+    def test_community_mochi_rejects_replaced_mirror_digest_before_download(self):
+        metadata = {"assets": [{"name": launcher.MOCHI_COMMUNITY_ASSET,
+                                "size": 123,
+                                "digest": "sha256:" + "0" * 64}]}
+        with (patch.object(launcher, "_github_json", return_value=metadata),
+              patch.object(launcher.urllib.request, "urlopen") as download):
+            with self.assertRaisesRegex(ValueError, "digest changed"):
+                launcher.prepare_mochi_from_community(self.exe, consent=True)
+            download.assert_not_called()
+
+    def test_community_mochi_rejects_unexpected_dll_and_does_not_prepare(self):
+        import hashlib
+        import io
+        memory = io.BytesIO()
+        with zipfile.ZipFile(memory, "w") as archive:
+            archive.writestr("nvngx_dlssnr.dll", b"unapproved DLL")
+        payload = memory.getvalue()
+        digest = hashlib.sha256(payload).hexdigest()
+        metadata = {"assets": [{"name": launcher.MOCHI_COMMUNITY_ASSET,
+                                "size": len(payload),
+                                "digest": "sha256:" + digest}]}
+        class Response:
+            def __init__(self):
+                self.stream = io.BytesIO(payload)
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                pass
+            def read(self, size=-1):
+                return self.stream.read(size)
+        with (patch.object(launcher, "MOCHI_COMMUNITY_ZIP_SHA256", digest),
+              patch.object(launcher, "_github_json", return_value=metadata),
+              patch.object(launcher.urllib.request, "urlopen", return_value=Response()),
+              patch.object(launcher, "prepare_mochi_model") as prepare):
+            with self.assertRaisesRegex(ValueError, "does not match supported"):
+                launcher.prepare_mochi_from_community(self.exe, consent=True)
+            prepare.assert_not_called()
+        self.assertFalse(any(self.game.glob(".amdnr-community-*")))
+
     def test_mochi_model_preparation_only_installs_verified_local_outputs(self):
         import subprocess
         source = self.root / "nvngx_dlssnr.dll"
