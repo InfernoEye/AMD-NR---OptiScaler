@@ -2920,9 +2920,40 @@ public sealed class MainWindow : Window
         installation.Children.Add(install);
         var installResult = Text("", 13, ForegroundBrush);
         installation.Children.Add(installResult);
-        var copy = Button("COPY MANUAL STEAM LAUNCH OPTION");
-        copy.IsVisible = false;
-        installation.Children.Add(copy);
+        var steamPanel = new StackPanel { Spacing = 8, IsVisible = false };
+        steamPanel.Children.Add(Text("STEAM LAUNCH OPTIONS", 14, AccentBrush, FontWeight.Bold));
+        var steamReadStatus = Text("", 12, MutedBrush);
+        steamPanel.Children.Add(steamReadStatus);
+        steamPanel.Children.Add(Text("CURRENT OPTIONS (read from Steam, or paste your own)", 11, MutedBrush,
+            FontWeight.Bold));
+        var currentSteamOptions = new TextBox
+        {
+            Watermark = "Steam → Game Properties → General → Launch Options",
+            MinHeight = 46, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
+            Background = BackgroundBrush, Foreground = ForegroundBrush,
+        };
+        steamPanel.Children.Add(currentSteamOptions);
+        var recheckSteam = Button("REVIEW EDITED STEAM OPTIONS");
+        steamPanel.Children.Add(recheckSteam);
+        var steamRemove = Text("", 12, AccentBrush);
+        var steamKeep = Text("", 12, MutedBrush);
+        var steamWarning = Text("", 12, ForegroundBrush);
+        steamPanel.Children.Add(steamRemove);
+        steamPanel.Children.Add(steamKeep);
+        steamPanel.Children.Add(steamWarning);
+        steamPanel.Children.Add(Text("FINAL OPTIONS TO COPY INTO STEAM", 11, AccentBrush,
+            FontWeight.Bold));
+        var finalSteamOptions = new TextBox
+        {
+            IsReadOnly = true, MinHeight = 50, AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            Background = BackgroundBrush, Foreground = ForegroundBrush,
+        };
+        steamPanel.Children.Add(finalSteamOptions);
+        var copy = Button("COPY FINAL STEAM OPTIONS", true);
+        copy.IsEnabled = false;
+        steamPanel.Children.Add(copy);
+        installation.Children.Add(steamPanel);
         var restoreControls = new StackPanel { Spacing = 8 };
         restoreControls.Children.Add(Text(
             "Restore an existing community bridge using its own managed backups. " +
@@ -2968,6 +2999,74 @@ public sealed class MainWindow : Window
         bool communityInstalled = false;
         bool migrationPending = false;
         string launchOptionText = "";
+        async Task RefreshSteamPreviewAsync(string? entered = null)
+        {
+            if (_backend is null) return;
+            try
+            {
+                var arguments = new List<string> {
+                    "--bridge-steam-preview-json", "--exe", selection
+                };
+                if (entered is not null)
+                {
+                    if (entered.Length > 8192)
+                        throw new InvalidOperationException("Steam launch options exceed the review limit.");
+                    arguments.Add("--bridge-existing-options");
+                    arguments.Add(entered);
+                }
+                var (exit, raw) = await _backend.RunAsync(arguments);
+                if (exit != 0) throw new InvalidOperationException(raw);
+                using var result = JsonDocument.Parse(raw);
+                var state = result.RootElement;
+                string GetString(string key) =>
+                    state.TryGetProperty(key, out var item) &&
+                    item.ValueKind == JsonValueKind.String ? item.GetString() ?? "" : "";
+                var source = GetString("steam_status");
+                var existing = GetString("existing");
+                if (entered is null && (source == "found" || source == "empty"))
+                    currentSteamOptions.Text = existing;
+                var composed = GetString("compose_status");
+                launchOptionText = GetString("preview");
+                finalSteamOptions.Text = string.IsNullOrEmpty(launchOptionText)
+                    ? "Unable to merge automatically; review the warnings and enter the active Steam options."
+                    : launchOptionText;
+                string[] GetLines(string key) =>
+                    state.TryGetProperty(key, out var items) && items.ValueKind == JsonValueKind.Array
+                    ? items.EnumerateArray().Select(x => x.GetString() ?? "").ToArray()
+                    : Array.Empty<string>();
+                var removed = GetLines("removed");
+                var kept = GetLines("kept");
+                var warnings = GetLines("review");
+                steamRemove.Text = removed.Length > 0
+                    ? "REMOVE (previous managed AMDNR):\n• " + string.Join("\n• ", removed)
+                    : "REMOVE: No proven obsolete options were removed.";
+                steamKeep.Text = kept.Length > 0
+                    ? "KEEP:\n• " + string.Join("\n• ", kept)
+                    : "KEEP: Existing unrelated options are retained.";
+                steamWarning.Text = warnings.Length > 0
+                    ? "REVIEW:\n• " + string.Join("\n• ", warnings)
+                    : "No known Steam option conflicts.";
+                steamReadStatus.Text = source switch
+                {
+                    "found" => "Loaded from Steam userdata (read-only).",
+                    "empty" => "Steam has no existing launch options for this game.",
+                    "manual" => "Reviewing the options you entered; Steam was not changed.",
+                    "multiple_profiles" => "Steam accounts disagree; paste the active account's options below.",
+                    _ => "Steam options could not be read reliably; paste the current options below."
+                };
+                copy.IsEnabled = !string.IsNullOrEmpty(launchOptionText);
+                steamPanel.IsVisible = true;
+            }
+            catch (Exception ex)
+            {
+                steamPanel.IsVisible = true;
+                steamReadStatus.Text = "Steam preview failed: " + ex.Message;
+                copy.IsEnabled = false;
+                launchOptionText = "";
+            }
+        }
+        recheckSteam.Click += async (_, _) =>
+            await RefreshSteamPreviewAsync(currentSteamOptions.Text ?? "");
         void UpdateButtons()
         {
             install.IsEnabled = !_busy && ready && !migrationPending && !communityInstalled &&
@@ -3154,9 +3253,9 @@ public sealed class MainWindow : Window
                     ? migration.GetString() : null;
                 installResult.Text = "Linux bridge installed. " +
                     (string.IsNullOrEmpty(snapshot) ? "" : "Recovery snapshot: " + snapshot + "\n") +
-                    "Steam launch option (copy manually):\n" + launchOptionText;
-                copy.IsVisible = !string.IsNullOrWhiteSpace(launchOptionText);
+                    "Review the combined Steam options below; Steam has not been modified.";
                 await CheckStatusAsync();
+                await RefreshSteamPreviewAsync();
             }
             catch (Exception ex)
             {
@@ -3168,7 +3267,8 @@ public sealed class MainWindow : Window
         copy.Click += async (_, _) =>
         {
             if (!string.IsNullOrWhiteSpace(launchOptionText))
-                await CopyToClipboardAsync(launchOptionText, "Proposed Steam option copied.");
+                await CopyToClipboardAsync(launchOptionText,
+                    "Final combined Steam options copied. Paste into Steam manually.");
         };
         restore.Click += async (_, _) =>
         {
@@ -3187,7 +3287,8 @@ public sealed class MainWindow : Window
                 installResult.Text = "Community-managed backups restored. Remove the wrapper " +
                     "from Steam launch options manually.";
                 launchOptionText = "";
-                copy.IsVisible = false;
+                steamPanel.IsVisible = false;
+                copy.IsEnabled = false;
                 await CheckStatusAsync();
             }
             catch (Exception ex)
@@ -3218,6 +3319,7 @@ public sealed class MainWindow : Window
             finally { _busy = false; UpdateButtons(); }
         };
         await CheckStatusAsync();
+        if (communityInstalled) await RefreshSteamPreviewAsync();
         await CheckHostAsync();
     }
 
