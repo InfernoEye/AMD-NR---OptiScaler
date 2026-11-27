@@ -633,7 +633,7 @@ def remove(exe: Path, approved: bool, *, restore_previous: bool = True,
     if not isinstance(data.get("launcher"), dict):
         raise ValueError("Record is not a community-managed installation; refusing removal.")
     manager = source_path() / "linux/manage.py"
-    if not manager.is_file():
+    if not manager.is_file() and not force:
         raise ValueError("Original community manager missing; cannot restore backups.")
     if force:
         from launcher_maintenance import _ensure_not_running
@@ -645,8 +645,12 @@ def remove(exe: Path, approved: bool, *, restore_previous: bool = True,
     command = [sys.executable, str(manager), "uninstall", str(folder)]
     if force:
         command.append("--force")  # reviewed v0.3.7 manager's explicit force mode
-    finished = subprocess.run(command,
-                              cwd=source_path(), text=True, capture_output=True, timeout=300)
+    if manager.is_file():
+        finished = subprocess.run(command,
+                                  cwd=source_path(), text=True, capture_output=True, timeout=300)
+    else:
+        finished = subprocess.CompletedProcess(
+            command, 1, "", "Verified upstream manager is not available.")
     fallback = None
     if finished.returncode:
         if not force:
