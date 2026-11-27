@@ -558,6 +558,9 @@ def _component_entries(archive: Path) -> list:
 def _component_target(root: Path, name: str) -> Path:
     dest = root.joinpath(*name.split("/"))
     relative = dest.relative_to(root)
+    if (not name or name.startswith("/") or "\\\\" in name or ":" in name or
+            any(part in ("", ".", "..") for part in name.split("/"))):
+        raise ValueError("Unsafe recorded component path")
     parent = root
     if root.is_symlink():
         raise ValueError("Symlink game folder")
