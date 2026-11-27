@@ -283,16 +283,24 @@ public sealed class Backend
     {
         var bytes = Encoding.UTF8.GetBytes(content);
         if (bytes.Length > 512 * 1024) throw new InvalidOperationException("INI too large");
-        var encoded = Convert.ToBase64String(bytes);
-        var (exit, output) = await RunAsync(new[] {
-            "--save-ini-base64", encoded, "--ini-expected-sha", previousSha, "--exe", exe
-        }, token);
-        if (exit != 0) throw new InvalidOperationException(output);
-        using var document = JsonDocument.Parse(output);
-        var root = document.RootElement;
-        return new IniSaveResult(root.GetProperty("status").GetString() ?? "",
-            root.GetProperty("backup").GetString() ?? "",
-            root.GetProperty("sha256").GetString() ?? "");
+        // Avoid Linux's per-argument size limit for real-world INI files.
+        // Path.GetTempFileName creates an exclusive temporary file; the backend
+        // validates its type and size and this code deletes it on completion.
+        var temp = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllBytesAsync(temp, bytes, token);
+            var (exit, output) = await RunAsync(new[] {
+                "--save-ini-source", temp, "--ini-expected-sha", previousSha, "--exe", exe
+            }, token);
+            if (exit != 0) throw new InvalidOperationException(output);
+            using var document = JsonDocument.Parse(output);
+            var root = document.RootElement;
+            return new IniSaveResult(root.GetProperty("status").GetString() ?? "",
+                root.GetProperty("backup").GetString() ?? "",
+                root.GetProperty("sha256").GetString() ?? "");
+        }
+        finally { File.Delete(temp); }
     }
 
     public async Task<InstallationReport> InstallationAsync(string executable)
