@@ -18,13 +18,17 @@ internal sealed class JoystickNavigation : IDisposable
     private readonly System.Action<Action> _send;
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _reader;
+    private readonly Task _repeater;
     private readonly bool[] _axisEngaged = new bool[8];
+    private readonly Action?[] _heldAxis = new Action?[8];
+    private readonly long[] _heldSince = new long[8];
     private readonly long[] _lastAction = new long[6];
 
     public JoystickNavigation(System.Action<Action> send)
     {
         _send = send;
         _reader = Task.Run(ReadLoopAsync);
+        _repeater = Task.Run(RepeatHeldAsync);
     }
 
     private void Dispatch(Action action)
@@ -58,15 +62,39 @@ internal sealed class JoystickNavigation : IDisposable
         if (Math.Abs((int)value) < 12000)
         {
             _axisEngaged[number] = false;
+            _heldAxis[number] = null;
             return;
         }
         if (Math.Abs((int)value) < 21000 || _axisEngaged[number])
             return;
         _axisEngaged[number] = true;
         var horizontal = number == 0 || number == 6;
-        Dispatch(horizontal
+        var action = horizontal
             ? (value > 0 ? Action.Right : Action.Left)
-            : (value > 0 ? Action.Down : Action.Up));
+            : (value > 0 ? Action.Down : Action.Up);
+        _heldAxis[number] = action;
+        _heldSince[number] = Environment.TickCount64;
+        Dispatch(action);
+    }
+
+    private async Task RepeatHeldAsync()
+    {
+        // Delayed repeat makes long library lists and settings scrollable
+        // without requiring a keyboard. Never repeat Confirm or Back.
+        try
+        {
+            while (!_stop.IsCancellationRequested)
+            {
+                await Task.Delay(85, _stop.Token);
+                var now = Environment.TickCount64;
+                for (var i = 0; i < _heldAxis.Length; i++)
+                {
+                    if (_heldAxis[i] is { } action && now - _heldSince[i] >= 425)
+                        Dispatch(action);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 
     private async Task ReadLoopAsync()
@@ -102,6 +130,7 @@ internal sealed class JoystickNavigation : IDisposable
             catch (IOException) { /* Hot-unplugged or inaccessible device. */ }
             catch (UnauthorizedAccessException) { /* User should not need root. */ }
             Array.Clear(_axisEngaged);
+            Array.Clear(_heldAxis);
             try { await Task.Delay(1500, _stop.Token); }
             catch (OperationCanceledException) { break; }
         }
@@ -110,7 +139,7 @@ internal sealed class JoystickNavigation : IDisposable
     public void Dispose()
     {
         _stop.Cancel();
-        // Don't block the UI thread waiting for an input device.
-        _stop.Dispose();
+        // Never block Avalonia while waiting for an input device to close.
+        _ = Task.WhenAll(_reader, _repeater).ContinueWith(_ => _stop.Dispose());
     }
 }
