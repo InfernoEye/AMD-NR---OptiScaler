@@ -2013,8 +2013,10 @@ public sealed class MainWindow : Window
         danielSection.Children.Add(Text(
             "Official Daniel releases: select one runtime version per game. " +
             "To switch versions, remove the old managed runtime first so backups are restored. " +
-            "Daniel 0.8.0 is a NeuralHub host and requires a separate installer; " +
-            "the legacy pass-DLL installer does not support it.", 12, MutedBrush));
+            "Daniel 0.8.0 requires NeuralHub data and Windows-specific GPU services " +
+            "that are not yet supported by this Linux launcher under Proton. " +
+            "Use Auto Set Up Daniel 0.6.0 for the supported legacy package format; " +
+            "in-game functionality under Proton must still be tested.", 12, MutedBrush));
         var danielPicker = new ComboBox
         {
             PlaceholderText = "Load Daniel runtime versions",
@@ -2023,6 +2025,7 @@ public sealed class MainWindow : Window
         danielSection.Children.Add(danielPicker);
         var danielButtons = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
         var loadDaniel = Button("LOAD DANIEL VERSIONS");
+        var autoDaniel = Button("AUTO SET UP DANIEL 0.6.0", true);
         var previewDaniel = Button("DOWNLOAD & PREVIEW DANIEL");
         var installDaniel = Button("INSTALL DANIEL", true);
         var replaceDaniel = Button("BACK UP & REPLACE DANIEL FILES");
@@ -2030,6 +2033,7 @@ public sealed class MainWindow : Window
         installDaniel.IsEnabled = false;
         replaceDaniel.IsEnabled = false;
         danielButtons.Children.Add(loadDaniel);
+        danielButtons.Children.Add(autoDaniel);
         danielButtons.Children.Add(previewDaniel);
         danielButtons.Children.Add(installDaniel);
         danielButtons.Children.Add(replaceDaniel);
@@ -2236,6 +2240,69 @@ public sealed class MainWindow : Window
             catch (Exception ex) { _status.Text = "Daniel versions unavailable: " + ex.Message; }
             finally { _busy = false; loadDaniel.IsEnabled = true; }
         };
+        // One click for the official legacy Daniel format, with mandatory SHA-256
+        // validation and a no-overwrite rule. Existing differing files require
+        // the explicit backup/replacement action after preview.
+        autoDaniel.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null) return;
+            _busy = true;
+            autoDaniel.IsEnabled = false;
+            installDaniel.IsEnabled = false;
+            replaceDaniel.IsEnabled = false;
+            danielPreviewDetails.Children.Clear();
+            previewedDanielTag = null;
+            previewedDanielAsset = null;
+            danielCanReplace = false;
+            _status.Text = "Checking official Daniel 0.6.0 package and current installation…";
+            try
+            {
+                var installed = await _backend.InstalledComponentsAsync(selected);
+                if (installed.Any(x => IsDanielRuntime(x.Asset)))
+                    throw new InvalidOperationException(
+                        "A Daniel runtime is already installed. Use its Remove Component action " +
+                        "before switching, to restore managed files safely.");
+                var entries = await _backend.ComponentsAsync();
+                var choice = entries.FirstOrDefault(x => x.Asset == "v0.6.0-Runtime.zip");
+                if (choice is null)
+                    throw new InvalidOperationException("Official Daniel 0.6.0 archive is unavailable.");
+                if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                danielPicker.ItemsSource = entries.Where(x => IsDanielRuntime(x.Asset)).ToArray();
+                danielPicker.SelectedItem = choice;
+                var preview = await _backend.PreviewComponentAsync(selected, choice.Tag, choice.Asset);
+                if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                danielPreviewDetails.Children.Add(Text(
+                    "Daniel 0.6.0: " + preview.FileCount + " runtime files · " +
+                    preview.NewFileCount + " new · " + preview.IdenticalCount +
+                    " identical · " + preview.ConflictCount + " conflicting.",
+                    12, MutedBrush));
+                if (preview.Installable)
+                {
+                    await _backend.InstallComponentAsync(selected, choice.Tag, choice.Asset);
+                    _status.Text = "Daniel 0.6.0 files installed and tracked. " +
+                        "Restart the game to test Proton runtime initialization.";
+                    await ReloadManagedComponents();
+                }
+                else if (!preview.SafetyLimitExceeded &&
+                         preview.ConflictCount > 0 &&
+                         preview.ConflictCount == preview.ReplaceableCount)
+                {
+                    previewedDanielTag = choice.Tag;
+                    previewedDanielAsset = choice.Asset;
+                    danielCanReplace = true;
+                    replaceDaniel.IsEnabled = true;
+                    danielPreviewDetails.Children.Add(Text(
+                        "Existing files differ. Review conflicts and choose the explicit " +
+                        "backup-and-replace button; automatic setup did not overwrite anything. " +
+                        string.Join(", ", preview.Conflicts.Take(10)), 12, MutedBrush));
+                    _status.Text = "Daniel verified; conflicting files require backup approval.";
+                }
+                else
+                    _status.Text = "Daniel setup safely blocked: archive limits or unsafe file conflicts.";
+            }
+            catch (Exception ex) { _status.Text = "Automatic Daniel setup refused: " + ex.Message; }
+            finally { _busy = false; autoDaniel.IsEnabled = true; }
+        };
         previewDaniel.Click += async (_, _) =>
         {
             if (_busy || _backend is null || danielPicker.SelectedItem is not ReleaseEntry chosen)
@@ -2255,8 +2322,10 @@ public sealed class MainWindow : Window
                 {
                     danielPreviewDetails.Children.Add(Text(
                         "Daniel 0.8.0 is a NeuralHub host, not a legacy pass-DLL package. " +
-                        "It requires AMDNR-NeuralHub-080 setup and a data index. " +
-                        "Automatic installation is not supported yet; no files were changed.",
+                        "It requires AMDNR-NeuralHub-080 setup, a data index, and " +
+                        "GPU/driver interfaces not provided by the current Proton integration. " +
+                        "Automatic installation is blocked to avoid a false success report. " +
+                        "Use Auto Set Up Daniel 0.6.0 for the legacy runtime format; no files were changed.",
                         12, MutedBrush));
                     _status.Text = "Daniel 0.8.0 requires the NeuralHub-specific installation workflow.";
                 }
