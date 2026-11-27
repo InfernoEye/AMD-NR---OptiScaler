@@ -1,3 +1,18 @@
+# AMDNR native Linux desktop (Avalonia, in development)
+
+**Preferred native GUI:** Avalonia / .NET 8. From the repository root:
+
+```bash
+dotnet run --project linux/avalonia/Amdnr.Linux.Desktop.csproj
+```
+
+Install the **.NET 8 SDK** and **Python 3.10+** first. The Avalonia UI uses the Linux Python installer as its backend. Run from the repository root, or set `AMDNR_LINUX_BACKEND` to an absolute path pointing to `amdnr_linux_launcher.py`.
+
+The Avalonia screen provides a game library, installation/uninstallation with backup restore, Wine DLL override guidance, Doctor preflight checks, and settings. The Python/Tk implementation below remains as a fallback CLI and UI.
+
+**Parity status:** This is the foundation of an independent native implementation, **not yet a 1:1 visual or functional match** for the Windows WPF launcher. Missing pieces include pixel-perfect styling and branded assets, the full Windows release/build picker and automatic downloads, equivalent diagnostic reporting, full store integrations and persistence, and Windows-only features. The original source-available WPF launcher has restrictive reuse terms; this implementation is written independently.
+
+---
 # Native Linux launcher (experimental)
 
 Run the independent Python/Tk launcher from this directory:
