@@ -170,9 +170,17 @@ public sealed class Backend
         }
         var native = root.GetProperty("native").EnumerateArray()
             .Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToArray();
+        var steam = root.TryGetProperty("steam_launch", out var launch)
+            && launch.ValueKind == JsonValueKind.Object ? launch : default;
+        var preferred = steam.ValueKind == JsonValueKind.Object &&
+            steam.TryGetProperty("selected", out var target) &&
+            target.ValueKind == JsonValueKind.String ? target.GetString() : null;
+        var steamReason = steam.ValueKind == JsonValueKind.Object &&
+            steam.TryGetProperty("reason", out var cause) &&
+            cause.ValueKind == JsonValueKind.String ? cause.GetString() : null;
         return new ExecutableScan(results, native,
             root.GetProperty("reason").GetString() ?? "unknown",
-            root.GetProperty("partial").GetBoolean());
+            root.GetProperty("partial").GetBoolean(), preferred, steamReason);
     }
 
     public async Task<IReadOnlyList<ExecutableEntry>> ExecutablesAsync(
@@ -207,7 +215,8 @@ public sealed record InstallationReport(bool Installed, string Status, string? A
 
 
 public sealed record ExecutableScan(IReadOnlyList<ExecutableEntry> Candidates,
-    IReadOnlyList<string> NativeFiles, string Reason, bool Partial);
+    IReadOnlyList<string> NativeFiles, string Reason, bool Partial,
+    string? SteamPreferred, string? SteamReason);
 
 public sealed record ExecutableEntry(string Path, bool Recommended, bool Suspicious, bool AutoSelect)
 {
