@@ -114,7 +114,7 @@ class LauncherTests(unittest.TestCase):
             result = launcher.install_component(self.exe, tag, asset)
             self.assertEqual(result["files"], 2)
             self.assertEqual(len(launcher.installed_components(self.exe)), 1)
-            with self.assertRaisesRegex(ValueError, "overwrite"):
+            with self.assertRaisesRegex(ValueError, "already managed"):
                 launcher.install_component(self.exe, tag, asset)
             target = self.game / "components" / "MochizukiNrRuntime.dll"
             target.write_bytes(b"modified externally")
@@ -127,7 +127,7 @@ class LauncherTests(unittest.TestCase):
             self.assertFalse((self.game / "components" / "LICENSE.txt").exists())
             self.assertEqual(launcher.installed_components(self.exe), [])
 
-    def test_large_file_count_archive_is_inspectable_but_not_installable(self):
+    def test_large_file_count_archive_is_installable_within_limit(self):
         tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
         archive = self.root / asset
         with zipfile.ZipFile(archive, "w") as stream:
@@ -137,12 +137,62 @@ class LauncherTests(unittest.TestCase):
             preview = launcher.component_preview(self.exe, tag, asset)
         self.assertEqual(preview["file_count"], 520)
         self.assertEqual(len(preview["files"]), 50)
-        self.assertTrue(preview["too_many_files"])
-        self.assertTrue(preview["safety_limit_exceeded"])
-        self.assertFalse(preview["installable"])
+        self.assertFalse(preview["too_many_files"])
+        self.assertFalse(preview["safety_limit_exceeded"])
+        self.assertTrue(preview["installable"])
+
+    def test_component_preview_preserves_identical_and_blocks_different_files(self):
+        tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
+        cache = self.root / tag
+        cache.mkdir()
+        archive = cache / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("plugins/existing.txt", b"match")
+            stream.writestr("plugins/new.bin", b"new data")
+        (self.game / "plugins").mkdir()
+        existing = self.game / "plugins/existing.txt"
+        existing.write_bytes(b"match")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertTrue(preview["installable"])
+            self.assertEqual(preview["identical_count"], 1)
+            self.assertEqual(preview["new_file_count"], 1)
+            self.assertEqual(preview["conflict_count"], 0)
+            launcher.install_component(self.exe, tag, asset)
+            self.assertEqual(existing.read_bytes(), b"match")
+            owned = launcher._component_records(self.exe)[asset]["files"]
+            self.assertEqual(set(owned), {"plugins/new.bin"})
+            launcher.remove_component(self.exe, asset)
+            self.assertTrue(existing.exists())
+            self.assertFalse((self.game / "plugins/new.bin").exists())
+
+    def test_component_differs_from_existing_and_must_not_overwrite(self):
+        tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
+        archive = self.root / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("present.dll", b"replacement")
+        target = self.game / "present.dll"
+        target.write_bytes(b"original")
         with patch.object(launcher, "download_release", return_value=archive):
-            with self.assertRaisesRegex(ValueError, "inspection only"):
-                launcher.install_component(self.exe, tag, asset)
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertFalse(preview["installable"])
+            self.assertEqual(preview["conflict_count"], 1)
+            self.assertEqual(preview["identical_count"], 0)
+        self.assertEqual(target.read_bytes(), b"original")
+
+    def test_realistic_mochi_file_count_does_not_trigger_safety_block(self):
+        tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
+        archive = self.root / asset
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as stream:
+            for i in range(2325):
+                stream.writestr(f"dlssnr-amd/aco/records/shader_{i:04d}.nrp", b"x")
+        with patch.object(launcher, "download_release", return_value=archive):
+            preview = launcher.component_preview(self.exe, tag, asset)
+        self.assertEqual(preview["file_count"], 2325)
+        self.assertFalse(preview["safety_limit_exceeded"])
+        self.assertTrue(preview["installable"])
 
     def test_large_valid_component_archive_can_be_previewed(self):
         # ZIP metadata of a >1 GiB component: avoid allocating a giant test file.
