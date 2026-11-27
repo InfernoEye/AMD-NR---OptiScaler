@@ -1908,7 +1908,41 @@ public sealed class MainWindow : Window
             finally { _busy = false; checkRuntimes.IsEnabled = true; }
         };
         official.Children.Add(checkRuntimes);
+        var prepareMochi = Button("PREPARE MOCHI MODEL (LOCAL NVIDIA DLL)");
+        official.Children.Add(Text(
+            "Mochi 0.0.9 needs a locally prepared model. Select your own " +
+            "nvngx_dlssnr.dll 310.9.16 or 310.8.0 (or a ZIP containing it). " +
+            "The Linux extractor verifies source and model weights; NVIDIA files are never downloaded by this action.",
+            12, MutedBrush));
+        official.Children.Add(prepareMochi);
         official.Children.Add(runtimeReport);
+        prepareMochi.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null) return;
+            var input = await PickFileAsync(
+                "Select your own NVIDIA nvngx_dlssnr.dll or ZIP (310.9.16 / 310.8.0)",
+                new FilePickerFileType("NVIDIA DLSS-NR input")
+                { Patterns = new[] { "nvngx_dlssnr.dll", "*.zip" } });
+            if (string.IsNullOrWhiteSpace(input)) return;
+            _busy = true;
+            prepareMochi.IsEnabled = false;
+            _status.Text = "Verifying input and locally preparing Mochi Model A/B…";
+            try
+            {
+                var report = await _backend.PrepareMochiModelAsync(selected, input);
+                if (_exe != selected || _breadcrumb.Text != "AMDNR  /  Extensions") return;
+                runtimeReport.Children.Clear();
+                runtimeReport.Children.Add(Text(report, 12, ForegroundBrush));
+                runtimeReport.Children.Add(Text(
+                    await _backend.RuntimeDiagnosticsAsync(selected), 12, MutedBrush));
+                _status.Text = "Mochi models prepared. Restart the game to test runtime availability.";
+            }
+            catch (Exception ex)
+            {
+                _status.Text = "Mochi model preparation refused: " + ex.Message;
+            }
+            finally { _busy = false; prepareMochi.IsEnabled = true; }
+        };
         var componentPicker = new ComboBox
         {
             PlaceholderText = "Load official AMDNR components",
