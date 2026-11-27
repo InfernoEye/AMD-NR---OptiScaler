@@ -344,6 +344,137 @@ def artwork_diagnostics(download_artwork: bool = False) -> dict[str, object]:
             "missing": missing}
 
 
+# Release downloads are restricted to this project's upstream GitHub repository.
+# Individual game metadata is never hardcoded.
+RELEASE_REPO = "3zwr1/AMD-NR---OptiScaler"
+RELEASE_API = f"https://api.github.com/repos/{RELEASE_REPO}/releases"
+
+
+def _github_json(url: str) -> object:
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "AMDNR-Avalonia-Linux/1.0",
+                      "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(request, timeout=12) as response:
+        payload = response.read(2 * 1024 * 1024 + 1)
+    if len(payload) > 2 * 1024 * 1024:
+        raise ValueError("GitHub release metadata is too large")
+    return json.loads(payload)
+
+
+def release_catalog(limit: int = 12) -> list[dict[str, object]]:
+    """Return only upstream AMDNR full-package ZIP assets from GitHub releases."""
+    if not 1 <= limit <= 30:
+        raise ValueError("Invalid catalog limit")
+    records = _github_json(f"{RELEASE_API}?per_page={limit}")
+    if not isinstance(records, list):
+        raise ValueError("Unexpected GitHub release response")
+    found: list[dict[str, object]] = []
+    for record in records:
+        if not isinstance(record, dict) or record.get("draft"):
+            continue
+        tag = record.get("tag_name")
+        assets = record.get("assets", [])
+        if not isinstance(tag, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", tag):
+            continue
+        if not isinstance(assets, list):
+            continue
+        checksums = [a for a in assets if isinstance(a, dict)
+                     and a.get("name") == "SHA256SUMS.txt"]
+        archives = [a for a in assets if isinstance(a, dict)
+                    and re.fullmatch(r"AMDNR-v[A-Za-z0-9._-]+\.zip", str(a.get("name", "")))]
+        if not checksums:
+            continue
+        for archive in archives:
+            size = archive.get("size")
+            if not isinstance(size, int) or not 0 < size <= 1024 * 1024 * 1024:
+                continue
+            found.append({
+                "tag": tag, "name": record.get("name") or tag,
+                "asset": archive["name"], "bytes": size,
+                "prerelease": bool(record.get("prerelease", False)),
+            })
+    return found
+
+
+def _release_asset(tag: str, asset_name: str) -> tuple[str, str, int]:
+    """Resolve a selected release again; never trust a caller-supplied download URL."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", tag):
+        raise ValueError("Invalid release tag")
+    if not re.fullmatch(r"AMDNR-v[A-Za-z0-9._-]+\.zip", asset_name):
+        raise ValueError("Only AMDNR release ZIP packages can be downloaded")
+    record = _github_json(f"{RELEASE_API}/tags/{tag}")
+    if not isinstance(record, dict) or record.get("draft"):
+        raise ValueError("Release not found")
+    assets = record.get("assets", [])
+    if not isinstance(assets, list):
+        raise ValueError("Invalid release assets")
+    archive = next((a for a in assets if isinstance(a, dict)
+                    and a.get("name") == asset_name), None)
+    checksum = next((a for a in assets if isinstance(a, dict)
+                     and a.get("name") == "SHA256SUMS.txt"), None)
+    if not archive or not checksum:
+        raise ValueError("Release archive or SHA256SUMS.txt is missing")
+    size = archive.get("size")
+    if not isinstance(size, int) or not 0 < size <= 1024 * 1024 * 1024:
+        raise ValueError("Release archive size is unsupported")
+    root = f"https://github.com/{RELEASE_REPO}/releases/download/{tag}/"
+    # Construct release URLs instead of accepting arbitrary URLs from API JSON.
+    from urllib.parse import quote
+    return root + quote(asset_name), root + "SHA256SUMS.txt", size
+
+
+def _release_cache_dir() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "amdnr" / "releases"
+
+
+def download_release(tag: str, asset_name: str) -> Path:
+    """Download a checksum-verified AMDNR ZIP to the user's cache, never to a game."""
+    archive_url, sums_url, size = _release_asset(tag, asset_name)
+    request = urllib.request.Request(sums_url, headers={"User-Agent": "AMDNR-Avalonia-Linux/1.0"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        sums = response.read(256 * 1024 + 1)
+    if len(sums) > 256 * 1024:
+        raise ValueError("Checksum manifest too large")
+    expected = None
+    for line in sums.decode("utf-8-sig").splitlines():
+        # Standard 'sha256  filename' format. Reject unsafe/ambiguous names.
+        match = re.fullmatch(r"([0-9a-fA-F]{64})\s+\*?(.+)", line.strip())
+        if match and match.group(2).strip() == asset_name:
+            expected = match.group(1).lower()
+            break
+    if expected is None:
+        raise ValueError("SHA256SUMS.txt does not contain the selected ZIP")
+
+    cache = _release_cache_dir() / tag
+    destination = cache / asset_name
+    if destination.exists() and destination.is_file() and _digest(destination) == expected:
+        return destination
+    cache.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=cache, prefix=".download-", delete=False) as out:
+        temporary = Path(out.name)
+    try:
+        hasher = hashlib.sha256()
+        total = 0
+        request = urllib.request.Request(archive_url, headers={"User-Agent": "AMDNR-Avalonia-Linux/1.0"})
+        with urllib.request.urlopen(request, timeout=40) as response, temporary.open("wb") as stream:
+            for chunk in iter(lambda: response.read(1024 * 1024), b""):
+                total += len(chunk)
+                if total > size or total > 1024 * 1024 * 1024:
+                    raise ValueError("Release download exceeded the published size")
+                hasher.update(chunk)
+                stream.write(chunk)
+        if total != size:
+            raise ValueError("Release download incomplete")
+        if hasher.hexdigest() != expected:
+            raise ValueError("Downloaded ZIP failed SHA-256 verification")
+        if not zipfile.is_zipfile(temporary):
+            raise ValueError("Downloaded release is not a ZIP archive")
+        os.replace(temporary, destination)
+        return destination
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def guess_executable(directory: Path) -> Path | None:
     options: list[Path] = []
     try:
@@ -609,6 +740,9 @@ def gui() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="List detected Steam games")
+    parser.add_argument("--releases-json", action="store_true", help="Show upstream AMDNR release packages as JSON")
+    parser.add_argument("--download-release", metavar="TAG", help="Download and verify selected AMDNR release")
+    parser.add_argument("--release-asset", metavar="ZIP", help="Archive filename for --download-release")
     parser.add_argument("--list-json", action="store_true", help="List games and cached artwork as JSON")
     parser.add_argument("--artwork-report", action="store_true", help="JSON summary of games with missing artwork")
     parser.add_argument("--download-artwork", action="store_true", help="Fetch missing cover art from Steam CDN")
@@ -619,7 +753,18 @@ def main() -> int:
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
     args = parser.parse_args()
-    if args.set_artwork:
+    if args.releases_json or args.download_release:
+        try:
+            if args.releases_json:
+                print(json.dumps(release_catalog(), ensure_ascii=False))
+            else:
+                if not args.release_asset:
+                    parser.error("--download-release requires --release-asset")
+                print(download_release(args.download_release, args.release_asset))
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.set_artwork:
         if not args.game_folder:
             parser.error("--set-artwork requires --game-folder")
         try:
