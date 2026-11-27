@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import amdnr_launcher as core
@@ -140,6 +141,83 @@ class MaintenanceTests(unittest.TestCase):
             maintenance.restore_transaction(self.exe)
         self.assertEqual((root / "dxgi.dll").read_bytes(),
                          b"unrecognized third-party change")
+
+
+    def test_write_failure_rolls_back_all_files_and_record(self):
+        old_record = (self.game / ".amdnr-linux-install.json").read_bytes()
+        new_zip = self.root / "replacement.zip"
+        self.write_zip(new_zip, b"proxy replacement", b"cfg replacement")
+        original_writer = maintenance._write_binary_atomic
+        attempts = 0
+
+        def fail_second_write(source, target):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                raise OSError("injected disk write error")
+            return original_writer(source, target)
+
+        with mock.patch.object(maintenance, "_write_binary_atomic",
+                               side_effect=fail_second_write):
+            with self.assertRaisesRegex(OSError, "injected disk write error"):
+                maintenance.repair_or_update(self.exe, new_zip, update=True)
+        self.assertEqual((self.game / "dxgi.dll").read_bytes(), b"proxy first")
+        self.assertEqual((self.game / "OptiScaler.ini").read_bytes(), b"cfg first")
+        self.assertEqual((self.game / ".amdnr-linux-install.json").read_bytes(), old_record)
+        self.assertFalse(maintenance.status(self.exe)["interrupted"])
+        self.assertFalse((self.game / ".amdnr-maintenance-staging").exists())
+
+    def test_corrupt_second_recovery_entry_never_changes_first_file(self):
+        snapshot = self.game / "AMDNR_backup" / maintenance.TRANSACTION_DIR
+        snapshot.mkdir(parents=True)
+        state = self.game / ".amdnr-linux-install.json"
+        (snapshot / "original-install.json").write_bytes(state.read_bytes())
+        proxy = self.game / "dxgi.dll"
+        (snapshot / "dxgi.dll").write_bytes(proxy.read_bytes())
+        proxy.write_bytes(b"temporary installed version")
+        maintenance.write_json_atomic(self.game / maintenance.JOURNAL_NAME, {
+            "format": 1,
+            "state_sha256": maintenance.digest(state),
+            "new_state_sha256": maintenance.digest(state),
+            "touched": [
+                {"path": "dxgi.dll",
+                 "previous_sha256": maintenance.digest(snapshot / "dxgi.dll"),
+                 "expected_sha256": __import__("hashlib").sha256(
+                     b"temporary installed version").hexdigest()},
+                {"path": "../outside.dll", "previous_sha256": None,
+                 "expected_sha256": None},
+            ]
+        })
+        with self.assertRaisesRegex(ValueError, "Unsafe path"):
+            maintenance.restore_transaction(self.exe)
+        self.assertEqual(proxy.read_bytes(), b"temporary installed version")
+        self.assertTrue(maintenance.status(self.exe)["interrupted"])
+
+    def test_bad_record_checksum_keeps_recovery_journal(self):
+        snapshot = self.game / "AMDNR_backup" / maintenance.TRANSACTION_DIR
+        snapshot.mkdir(parents=True)
+        state = self.game / ".amdnr-linux-install.json"
+        (snapshot / "original-install.json").write_bytes(state.read_bytes())
+        maintenance.write_json_atomic(self.game / maintenance.JOURNAL_NAME, {
+            "format": 1, "state_sha256": "z" * 64,
+            "new_state_sha256": "0" * 64, "touched": []
+        })
+        with self.assertRaisesRegex(ValueError, "snapshot changed"):
+            maintenance.restore_transaction(self.exe)
+        self.assertTrue(maintenance.status(self.exe)["interrupted"])
+
+    def test_missing_original_backup_does_not_change_live_game(self):
+        old_record = (self.game / ".amdnr-linux-install.json").read_bytes()
+        state = json.loads(old_record)
+        state["files"][0]["backed_up"] = True
+        maintenance.write_json_atomic(self.game / ".amdnr-linux-install.json", state)
+        update = self.root / "replacement.zip"
+        self.write_zip(update, b"new proxy", b"new configuration")
+        with self.assertRaisesRegex(ValueError, "Original backup missing"):
+            maintenance.repair_or_update(self.exe, update, update=True)
+        self.assertEqual((self.game / "dxgi.dll").read_bytes(), b"proxy first")
+        self.assertEqual((self.game / "OptiScaler.ini").read_bytes(), b"cfg first")
+        self.assertFalse(maintenance.status(self.exe)["interrupted"])
 
 
 if __name__ == "__main__":
