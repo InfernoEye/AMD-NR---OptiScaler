@@ -63,7 +63,7 @@ def host_library_status() -> dict:
     distribution = distro.get("ID", "unknown").lower()
     version = distro.get("VERSION_ID", "")
     if distribution in ("ubuntu", "debian", "linuxmint", "pop"):
-        package_elf = "libelf1" if (distribution == "ubuntu" and version.startswith("22.")) else "libelf1t64"
+        package_elf = "libelf1" if (distribution == "ubuntu" and version.startswith("22.")) or (distribution == "debian" and version.startswith(("11", "12"))) else "libelf1t64"
         command = f"sudo apt install {package_elf} libnuma1"
     elif distribution in ("arch", "endeavouros", "manjaro", "cachyos"):
         command = "sudo pacman -S --needed elfutils numactl"
