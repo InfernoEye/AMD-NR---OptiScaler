@@ -2550,7 +2550,29 @@ public sealed class MainWindow : Window
         _content.Children.Add(Text("Doctor", 30, ForegroundBrush, FontWeight.Bold));
         _content.Children.Add(Text("Environment and installation checks for Steam/Proton.",
             14, MutedBrush));
+        var columns = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,*"),
+            RowDefinitions = new RowDefinitions("Auto,Auto"),
+            ColumnSpacing = 16,
+            RowSpacing = 14,
+        };
+        var left = new StackPanel { Spacing = 14 };
+        var right = new StackPanel { Spacing = 14 };
+        columns.Children.Add(left);
+        Grid.SetColumn(right, 1);
+        columns.Children.Add(right);
+        columns.SizeChanged += (_, e) =>
+        {
+            var compact = e.NewSize.Width < 790;
+            columns.ColumnDefinitions[1].Width = compact ? new GridLength(0)
+                : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(right, compact ? 0 : 1);
+            Grid.SetRow(right, compact ? 1 : 0);
+        };
+        _content.Children.Add(columns);
         var checks = new StackPanel { Spacing = 14 };
+        checks.Children.Add(Text("SYSTEM READINESS", 12, AccentBrush, FontWeight.Bold));
         var lines = new List<(string Name, bool Okay, bool Pending)>
         {
             ("Linux desktop", OperatingSystem.IsLinux(), false),
@@ -2571,7 +2593,7 @@ public sealed class MainWindow : Window
             row.Children.Add(info);
             checks.Children.Add(row);
         }
-        _content.Children.Add(Panel(checks));
+        left.Children.Add(Panel(checks));
 
         var runChecks = Button("RUN INSTALLATION DIAGNOSTICS", true);
         var results = new StackPanel { Spacing = 12 };
@@ -2618,15 +2640,26 @@ public sealed class MainWindow : Window
             catch (Exception ex) { _status.Text = "Doctor failed: " + ex.Message; }
             finally { _busy = false; runChecks.IsEnabled = true; }
         };
-        _content.Children.Add(runChecks);
-        _content.Children.Add(Panel(results));
+        var diagnosticCard = new StackPanel { Spacing = 12 };
+        diagnosticCard.Children.Add(Text("INSTALLATION DIAGNOSTICS",
+            12, AccentBrush, FontWeight.Bold));
+        diagnosticCard.Children.Add(Text("Read-only verification of the selected game and AMDNR files.",
+            12, MutedBrush));
+        diagnosticCard.Children.Add(runChecks);
+        diagnosticCard.Children.Add(results);
+        right.Children.Add(Panel(diagnosticCard));
         var diagnosticActions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
         var bundle = Button("COLLECT REDACTED SUPPORT REPORT");
 
         var diagnosticDetails = new StackPanel { Spacing = 6 };
         diagnosticActions.Children.Add(bundle);
-        _content.Children.Add(diagnosticActions);
-        _content.Children.Add(Panel(diagnosticDetails));
+        var supportCard = new StackPanel { Spacing = 11 };
+        supportCard.Children.Add(Text("SUPPORT / LOGS", 12, AccentBrush, FontWeight.Bold));
+        supportCard.Children.Add(Text("Support reports are saved locally. Nothing is uploaded.",
+            12, MutedBrush));
+        supportCard.Children.Add(diagnosticActions);
+        supportCard.Children.Add(diagnosticDetails);
+        left.Children.Add(Panel(supportCard));
         bundle.Click += async (_, _) =>
         {
             if (_busy || _backend is null || string.IsNullOrWhiteSpace(_exe) || !File.Exists(_exe))
