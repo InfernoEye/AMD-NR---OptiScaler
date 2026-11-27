@@ -268,6 +268,68 @@ class BridgeTests(unittest.TestCase):
         self.assertIn(digest, bridge.REVIEWED_LIBELF_PIN)
         self.assertEqual(suffix, "e/elfutils")
 
+    def test_current_amdnr_pin_updates_exact_private_upstream_source(self):
+        src = self.root / "source"
+        manager = src / "linux/manage.py"
+        setup = src / "linux/setup.py"
+        manager.parent.mkdir(parents=True)
+        manager.write_text(
+            "RELEASES = {\\n" + bridge.UPSTREAM_HOST_ENTRY +
+            "\\n}\\n" + bridge.UPSTREAM_LMXXF_ENTRY + "\\n}\\n"
+        )
+        setup.write_text(bridge.UPSTREAM_DEFAULT_HOST + "\\n")
+        self.assertTrue(bridge.apply_current_amdnr_pin(src))
+        modified_manager = manager.read_text()
+        modified_setup = setup.read_text()
+        self.assertIn(bridge.UPSTREAM_HOST_ENTRY, modified_manager)
+        self.assertIn(bridge.UPDATED_HOST_ENTRY, modified_manager)
+        self.assertIn(bridge.UPDATED_LMXXF_ENTRY, modified_manager)
+        self.assertIn(bridge.UPDATED_DEFAULT_HOST, modified_setup)
+        self.assertNotIn(bridge.UPSTREAM_DEFAULT_HOST, modified_setup)
+        self.assertFalse(bridge.apply_current_amdnr_pin(src))
+        self.assertEqual(manager.read_text(), modified_manager)
+        self.assertEqual(setup.read_text(), modified_setup)
+
+    def test_current_amdnr_pin_rejects_unexpected_layout(self):
+        src = self.root / "source"
+        manager = src / "linux/manage.py"
+        setup = src / "linux/setup.py"
+        manager.parent.mkdir(parents=True)
+        manager.write_text("RELEASES = {}\\n")
+        setup.write_text(bridge.UPSTREAM_DEFAULT_HOST + "\\n")
+        with self.assertRaisesRegex(ValueError, "Unexpected upstream"):
+            bridge.apply_current_amdnr_pin(src)
+        self.assertEqual(manager.read_text(), "RELEASES = {}\\n")
+        self.assertEqual(setup.read_text(), bridge.UPSTREAM_DEFAULT_HOST + "\\n")
+
+    def test_current_amdnr_prepared_package_must_match_source_receipt(self):
+        package = bridge.prepared_path()
+        (package / "amdnr-linux").mkdir(parents=True)
+        (package / "amdnr-linux/run.sh").write_text("run")
+        (package / "d3d12.dll").write_bytes(b"stub")
+        marker = package / "amdnr-linux/SOURCE.txt"
+        marker.write_text(
+            f"Host/runtime: AMDNR {bridge.HOST_VERSION}, upstream\\n"
+            f"Archive SHA-256: {bridge.HOST_SHA256}\\n"
+            f"lmxxf archive: upstream, SHA-256 {bridge.LMXXF_SHA256}\\n"
+        )
+        components = package / "amdnr-linux/components.json"
+        components.write_text(json.dumps({"neural_runtime": "lmxxf"}))
+        self.assertTrue(bridge.package_is_ready(package))
+        components.write_text(json.dumps({"neural_runtime": "daniel"}))
+        self.assertFalse(bridge.package_is_ready(package))
+        components.write_text(json.dumps({"neural_runtime": "lmxxf"}))
+        marker.write_text("legacy build")
+        self.assertFalse(bridge.package_is_ready(package))
+
+    def test_current_amdnr_host_pin_is_separate_from_bridge_version(self):
+        self.assertEqual(bridge.VERSION, "0.3.7")
+        self.assertEqual(bridge.HOST_VERSION, "0.3.5.8.28")
+        self.assertEqual(bridge.LMXXF_VERSION, "0.4.6.2")
+        self.assertEqual(len(bridge.HOST_SHA256), 64)
+        self.assertEqual(len(bridge.LMXXF_SHA256), 64)
+        self.assertNotEqual(bridge.prepared_path(), bridge.cache_dir() / "package")
+
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
         self.assertEqual(bridge.VERSION, "0.3.7")
