@@ -161,6 +161,7 @@ public sealed class MainWindow : Window
         AddNav(stack, "Installed", ShowInstalledGames);
         AddNav(stack, "Install", ShowInstall);
         AddNav(stack, "Doctor", ShowDoctor);
+        AddNav(stack, "Compatibility", ShowCompatibility);
         AddNav(stack, "Settings", ShowSettings);
         stack.Children.Add(new Border { Height = 30 });
         stack.Children.Add(Text("LINUX / PROTON", 11, MutedBrush, FontWeight.Bold));
@@ -1987,6 +1988,166 @@ public sealed class MainWindow : Window
         _content.Children.Add(Text("These are launcher-environment checks, not a verification of " +
             "GPU compatibility, rendering quality, or the Windows DLL runtime under Proton.",
             13, MutedBrush));
+    }
+
+    private async void ShowCompatibility()
+    {
+        Clear("Compatibility");
+        _content.Children.Add(Text("Linux / Proton compatibility", 30, ForegroundBrush, FontWeight.Bold));
+        _content.Children.Add(Text(
+            "Inspect GPU, Proton tools, active game processes and possible anti-cheat. " +
+            "Nothing here changes Steam or installs GPU drivers.", 13, MutedBrush));
+        var exe = _exe;
+        var folder = _selectedGame?.Folder ?? _selectedFolder;
+        if (string.IsNullOrWhiteSpace(folder) && !string.IsNullOrWhiteSpace(exe))
+            folder = Path.GetDirectoryName(exe);
+        if (_backend is null || string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+        {
+            _content.Children.Add(Text(
+                "Select a game in Library first. A remembered Windows executable enables full diagnostics.",
+                14, MutedBrush));
+            return;
+        }
+        var gameFolder = folder;
+        var panel = new StackPanel { Spacing = 12 };
+        var scan = Button("RUN COMPATIBILITY CHECK", true);
+        var scanOutput = Text("No compatibility checks run yet.", 12, MutedBrush);
+        panel.Children.Add(scan);
+        panel.Children.Add(scanOutput);
+        _content.Children.Add(Panel(panel));
+        scan.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null || string.IsNullOrWhiteSpace(exe) || !File.Exists(exe))
+            {
+                _status.Text = "Select a Windows game executable to check compatibility.";
+                return;
+            }
+            _busy = true;
+            scan.IsEnabled = false;
+            try
+            {
+                var (exit, result) = await _backend.RunAsync(new[]
+                { "--compatibility-json", "--exe", exe });
+                if (exit != 0) throw new InvalidOperationException(result);
+                using var doc = JsonDocument.Parse(result);
+                var root = doc.RootElement;
+                var gpu = root.GetProperty("gpu").EnumerateArray().Select(e =>
+                    e.GetProperty("vendor").GetString() + " (" + e.GetProperty("pci_id").GetString() +
+                    "; driver " + e.GetProperty("driver").GetString() + ")").ToArray();
+                var proton = root.GetProperty("proton_tools").EnumerateArray().Select(e =>
+                    e.GetProperty("name").GetString()).ToArray();
+                var antiCheat = root.GetProperty("anti_cheat");
+                var process = root.GetProperty("game_process");
+                var warnings = root.GetProperty("blockers").EnumerateArray().Select(e => e.GetString()).ToArray();
+                scanOutput.Text =
+                    "GPU: " + (gpu.Length == 0 ? "Not detected" : string.Join(", ", gpu)) +
+                    "\nProton tools: " + (proton.Length == 0 ? "Not detected" : string.Join(", ", proton)) +
+                    "\nGame running (heuristic): " +
+                        (process.GetProperty("running").ValueKind == JsonValueKind.Null ? "Unknown" :
+                            process.GetProperty("running").GetBoolean() ? "Possibly" : "Not detected") +
+                    "\nAnti-cheat files: " + (antiCheat.GetProperty("potential_anti_cheat").GetBoolean()
+                        ? string.Join(", ", antiCheat.GetProperty("filenames").EnumerateArray()
+                            .Select(e => e.GetString())) : "No known filenames detected") +
+                    "\nRuntime confidence: " + root.GetProperty("verdict").GetString() +
+                    "\nNeuralHub: " + root.GetProperty("daniel_080").GetString() +
+                    (warnings.Length == 0 ? "" : "\nWarnings: " + string.Join(" | ", warnings));
+                _status.Text = "Compatibility checks completed. In-game rendering still requires testing.";
+            }
+            catch (Exception ex) { _status.Text = "Compatibility scan failed: " + ex.Message; }
+            finally { _busy = false; scan.IsEnabled = true; }
+        };
+
+        var profile = new StackPanel { Spacing = 11 };
+        profile.Children.Add(Text("PER-GAME PROTON PROFILE", 12, AccentBrush, FontWeight.Bold));
+        profile.Children.Add(Text(
+            "These preferences are saved only in the launcher. Steam compatibility-tool selection " +
+            "must be applied in Steam itself; launch options remain copy-only.",
+            12, MutedBrush));
+        var gameMode = new CheckBox { Content = "Use GameMode (gamemoderun)", Foreground = ForegroundBrush };
+        var mangoHud = new CheckBox { Content = "Use MangoHud", Foreground = ForegroundBrush };
+        profile.Children.Add(gameMode);
+        profile.Children.Add(mangoHud);
+        profile.Children.Add(Text("PREFERRED PROTON (informational)", 11, MutedBrush));
+        var protonField = new TextBox { Text = "Steam default",
+            Background = BackgroundBrush, Foreground = ForegroundBrush };
+        profile.Children.Add(protonField);
+        profile.Children.Add(Text("TESTED RUNTIME", 11, MutedBrush));
+        var runtime = new TextBox { Watermark = "e.g. mochizuki",
+            Background = BackgroundBrush, Foreground = ForegroundBrush };
+        profile.Children.Add(runtime);
+        var statuses = new[] { "unverified", "files_present", "detected_in_game",
+            "rendering_confirmed", "failed" };
+        var tested = new ComboBox { ItemsSource = statuses, SelectedItem = "unverified",
+            Width = 260, HorizontalAlignment = HorizontalAlignment.Left };
+        profile.Children.Add(tested);
+        var profileButtons = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+        var save = Button("SAVE GAME PROFILE");
+        var preview = Button("COPY SAFE STEAM PREVIEW");
+        profileButtons.Children.Add(save);
+        profileButtons.Children.Add(preview);
+        profile.Children.Add(profileButtons);
+        _content.Children.Add(Panel(profile));
+        try
+        {
+            var (exit, result) = await _backend.RunAsync(new[]
+                { "--proton-profile-json", gameFolder });
+            if (_currentSection != "Compatibility" || exit != 0) return;
+            using var doc = JsonDocument.Parse(result);
+            var settings = doc.RootElement;
+            gameMode.IsChecked = settings.GetProperty("gamemode").GetBoolean();
+            mangoHud.IsChecked = settings.GetProperty("mangohud").GetBoolean();
+            protonField.Text = settings.GetProperty("selected_proton").GetString();
+            runtime.Text = settings.GetProperty("tested_runtime").ValueKind == JsonValueKind.Null
+                ? "" : settings.GetProperty("tested_runtime").GetString();
+            tested.SelectedItem = settings.GetProperty("tested_result").GetString();
+        }
+        catch (Exception ex) { _status.Text = "Could not read Proton profile: " + ex.Message; }
+        save.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null) return;
+            _busy = true;
+            save.IsEnabled = false;
+            try
+            {
+                var payload = JsonSerializer.Serialize(new {
+                    gamemode = gameMode.IsChecked == true,
+                    mangohud = mangoHud.IsChecked == true,
+                    selected_proton = protonField.Text ?? "Steam default",
+                    tested_runtime = string.IsNullOrWhiteSpace(runtime.Text) ? null : runtime.Text,
+                    tested_result = tested.SelectedItem?.ToString() ?? "unverified",
+                });
+                var (exit, result) = await _backend.RunAsync(new[]
+                    { "--save-proton-profile", gameFolder, "--profile-json", payload });
+                if (exit != 0) throw new InvalidOperationException(result);
+                _status.Text = "Per-game Proton preferences saved; Steam settings unchanged.";
+            }
+            catch (Exception ex) { _status.Text = "Proton preferences rejected: " + ex.Message; }
+            finally { _busy = false; save.IsEnabled = true; }
+        };
+        preview.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null) return;
+            _busy = true;
+            preview.IsEnabled = false;
+            try
+            {
+                var alias = !string.IsNullOrWhiteSpace(exe)
+                    ? RecordedAlias(exe) ?? _alias : _alias;
+                var (exit, output) = await _backend.RunAsync(new[]
+                    { "--proton-options-json", gameFolder, "--alias", alias });
+                if (exit != 0) throw new InvalidOperationException(output);
+                using var doc = JsonDocument.Parse(output);
+                var data = doc.RootElement;
+                if (data.GetProperty("status").GetString() != "ok")
+                    throw new InvalidOperationException(data.GetProperty("reason").GetString() ??
+                        "Existing Steam launch options need manual review.");
+                var value = data.GetProperty("launch_options").GetString();
+                if (value is null) throw new InvalidOperationException("No safe launch preview.");
+                await CopyToClipboardAsync(value, "Steam launch preview copied; apply it manually in Steam.");
+            }
+            catch (Exception ex) { _status.Text = "Steam preview unavailable: " + ex.Message; }
+            finally { _busy = false; preview.IsEnabled = true; }
+        };
     }
 
     private async Task LoadLauncherSettingsAsync()
