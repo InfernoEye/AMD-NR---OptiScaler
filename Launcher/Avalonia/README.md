@@ -53,11 +53,36 @@ A five-step skippable Linux-specific introduction appears on first run; it can
 be replayed from Settings. Introduction and view preferences are user-local
 under the XDG configuration directory, separate from game files.
 
-The screenshot-guided redesign is **not complete**. Remaining work includes
-real Linux desktop screenshot comparisons, localization, touch/hover polish,
-responsive testing at Steam Deck resolution, and hardware validation of
-controller navigation. Unsupported Windows-only Anywhere/Desktop NR features
-must not be presented as working Linux features.
+## Current UI functionality and verification
+
+- **English/Polish:** Language selector in Settings, saved under XDG configuration.
+  Core navigation, library and common actions, onboarding and Help/FAQ have
+  curated Polish translations. Remaining advanced diagnostic and installation
+  descriptions still use English; localization is not yet complete end-to-end.
+- **Library styling:** Grid/List with persisted selection, adaptive sidebar/top
+  navigation, game artwork backdrop on the details screen, and hover/focus
+  outlines. No game files or Steam launch settings change when switching views.
+- **Controller:** Optional Linux joydev input handles directional focus,
+  held-stick repeat, selection and back. The focused control scrolls into view.
+  Device mappings, Steam Input configurations and real Steam Deck behavior
+  still need hardware testing.
+- **Neural configuration:** A guided preview shows only existing known keys
+  in `[DlssNr]` and permits only their supported values. Unsupported or duplicate
+  keys are never added. The original raw editor and explicit SHA-guarded Save
+  with backup remain the only way to write changes. Nothing is auto-applied.
+- **Help:** In-app English/Polish FAQ, Linux/Proton diagnostic guidance,
+  explicit runtime limitations, and credits for external community research.
+- **UI logic checks:** From the repository root, execute:
+  `dotnet run --project Launcher/Avalonia/Amdnr.Avalonia.csproj -- --selftest-ui`.
+  This checks INI preview preservation, duplicate/invalid setting rejection,
+  and localization fallback without starting the GUI or touching game files.
+
+**Not yet independently verified:** Linux desktop screenshots, screenshot
+parity with the Windows launcher, live joystick/controller behavior,
+Steam Deck 1280×800 layout, broad distro compatibility, or complete Polish
+translation of every advanced page. Successful CI compilation does not
+establish those results. Windows-only Anywhere/Desktop NR features remain
+unsupported unless separately validated.
 
 **Platform: Linux.** This is the independent Linux desktop launcher. The original Windows launcher remains under `Launcher/OpenSource/`.
 
