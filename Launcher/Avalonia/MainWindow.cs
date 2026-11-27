@@ -2097,7 +2097,11 @@ public sealed class MainWindow : Window
             try
             {
                 await _backend.InstallComponentAsync(selected, chosen.Tag, chosen.Asset);
-                _status.Text = "Installed verified AMDNR component: " + chosen.Asset;
+                _status.Text = "Component files installed: " + chosen.Asset +
+                    ". Neural runtime detection is checked separately.";
+                runtimeReport.Children.Clear();
+                runtimeReport.Children.Add(Text(
+                    await _backend.RuntimeDiagnosticsAsync(selected), 12, MutedBrush));
                 previewedTag = null;
                 previewedAsset = null;
                 previewDetails.Children.Clear();
@@ -2118,8 +2122,11 @@ public sealed class MainWindow : Window
             {
                 await _backend.InstallComponentAsync(selected, chosen.Tag, chosen.Asset,
                     replaceConflicts: true);
-                _status.Text = "Installed " + chosen.Asset +
-                    "; replaced originals were backed up for component removal.";
+                _status.Text = "Component files installed: " + chosen.Asset +
+                    "; replaced originals backed up. Runtime presence checked below.";
+                runtimeReport.Children.Clear();
+                runtimeReport.Children.Add(Text(
+                    await _backend.RuntimeDiagnosticsAsync(selected), 12, MutedBrush));
                 previewedTag = null;
                 previewedAsset = null;
                 previewReplaceable = false;
