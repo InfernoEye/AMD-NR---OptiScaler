@@ -57,6 +57,16 @@ class EnvironmentTests(unittest.TestCase):
             self.assertEqual(bad["status"], "needs_review")
             self.assertIsNone(bad["launch_options"])
 
+    def test_launch_preview_does_not_duplicate_existing_user_wrapper(self):
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.config)}):
+            environment.save_profile(self.game, {"gamemode": True, "mangohud": True})
+            with patch.object(environment.shutil, "which", return_value="/usr/bin/test"):
+                result = environment.launch_preview(
+                    self.game, "dxgi.dll", "gamemoderun mangohud %command%")
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["launch_options"].count("gamemoderun"), 1)
+            self.assertEqual(result["launch_options"].count("mangohud"), 1)
+
     def test_launch_preview_warns_if_optional_wrapper_is_absent(self):
         with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.config)}):
             environment.save_profile(self.game, {"gamemode": True})
