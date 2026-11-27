@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 
 MODULE = Path(__file__).resolve().parents[1] / "amdnr_linux_launcher.py"
@@ -64,6 +65,26 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsafe"):
             launcher.install(self.archive, self.exe, "dxgi.dll")
         self.assertFalse((self.root / "outside").exists())
+
+    def test_steam_game_details_reads_local_artwork(self):
+        library = self.root / "library"
+        common = library / "steamapps/common"
+        game = common / "TestGame"
+        game.mkdir(parents=True)
+        (library / "steamapps/appmanifest_123.acf").write_text(
+            '"AppState"\n{\n"appid" "123"\n"name" "Test"\n"installdir" "TestGame"\n}',
+            encoding="utf-8")
+        steam = self.root / "Steam"
+        cache = steam / "appcache/librarycache"
+        cache.mkdir(parents=True)
+        cover = cache / "123_library_600x900.jpg"
+        cover.write_bytes(b"fake cover")
+        with patch.object(launcher, "steam_games", return_value=[("Test", game)]), \
+             patch.object(launcher, "steam_roots", return_value=[steam]):
+            details = launcher.steam_game_details()
+        self.assertEqual(len(details), 1)
+        self.assertEqual(details[0]["name"], "Test")
+        self.assertEqual(details[0]["artwork"], str(cover))
 
     def test_missing_game_executable_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Windows"):
