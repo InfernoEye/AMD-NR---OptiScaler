@@ -570,6 +570,70 @@ public sealed class MainWindow : Window
         _pageScroller.Offset = new Vector(0, 0);
     }
 
+    private void ShowHelp()
+    {
+        Clear("Help");
+        _content.Children.Add(Text(UiLanguage.Translate("Help") + " / FAQ",
+            29, ForegroundBrush, FontWeight.Bold));
+        _content.Children.Add(Text("Practical guidance for AMDNR installation and Proton troubleshooting. " +
+            "This page does not install drivers or change Steam options.", 14, MutedBrush));
+
+        void Question(string title, string answer)
+        {
+            var stack = new StackPanel { Spacing = 8 };
+            stack.Children.Add(Text(title, 17, ForegroundBrush, FontWeight.SemiBold));
+            stack.Children.Add(Text(answer, 13, MutedBrush));
+            _content.Children.Add(Panel(stack));
+        }
+
+        Question("How do I install AMDNR safely?",
+            "Select a game in Library, confirm its Windows executable, then use Install. " +
+            "Review the official release ZIP and proxy DLL; the launcher checks downloads and " +
+            "keeps backups. Existing Steam launch options remain under your control.");
+        Question("Why does AMDNR not appear in my game?",
+            "Verify that the game uses its Windows build under Proton, confirm the active " +
+            "Windows executable and launcher-selected DLL alias, then copy the proposed " +
+            "WINEDLLOVERRIDES into Steam launch options if appropriate. Use Doctor for details.");
+        Question("What about lmxxf and Daniel?",
+            "lmxxf has community reports of neural rendering on compatible AMD GPUs and " +
+            "Proton versions; results vary. Daniel 0.6.0 may install but is not independently " +
+            "game-validated here. Daniel 0.8.0 is not currently supported on Linux.");
+        Question("How do I recover or remove an installation?",
+            "Use Installed or Doctor to check file integrity. Recovery/Repair protects " +
+            "previous files and refuses uncertain changes. Use managed uninstall to restore " +
+            "launcher backups. Do not remove recovery journals by hand.");
+        Question("Why can't the AppImage start?",
+            "Run the downloaded AppImage as an executable. On systems without FUSE, try " +
+            "'--appimage-extract-and-run'. Linux graphical system libraries and GPU drivers " +
+            "are still required. The distributed AppImage includes .NET and Python.");
+        Question("What should I include in a bug report?",
+            "Provide distro, desktop session, GPU, Proton version, game, exact steps and " +
+            "the redacted Doctor support report. Check the report before sharing. " +
+            "Never post Steam authentication files or private game data.");
+        var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+        var doctor = Button(UiLanguage.Translate("Doctor").ToUpperInvariant(), true);
+        doctor.Click += (_, _) => ShowDoctor();
+        actions.Children.Add(doctor);
+        var introduction = Button(UiLanguage.Translate("Replay introduction").ToUpperInvariant());
+        introduction.Click += async (_, _) => await ShowOnboardingAsync(replay: true);
+        actions.Children.Add(introduction);
+        var credits = Button("COMMUNITY RESEARCH / CREDITS");
+        credits.Click += (_, _) =>
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "https://github.com/hassanm0301/AMDNR-Linux",
+                    UseShellExecute = true,
+                });
+            }
+            catch (Exception ex) { _status.Text = "Could not open credits: " + ex.Message; }
+        };
+        actions.Children.Add(credits);
+        _content.Children.Add(actions);
+    }
+
     private async void ShowInstalledGames()
     {
         Clear("Installed");
