@@ -27,6 +27,17 @@ Requirements: Linux, Python **3.10+**, and `python3-tk` for the GUI (on Debian/U
 
 The manager can detect standard Steam libraries (including Flatpak Steam), show installed games, select a game's Windows executable, install files from a **locally downloaded, trusted AMDNR release ZIP**, back up files it replaces, and uninstall while restoring backups. It does **not** download arbitrary runtimes, bypass anti-cheat, or guarantee that the Windows neural runtime will run under Proton.
 
+
+## Diagnose missing game artwork
+
+The game library now shows a **Missing Art** filter and a count of unresolved covers. For an exact list of games that remain unresolved after searching Steam caches and official artwork sources, run:
+
+```bash
+python3 linux/amdnr_linux_launcher.py --artwork-report --download-artwork
+```
+
+This produces JSON with totals and game names (no local installation paths). Some older/unlisted/removed Steam titles have no available official cover. Use **Change Cover Art** on the game's details to assign a JPG or PNG directly; the selected artwork is stored outside the game and Steam directories.
+
 ## Command-line operation
 
 ```bash
