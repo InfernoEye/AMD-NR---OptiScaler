@@ -86,14 +86,14 @@ class LauncherTests(unittest.TestCase):
             (staging / "dlssnr.bin").write_bytes(b"NRMODEL1" + b"x" * (1024 * 1024 + 16))
             (staging / "dlssnr-small.bin").write_bytes(b"NRMODEL1" + b"y" * (1024 * 1024 + 16))
             return subprocess.CompletedProcess(command, 0, stdout="verified fixture", stderr="")
-        with patch.object(launcher.subprocess, "run", side_effect=fake_extract):
+        with patch.object(subprocess, "run", side_effect=fake_extract):
             result = launcher.prepare_mochi_model(self.exe, source)
         self.assertEqual(result["status"], "prepared")
         model_a = self.game / "dlssnr-amd/dlssnr.bin"
         self.assertTrue(model_a.is_file())
         self.assertTrue((self.game / "dlssnr-amd/dlssnr-small.bin").exists())
         self.assertTrue(launcher.runtime_diagnostics(self.exe)["mochi_model_present"])
-        with patch.object(launcher.subprocess, "run") as ignored:
+        with patch.object(subprocess, "run") as ignored:
             with self.assertRaisesRegex(ValueError, "already exists"):
                 launcher.prepare_mochi_model(self.exe, source)
             ignored.assert_not_called()
@@ -107,7 +107,7 @@ class LauncherTests(unittest.TestCase):
         other.write_bytes(b"bad")
         with self.assertRaisesRegex(ValueError, "named nvngx_dlssnr.dll"):
             launcher.prepare_mochi_model(self.exe, other)
-        with patch.object(launcher.subprocess, "run",
+        with patch.object(subprocess, "run",
                           return_value=subprocess.CompletedProcess(
                               ["bash"], 1, stdout="", stderr="bad source SHA256")):
             with self.assertRaisesRegex(ValueError, "bad source SHA256"):
