@@ -244,8 +244,8 @@ public sealed class MainWindow : Window
                 ShowInstalledGames();
                 return TourNavigation("Installed");
             case 4:
-                ShowInstall();
-                return TourNavigation("Install");
+                ShowLibrary();
+                return TourNavigation("Library");
             case 5:
                 ShowDoctor();
                 return TourNavigation("Doctor");
@@ -315,7 +315,6 @@ public sealed class MainWindow : Window
         };
         AddTopNav(buttons, "Library", ShowLibrary);
         AddTopNav(buttons, "Installed", ShowInstalledGames);
-        AddTopNav(buttons, "Install", ShowInstall);
         AddTopNav(buttons, "Doctor", ShowDoctor);
         AddTopNav(buttons, "Compatibility", ShowCompatibility);
         AddTopNav(buttons, "Settings", ShowSettings);
@@ -441,7 +440,6 @@ public sealed class MainWindow : Window
     {
         "Library" => "▦",
         "Installed" => "✓",
-        "Install" => "＋",
         "Doctor" => "✚",
         "Compatibility" => "◈",
         "Settings" => "⚙",
@@ -459,7 +457,6 @@ public sealed class MainWindow : Window
         stack.Children.Add(new Border { Height = 6 });
         AddNav(stack, "Library", ShowLibrary);
         AddNav(stack, "Installed", ShowInstalledGames);
-        AddNav(stack, "Install", ShowInstall);
         AddNav(stack, "Doctor", ShowDoctor);
         stack.Children.Add(new Border { Height = 18 });
         stack.Children.Add(Text("SYSTEM", 10, MutedBrush, FontWeight.Bold));
@@ -836,15 +833,15 @@ public sealed class MainWindow : Window
                     if (!File.Exists(path)) throw new IOException("Downloaded archive is missing");
                     _archive = path;
                     _status.Text = "Verified " + chosen.Asset +
-                        ". Select a game and use Install for manual version changes.";
+                        ". Open a game in Library to manage installation.";
                     compareText.Text = "Verified archive prepared: " + path;
                 }
                 catch (Exception ex) { _status.Text = "Release download failed: " + ex.Message; }
                 finally { _busy = false; fetch.IsEnabled = true; }
             };
             releaseTools.Children.Add(fetch);
-            var manageVersions = Button("OPEN INSTALL & MANAGE");
-            manageVersions.Click += (_, _) => ShowInstall();
+            var manageVersions = Button("OPEN GAME SETUP");
+            manageVersions.Click += (_, _) => ShowLibrary();
             releaseTools.Children.Add(manageVersions);
             releaseTools.Children.Add(Text("For a recorded installation, use Verify first. " +
                 "The installer requires an explicit uninstall/restore before a new package; " +
@@ -902,7 +899,7 @@ public sealed class MainWindow : Window
                     _exe = entry.Executable;
                     _selectedGame = game;
                     _selectedFolder = entry.Folder;
-                    ShowInstall();
+                    ShowGameDetails();
                 };
                 actions.Children.Add(manageInstall);
                 var oneResult = Text("", 12, MutedBrush);
@@ -2607,13 +2604,6 @@ public sealed class MainWindow : Window
         _ = LoadOptionalAddons();
     }
 
-
-    private void ShowInstall()
-    {
-        // Linux install, uninstall, optional runtime, and Steam launch options
-        // live together on the selected game's details page.
-        ShowGameDetails();
-    }
 
     private void ShowLegacyInstall()
     {
