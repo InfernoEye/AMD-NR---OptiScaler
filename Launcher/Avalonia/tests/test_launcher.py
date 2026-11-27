@@ -289,6 +289,28 @@ class LauncherTests(unittest.TestCase):
         self.assertFalse(next(x for x in report["checks"] if x["name"] == "Game executable")["ok"])
         self.assertFalse((self.root / launcher.STATE_NAME).exists())
 
+    def test_executable_candidates_prioritize_shipping_binary(self):
+        shipping = self.game / "Binaries/Win64/Example-Win64-Shipping.exe"
+        shipping.parent.mkdir(parents=True)
+        shipping.write_bytes(b"shipping")
+        (self.game / "setup.exe").write_bytes(b"installer")
+        candidates = launcher.executable_candidates(self.game)
+        self.assertEqual(candidates[0]["path"], str(shipping))
+        self.assertTrue(candidates[0]["recommended"])
+        self.assertTrue(next(x for x in candidates
+                             if x["path"].endswith("setup.exe"))["suspicious"])
+
+    def test_executable_candidates_empty_for_unknown_game(self):
+        self.assertEqual(launcher.executable_candidates(self.root / "missing"), [])
+
+    def test_doctor_pending_is_not_a_failure(self):
+        with patch.object(launcher, "steam_libraries", return_value=[]):
+            results = launcher.doctor_report(None, None)["checks"]
+        executable = next(x for x in results if x["name"] == "Game executable")
+        archive = next(x for x in results if x["name"] == "AMDNR release ZIP")
+        self.assertEqual(executable["status"], "not_selected")
+        self.assertEqual(archive["status"], "not_selected")
+
     def test_missing_game_executable_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Windows"):
             launcher.install(self.archive, self.game / "missing.exe", "dxgi.dll")
