@@ -271,6 +271,24 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Only AMDNR release ZIP"):
             launcher._release_asset("Alpha1", "other-package.exe")
 
+    def test_doctor_checks_installed_file_integrity(self):
+        launcher.install(self.archive, self.exe, "dxgi.dll")
+        with patch.object(launcher, "steam_libraries", return_value=[self.root]):
+            report = launcher.doctor_report(self.exe, self.archive)
+            results = {v["name"]: v for v in report["checks"]}
+            self.assertTrue(results["Installed AMDNR files"]["ok"])
+            (self.game / "dxgi.dll").write_bytes(b"tampered")
+            report = launcher.doctor_report(self.exe, self.archive)
+            results = {v["name"]: v for v in report["checks"]}
+            self.assertFalse(results["Installed AMDNR files"]["ok"])
+            self.assertIn("1 missing or modified", results["Installed AMDNR files"]["detail"])
+
+    def test_doctor_without_game_is_read_only(self):
+        with patch.object(launcher, "steam_libraries", return_value=[]):
+            report = launcher.doctor_report(None, None)
+        self.assertFalse(next(x for x in report["checks"] if x["name"] == "Game executable")["ok"])
+        self.assertFalse((self.root / launcher.STATE_NAME).exists())
+
     def test_missing_game_executable_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Windows"):
             launcher.install(self.archive, self.game / "missing.exe", "dxgi.dll")
