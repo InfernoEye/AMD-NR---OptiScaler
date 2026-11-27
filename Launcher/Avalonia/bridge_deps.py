@@ -2,7 +2,7 @@
 
 The community bridge uses a *private*, version-pinned ROCm runtime. We do not
 substitute random host .so files for its pinned packages. Local .deb archives
-can be reused ONLY when their SHA-256 matches upstream's exact package pin.
+can be reused ONLY when their SHA-256 matches the adapter's explicitly reviewed pin.
 Fallback downloads from Ubuntu mirrors are approved by the same explicit
 Prepare click, and are SHA-256 verified before upstream setup sees them.
 No root, package-manager calls or modifications to system libraries.
@@ -18,10 +18,10 @@ import tempfile
 import urllib.error
 import urllib.request
 
-# Exact upstream AMDNR-Linux linux-v0.3.7 fetch-rocm.py pins.
+# Reviewed Jammy-backports libelf replacement; other pins stay identical to upstream v0.3.7.
 UBUNTU_PACKAGES = (
-    ("libelf1_0.186-1ubuntu0.1_amd64.deb",
-     "2cc781614b045b450a1e073ee3b0902f393ee58ede1d2ea4526ad805fcccf538",
+    ("libelf1_0.188-1~bpo22.04.1_amd64.deb",
+     "280b71b2f310fa637e325a4923db4c634964994de1a75f5e5770ef6247179c55",
      "e/elfutils"),
     ("libnuma1_2.0.14-3ubuntu2_amd64.deb",
      "0721c89001fbbd1ada23e89da5d60e762763c1a7b3dc814a2e9a518480a8043d",
