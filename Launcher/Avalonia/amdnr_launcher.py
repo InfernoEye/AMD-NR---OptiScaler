@@ -899,6 +899,77 @@ def remove_component(executable: Path, asset: str) -> dict:
             "files": len(rec["files"]), "restored": len(rec.get("replaced", {}))}
 
 
+def prepare_mochi_model(executable: Path, source: Path) -> dict[str, object]:
+    """Build verified Mochi Model A/B from a user-selected NVIDIA DLL or ZIP.
+
+    No NVIDIA DLL or extracted model is bundled or obtained automatically.
+    The bundled MIT Linux extractor validates the input SHA-256 and every
+    model weight before returning files. No existing game file is replaced.
+    """
+    import subprocess
+    if not executable.is_file() or executable.is_symlink() or executable.suffix.lower() != ".exe":
+        raise ValueError("Select an existing Windows game executable")
+    if (not source.is_file() or source.is_symlink() or
+            source.suffix.lower() not in (".dll", ".zip") or
+            not 0 < source.stat().st_size <= 1024 ** 3):
+        raise ValueError("Choose a local nvngx_dlssnr.dll or ZIP (maximum 1 GiB)")
+    if source.suffix.lower() == ".dll" and source.name.lower() != "nvngx_dlssnr.dll":
+        raise ValueError("Source must be named nvngx_dlssnr.dll")
+    tools = Path(__file__).with_name("model-tools")
+    extractor = tools / "extract_model.sh"
+    if not extractor.is_file() or extractor.is_symlink():
+        raise ValueError("Local Mochi model extraction tools are unavailable")
+    root = executable.resolve().parent
+    target_dir = _component_target(root, "dlssnr-amd")
+    if target_dir.exists() and (target_dir.is_symlink() or not target_dir.is_dir()):
+        raise ValueError("Unsafe Mochi model destination")
+    for filename in ("dlssnr.bin", "dlssnr-small.bin"):
+        candidate = target_dir / filename
+        if candidate.exists() or candidate.is_symlink():
+            raise ValueError("Mochi model destination already exists; no files replaced: " + filename)
+    # Stage on the game volume; hardlink the finished verified model into place
+    # atomically and exclusively, preventing partial or overwritten models.
+    completed = []
+    with tempfile.TemporaryDirectory(prefix=".amdnr-model-", dir=root) as work:
+        staging = Path(work)
+        try:
+            proc = subprocess.run(
+                ["bash", str(extractor), str(source.resolve()), str(staging)],
+                capture_output=True, text=True, timeout=600, check=False,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError("Local Mochi model extraction timed out") from exc
+        except FileNotFoundError as exc:
+            raise ValueError("Mochi model extraction requires bash and python3") from exc
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip()
+            raise ValueError("Mochi model preparation failed: " + detail[-1200:])
+        produced = [name for name in ("dlssnr.bin", "dlssnr-small.bin")
+                    if (staging / name).is_file() and not (staging / name).is_symlink()]
+        if "dlssnr.bin" not in produced:
+            raise ValueError("Mochi model extractor produced no Model A")
+        info = {}
+        for name in produced:
+            path = staging / name
+            if (not 1024 * 1024 < path.stat().st_size <= 512 * 1024 * 1024 or
+                    path.open("rb").read(8) != b"NRMODEL1"):
+                raise ValueError("Mochi model output failed format/size validation: " + name)
+            info[name] = {"bytes": path.stat().st_size, "sha256": _digest(path)}
+        target_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            for name in produced:
+                output = _component_target(root, "dlssnr-amd/" + name)
+                os.link(staging / name, output)
+                completed.append((output, info[name]["sha256"]))
+        except Exception:
+            for output, digest in completed:
+                if output.is_file() and not output.is_symlink() and _digest(output) == digest:
+                    output.unlink()
+            raise
+    return {"status": "prepared", "source": source.name, "models": info,
+            "note": "Locally verified model data installed; restart the game to test Mochi runtime."}
+
+
 def runtime_diagnostics(executable: Path) -> dict[str, object]:
     """Read-only file-level diagnostics for the actual AMDNR proxy/runtime layout."""
     if not executable.is_file() or executable.is_symlink() or executable.suffix.lower() != ".exe":
@@ -2394,6 +2465,8 @@ def main() -> int:
     parser.add_argument("--settings-json", action="store_true", help="Read persistent launcher preferences")
     parser.add_argument("--save-settings-base64", metavar="JSON_B64", help="Save validated launcher preferences")
     parser.add_argument("--ini-json", action="store_true", help="Read OptiScaler.ini beside --exe")
+    parser.add_argument("--prepare-mochi-model", type=Path, metavar="NVIDIA_DLL_OR_ZIP",
+                        help="Prepare Mochi models locally from verified user-provided NVIDIA DLL")
     parser.add_argument("--runtime-diagnostics-json", action="store_true",
                         help="Read game-local neural runtime file presence without altering files")
     parser.add_argument("--components-json", action="store_true")
@@ -2472,6 +2545,15 @@ def main() -> int:
                     raise ValueError("Settings payload too large")
                 print(json.dumps(save_launcher_settings(json.loads(payload)), ensure_ascii=False))
         except (OSError, ValueError, TypeError, UnicodeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.prepare_mochi_model is not None:
+        if args.exe is None:
+            parser.error("--prepare-mochi-model requires --exe")
+        try:
+            print(json.dumps(prepare_mochi_model(args.exe, args.prepare_mochi_model),
+                             ensure_ascii=False))
+        except (OSError, ValueError, TypeError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     elif args.runtime_diagnostics_json:
