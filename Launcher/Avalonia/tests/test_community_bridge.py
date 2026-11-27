@@ -238,6 +238,36 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result["release_approval"], "reviewed_sha256_pin")
         self.assertFalse(result["updates_checked_online"])
 
+    def test_reviewed_libelf_patch_is_exact_and_idempotent(self):
+        src = self.root / "source"
+        script = src / "linux/fetch-rocm.py"
+        script.parent.mkdir(parents=True)
+        script.write_text(
+            "PACKAGES = [(UBUNTU + \"" + bridge.UPSTREAM_LIBELF_PIN + ")]\\n"
+        )
+        self.assertTrue(bridge.apply_reviewed_libelf_pin(src))
+        revised = script.read_text()
+        self.assertIn(bridge.REVIEWED_LIBELF_PIN, revised)
+        self.assertNotIn(bridge.UPSTREAM_LIBELF_PIN, revised)
+        self.assertFalse(bridge.apply_reviewed_libelf_pin(src))
+        self.assertEqual(script.read_text(), revised)
+
+    def test_reviewed_libelf_patch_rejects_unknown_script(self):
+        src = self.root / "source"
+        script = src / "linux/fetch-rocm.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("PACKAGES = []\\n")
+        with self.assertRaisesRegex(ValueError, "Unrecognized"):
+            bridge.apply_reviewed_libelf_pin(src)
+        self.assertEqual(script.read_text(), "PACKAGES = []\\n")
+
+    def test_reviewed_dependency_pin_matches_source_patch(self):
+        from bridge_deps import UBUNTU_PACKAGES
+        package_name, digest, suffix = UBUNTU_PACKAGES[0]
+        self.assertIn(package_name, bridge.REVIEWED_LIBELF_PIN)
+        self.assertIn(digest, bridge.REVIEWED_LIBELF_PIN)
+        self.assertEqual(suffix, "e/elfutils")
+
     def test_release_pin(self):
         self.assertEqual(len(bridge.SHA256), 64)
         self.assertEqual(bridge.VERSION, "0.3.7")
