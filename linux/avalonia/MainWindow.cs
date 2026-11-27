@@ -304,19 +304,35 @@ public sealed class MainWindow : Window
     private Control GameArtwork(GameEntry game, double height)
     {
         var illustration = new Grid { Height = height };
-        illustration.Children.Add(new Border
+        // Always have useful artwork, even when Steam has no published capsule.
+        // Generated locally from the game title: no name-based exceptions or extra APIs.
+        var placeholder = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto") };
+        placeholder.Children.Add(new Border
         {
-            Background = SidebarBrush,
+            Background = Brush("#30202C"),
+            BorderBrush = AccentDarkBrush,
+            BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
         });
-        illustration.Children.Add(new TextBlock
+        var top = Text("AMDNR  /  LIBRARY", 10, AccentBrush, FontWeight.Bold);
+        top.Margin = new Thickness(12, 11, 12, 0);
+        placeholder.Children.Add(top);
+        var title = Text(game.Name, height >= 200 ? 25 : 16,
+            ForegroundBrush, FontWeight.Bold);
+        title.Margin = new Thickness(12, 4, 12, 4);
+        title.MaxLines = height >= 200 ? 4 : 3;
+        Grid.SetRow(title, 1);
+        placeholder.Children.Add(title);
+        var bottom = Text("STEAM  ·  COVER NOT AVAILABLE", 9, MutedBrush);
+        bottom.Margin = new Thickness(12, 0, 12, 10);
+        Grid.SetRow(bottom, 2);
+        placeholder.Children.Add(bottom);
+        illustration.Children.Add(new Border
         {
-            Text = game.Name.Length > 0 ? game.Name[..1].ToUpperInvariant() : "?",
-            FontSize = 48,
-            FontWeight = FontWeight.Bold,
-            Foreground = AccentBrush,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
+            Child = placeholder,
+            Background = SidebarBrush,
+            CornerRadius = new CornerRadius(8),
+            ClipToBounds = true,
         });
         if (!string.IsNullOrEmpty(game.Artwork))
         {
