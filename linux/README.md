@@ -1,12 +1,12 @@
 # AMDNR native Linux desktop (Avalonia, in development)
 
-**Preferred native GUI:** Avalonia / .NET 8. From the repository root:
+**Preferred native GUI:** Avalonia / .NET 10. From the repository root:
 
 ```bash
 dotnet run --project linux/avalonia/Amdnr.Linux.Desktop.csproj
 ```
 
-Install the **.NET 8 SDK** and **Python 3.10+** first. The Avalonia UI uses the Linux Python installer as its backend. Run from the repository root, or set `AMDNR_LINUX_BACKEND` to an absolute path pointing to `amdnr_linux_launcher.py`.
+Install the **.NET 10 SDK** and **Python 3.10+** first. Check with `dotnet --list-sdks`. The project targets `net10.0`, so an older SDK cannot compile it; a newer SDK may work if it supports targeting .NET 10. Run `dotnet --list-runtimes` to verify that `Microsoft.NETCore.App 10.x` is installed for framework-dependent launching. `dotnet run` automatically selects an appropriate installed SDK; no `global.json` pins a specific patch. The Avalonia UI uses the Linux Python installer as its backend. Run from the repository root, or set `AMDNR_LINUX_BACKEND` to an absolute path pointing to `amdnr_linux_launcher.py`.
 
 The Avalonia screen provides a game library, installation/uninstallation with backup restore, Wine DLL override guidance, Doctor preflight checks, and settings. The Python/Tk implementation below remains as a fallback CLI and UI.
 
