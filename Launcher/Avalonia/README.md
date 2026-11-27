@@ -123,6 +123,38 @@ cannot be made, the copy action is disabled. A successful installation
 does not establish that the specific Proton-Wineland version can run the
 selected neural rendering runtime.
 
+## Simplified per-game Linux installation
+
+Open **Library → Game**. The game page now contains the primary AMDNR
+installation panel, not the standalone legacy Windows DLL workflow.
+The default **Install AMDNR** installs the pinned AMDNR host with the verified
+Linux ROCm/HIP bridge and native lmxxf runtime. If dependencies are not
+prepared yet, the same Install action prepares them first, after the user
+confirms the compiler's provenance. If conflicting old AMDNR/ReShade files
+are detected, the installer requests an additional backup-and-replace
+checkbox and preserves its migration snapshot before writing.
+
+Optional add-ons can be chosen with checkboxes before installation:
+Daniel 0.6 replaces default lmxxf (it is not installed alongside lmxxf).
+The game page also lists up to five distinct verified official component
+archives (excluding duplicate neural runtimes). Selected component ZIPs are
+SHA-256 verified and previewed for conflicts/extraction limits *after* the
+core bridge installs. An unsafe or conflicting component is skipped and
+reported explicitly; a successful base install is not misrepresented as
+failure. Optional component compatibility with Proton is not guaranteed.
+
+The same panel provides **Uninstall AMDNR**, which first requests managed
+removal of tracked components and then uses the bridge's managed removal
+and migration recovery. Modified add-on files can block removal rather
+than being overwritten. The existing Steam launch-option comparison
+and copy-only final command are shown directly beneath the install actions
+once the bridge is installed. No Steam settings, GPU drivers, or Proton
+prefix files are silently changed during installation.
+
+Executable selection, legacy Windows-DLL install/repair, bridge diagnostics,
+and advanced component management remain available under collapsed
+**Advanced** sections. Daniel 0.8 / NeuralHub remains excluded.
+
 ## Primary Linux/Proton installation and existing-file migration
 
 On Linux, the game page's main **Install Linux Bridge** action opens the
