@@ -1388,6 +1388,7 @@ public sealed class MainWindow : Window
         _games = steam.Concat(custom.Where(g => seen.Add(Path.GetFullPath(g.Folder))))
             .OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToList();
         _libraryAudit.Clear(); // Never retain readiness information after library refresh.
+        _auditFilter = "All games";
     }
 
     private async Task RefreshGamesAsync()
