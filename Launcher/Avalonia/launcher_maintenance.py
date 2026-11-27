@@ -90,6 +90,18 @@ def status(executable: Path) -> dict:
             "note": "Do not run install/uninstall while an interrupted maintenance journal exists."}
 
 
+def _ensure_not_running(executable: Path) -> None:
+    try:
+        from linux_environment import game_running
+        report = game_running(executable)
+        if report.get("running"):
+            raise ValueError("Game appears to be running; quit it before changing AMDNR files")
+    except ImportError:
+        # Standalone backend imports can lack Linux-only diagnostics; this is
+        # an advisory safety check rather than a GPU compatibility guarantee.
+        pass
+
+
 def _preflight(root: Path, state: dict) -> dict:
     if (root / JOURNAL_NAME).exists() or (root / JOURNAL_NAME).is_symlink():
         raise ValueError("Interrupted maintenance journal exists; recover first")
@@ -219,6 +231,7 @@ def repair_or_update(executable: Path, archive: Path, *, update: bool = False,
     if not executable.is_file() or executable.is_symlink() or executable.suffix.lower() != ".exe":
         raise ValueError("Select the Windows game executable")
     root = executable.resolve().parent
+    _ensure_not_running(executable)
     state = valid_record(root)
     originals = _preflight(root, state)
     if not archive.is_file() or archive.is_symlink() or not zipfile.is_zipfile(archive):
@@ -360,6 +373,7 @@ def repair_or_update(executable: Path, archive: Path, *, update: bool = False,
 def next_proxy(executable: Path, aliases: tuple[str, ...]) -> dict:
     """Move only a clean launcher-owned proxy, never replace an existing DLL."""
     root = executable.resolve().parent
+    _ensure_not_running(executable)
     state = valid_record(root)
     _preflight(root, state)
     current = state.get("alias")
