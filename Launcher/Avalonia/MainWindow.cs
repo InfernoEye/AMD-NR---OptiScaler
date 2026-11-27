@@ -591,7 +591,9 @@ public sealed class MainWindow : Window
                 ? "Restored saved executable: " + Path.GetFileName(saved)
                 : chosen is not null
                     ? scan.SteamPreferred == chosen
-                        ? "Selected Steam's primary Windows executable: " + Path.GetFileName(chosen)
+                        ? (scan.SteamReason == "steam_unique_option"
+                            ? "Selected Steam's sole installed Windows executable: "
+                            : "Selected Steam's primary Windows executable: ") + Path.GetFileName(chosen)
                         : "Automatically selected likely game executable: " + Path.GetFileName(chosen)
                     : results.Count == 0
                         ? scan.Reason == "native_linux_files"
