@@ -2802,6 +2802,9 @@ public sealed class MainWindow : Window
         // and approves downloads before the upstream prepare script is executed.
         var preparation = new StackPanel { Spacing = 10 };
         preparation.Children.Add(Text("2   PREPARE DEPENDENCIES", 13, AccentBrush, FontWeight.Bold));
+        preparation.Children.Add(Text("AMDNR 0.3.5.8.28 · native lmxxf 0.4.6.2 · no Daniel/NeuralHub. " +
+            "Prepares a separate versioned package; existing 0.3.5.6 cache is preserved.",
+            13, ForegroundBrush));
         preparation.Children.Add(Text(
             "Compiler candidates are searched automatically in this Steam library. " +
             "A matching x64 PE header is not proof of Microsoft origin: review the chosen " +
@@ -2947,8 +2950,9 @@ public sealed class MainWindow : Window
                 var conflicts = state.GetProperty("conflicts").EnumerateArray()
                     .Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToArray();
                 blocked = conflicts.Length > 0;
+                var hostVersion = state.GetProperty("host_version").GetString() ?? "?";
                 packageState.Text = $"Verified release archive: {(archiveVerified ? "ready" : "not downloaded")} · " +
-                    $"Prepared bridge: {(ready ? "ready" : "not prepared")} · " +
+                    $"AMDNR {hostVersion} prepared: {(ready ? "ready" : "not prepared")} · " +
                     $"Community wrapper: {(communityInstalled ? "installed" : "not installed")}";
                 problems.Text = blocked
                     ? "INSTALL BLOCKED — EXISTING FILES MUST BE REVIEWED:\n" +
