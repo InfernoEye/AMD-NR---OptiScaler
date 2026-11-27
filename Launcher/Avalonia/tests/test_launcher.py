@@ -95,6 +95,59 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual((self.game / "MochizukiNrRuntime.dll").read_bytes(),
                              b"mock mochi runtime")
 
+    def test_official_daniel_runtime_discovery_uses_historical_release(self):
+        releases = [{"tag_name": "Alpha2", "assets": [{"name": "SHA256SUMS.txt"}]}]
+        daniel = {"tag_name": "Alpha0.3.5.5R4", "assets": [
+            {"name": "SHA256SUMS.txt"}, {"name": "v0.6.0-Runtime.zip", "size": 176366023}]}
+        with patch.object(launcher, "_github_json", side_effect=[releases, daniel]) as getter:
+            found = launcher.component_catalog()
+        self.assertEqual(found[0]["asset"], "v0.6.0-Runtime.zip")
+        self.assertEqual(found[0]["tag"], "Alpha0.3.5.5R4")
+        self.assertIn("3zwr1", launcher.RELEASE_REPO)
+        self.assertIn("Alpha0.3.5.5R4", getter.call_args_list[1].args[0])
+
+    def test_daniel_runtime_installs_required_files_to_game_root_only(self):
+        tag, asset = "Alpha0.3.5.5R4", "v0.6.0-Runtime.zip"
+        cache = self.root / tag
+        cache.mkdir()
+        archive = cache / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            for i in range(1, 4):
+                stream.writestr(f"package/bin/dlssnr_amd_pass{i}.dll", b"pass " + bytes([i]))
+            stream.writestr("package/bin/dlssnr_on_amd_weights.bin", b"weights")
+            stream.writestr("package/docs/danielblnc_ATTRIBUTION.txt", b"credit")
+            stream.writestr("package/dxgi.dll", b"must not install")
+            stream.writestr("package/setup.exe", b"must not install")
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root)):
+            preview = launcher.component_preview(self.exe, tag, asset)
+            self.assertTrue(preview["installable"])
+            self.assertEqual(preview["file_count"], 5)
+            self.assertIn("dlssnr_amd_pass1.dll", preview["files"])
+            launcher.install_component(self.exe, tag, asset)
+            self.assertTrue(launcher.runtime_diagnostics(self.exe)["daniel_pass_present"])
+            self.assertTrue(launcher.runtime_diagnostics(self.exe)["daniel_weights_present"])
+            self.assertFalse((self.game / "dxgi.dll").exists())
+            self.assertFalse((self.game / "package").exists())
+            launcher.remove_component(self.exe, asset)
+            self.assertFalse((self.game / "dlssnr_amd_pass1.dll").exists())
+
+    def test_daniel_runtime_rejects_missing_pass_and_duplicate_destinations(self):
+        tag, asset = "Alpha0.3.5.5R4", "v0.6.0-Runtime.zip"
+        archive = self.root / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("dlssnr_amd_pass1.dll", b"one")
+        with patch.object(launcher, "download_release", return_value=archive):
+            with self.assertRaisesRegex(ValueError, "missing required"):
+                launcher.component_preview(self.exe, tag, asset)
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("folder1/dlssnr_amd_pass1.dll", b"one")
+            stream.writestr("folder2/dlssnr_amd_pass1.dll", b"two")
+        with patch.object(launcher, "download_release", return_value=archive):
+            with self.assertRaisesRegex(ValueError, "Duplicate"):
+                launcher.component_preview(self.exe, tag, asset)
+
     def test_official_component_catalog_filters_and_deduplicates(self):
         releases = [
             {"tag_name": "Alpha2", "draft": False, "assets": [
