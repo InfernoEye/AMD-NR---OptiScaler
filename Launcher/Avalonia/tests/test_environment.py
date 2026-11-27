@@ -41,7 +41,7 @@ class EnvironmentTests(unittest.TestCase):
                         "--bridge-install", "--exe", str(exe), comm="python3")
         self._fake_proc(101, "/usr/bin/AMDNR-Launcher", "--exe", str(exe),
                         comm="AMDNR-Launcher")
-        self._fake_proc(102, "bash", "-c", f"wine \\"{exe}\\"",
+        self._fake_proc(102, "bash", "-c", "wine " + str(exe),
                         comm="bash")
         self.assertFalse(environment.game_running(exe, proc_root=proc_root)["running"])
 
