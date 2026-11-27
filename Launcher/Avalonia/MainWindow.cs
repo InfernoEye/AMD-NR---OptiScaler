@@ -1974,7 +1974,6 @@ public sealed class MainWindow : Window
         var refresh = Button("REFRESH STATUS");
         actions.Children.Add(install);
         actions.Children.Add(uninstall);
-        actions.Children.Add(refresh);
         panel.Children.Add(actions);
         var feedback = Text("", 13, ForegroundBrush);
         panel.Children.Add(feedback);
@@ -2005,6 +2004,7 @@ public sealed class MainWindow : Window
         steamPanel.Children.Add(copy);
         panel.Children.Add(steamPanel);
         var advanced = new StackPanel { Spacing = 6 };
+        advanced.Children.Add(refresh);
         var moreAddons = Button("MANAGE OTHER COMPONENTS / ADD-ONS");
         moreAddons.Click += (_, _) => ShowExtensions();
         advanced.Children.Add(moreAddons);
@@ -2238,12 +2238,9 @@ public sealed class MainWindow : Window
 
     private void ShowInstall()
     {
-        if (!string.IsNullOrEmpty(_exe) && File.Exists(_exe))
-        {
-            ShowCommunityBridge();
-            return;
-        }
-        ShowLegacyInstall();
+        // Linux install, uninstall, optional runtime, and Steam launch options
+        // live together on the selected game's details page.
+        ShowGameDetails();
     }
 
     private void ShowLegacyInstall()
