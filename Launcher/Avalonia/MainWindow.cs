@@ -152,6 +152,7 @@ public sealed class MainWindow : Window
         stack.Children.Add(Text("NEURAL RENDERING", 11, MutedBrush, FontWeight.SemiBold));
         stack.Children.Add(new Border { Height = 26 });
         AddNav(stack, "Library", ShowLibrary);
+        AddNav(stack, "Installed", ShowInstalledGames);
         AddNav(stack, "Install", ShowInstall);
         AddNav(stack, "Doctor", ShowDoctor);
         AddNav(stack, "Settings", ShowSettings);
@@ -233,6 +234,99 @@ public sealed class MainWindow : Window
         // Navigation returns to the beginning of the new page; user-sized
         // window dimensions are intentionally unchanged.
         _pageScroller.Offset = new Vector(0, 0);
+    }
+
+    private async void ShowInstalledGames()
+    {
+        Clear("Installed");
+        _content.Children.Add(Text("Installed Games", 30, ForegroundBrush, FontWeight.Bold));
+        _content.Children.Add(Text("Manage AMDNR installations from your saved game library. " +
+            "This view reads only recorded installation metadata; it never scans or hashes game files.",
+            14, MutedBrush));
+
+        var results = new StackPanel { Spacing = 12 };
+        results.Children.Add(Text("Checking saved installation records…", 14, MutedBrush));
+        _content.Children.Add(results);
+        if (_backend is null)
+        {
+            results.Children.Clear();
+            results.Children.Add(Text("Linux backend is unavailable.", 14, MutedBrush));
+            return;
+        }
+        try
+        {
+            var installed = await _backend.InstalledGamesAsync();
+            if (_currentSection != "Installed") return;
+            results.Children.Clear();
+            var valid = installed.Count(item => item.Status == "recorded");
+            var invalid = installed.Count - valid;
+            results.Children.Add(Text(
+                $"{valid} recorded installation{(valid == 1 ? "" : "s")}" +
+                (invalid > 0 ? $"  ·  {invalid} record{(invalid == 1 ? "" : "s")} need attention" : ""),
+                15, AccentBrush, FontWeight.SemiBold));
+            if (installed.Count == 0)
+            {
+                var empty = new StackPanel { Spacing = 10 };
+                empty.Children.Add(Text("No indexed AMDNR installations found",
+                    19, ForegroundBrush, FontWeight.SemiBold));
+                empty.Children.Add(Text("Install AMDNR into a game with a remembered Windows " +
+                    "executable to see its record here. Previously installed games without " +
+                    "a selected executable may need to be opened or rescanned once.",
+                    13, MutedBrush));
+                var library = Button("OPEN LIBRARY", true);
+                library.Click += (_, _) => ShowLibrary();
+                empty.Children.Add(library);
+                results.Children.Add(Panel(empty));
+                return;
+            }
+            foreach (var item in installed)
+            {
+                var entry = item;
+                var details = new StackPanel { Spacing = 8 };
+                details.Children.Add(Text(entry.Name, 20, ForegroundBrush, FontWeight.SemiBold));
+                details.Children.Add(Text(entry.Status == "recorded"
+                    ? "✓  Installation record found · file integrity not verified"
+                    : "!  Installation record is invalid or unreadable",
+                    13, entry.Status == "recorded" ? AccentBrush : MutedBrush,
+                    FontWeight.SemiBold));
+                details.Children.Add(Text("Game executable: " +
+                    Path.GetFileName(entry.Executable), 13, ForegroundBrush));
+                if (entry.Status == "recorded")
+                {
+                    details.Children.Add(Text("Proxy DLL: " + entry.Alias +
+                        $"  ·  Tracked files: {entry.TrackedFiles}", 13, MutedBrush));
+                    if (!string.IsNullOrEmpty(entry.SourceArchive))
+                        details.Children.Add(Text("Source: " +
+                            Path.GetFileName(entry.SourceArchive), 12, MutedBrush));
+                }
+                var actions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+                var manage = Button("OPEN GAME", true);
+                var game = _games.FirstOrDefault(g =>
+                    string.Equals(Path.GetFullPath(g.Folder),
+                        Path.GetFullPath(entry.Folder), StringComparison.Ordinal));
+                manage.IsEnabled = game is not null;
+                manage.Click += (_, _) =>
+                {
+                    if (game is not null) SelectGame(game);
+                };
+                actions.Children.Add(manage);
+                var folder = Button("OPEN FOLDER");
+                folder.Click += (_, _) => OpenGameFolder(entry.Folder);
+                actions.Children.Add(folder);
+                details.Children.Add(actions);
+                results.Children.Add(Panel(details));
+            }
+            results.Children.Add(Text("This is an inventory of installation records, not a " +
+                "compatibility or file-integrity verdict. Open a game and run Doctor / " +
+                "Verify Installed Files to check its installation.", 12, MutedBrush));
+        }
+        catch (Exception ex)
+        {
+            if (_currentSection != "Installed") return;
+            results.Children.Clear();
+            results.Children.Add(Text("Could not read installed games: " + ex.Message,
+                13, MutedBrush));
+        }
     }
 
     private void ShowLibrary()
