@@ -84,6 +84,20 @@ python3 Launcher/Avalonia/amdnr_launcher.py --remove-custom-game "/path/to/game"
 
 The registry only stores the game's display name and local installation folder. Game installation files are never modified when adding, editing, or forgetting the entry.
 
+## Per-game quick setup
+
+The selected-game page includes a **GAME SETUP / QUICK ACTIONS** panel:
+it displays readiness without rescanning, offers **Copy EXE Path** and **Open
+Game Folder**, and provides a copyable Steam/Proton launch override. For an
+existing recorded AMDNR installation, the override uses the recorded proxy
+DLL rather than an unrelated default selection. ASI plugins are explicitly
+shown as requiring a compatible loader, not a DLL override.
+
+The **Install** page now updates its launch-options preview immediately when
+the proxy DLL choice changes. Copying options only copies text; the launcher
+does not edit Steam settings automatically. Anti-cheat and Proton/runtime
+compatibility are not guaranteed.
+
 ## Differential library updates and remembered executables
 
 Normal startup and **Refresh** now use a persistent game index stored at
