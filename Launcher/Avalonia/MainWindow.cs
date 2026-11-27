@@ -1632,6 +1632,81 @@ public sealed class MainWindow : Window
         };
         section.Children.Add(inspect);
         section.Children.Add(inspection);
+        var maintenanceSection = new StackPanel { Spacing = 10 };
+        maintenanceSection.Children.Add(Text("REPAIR / UPDATE / RECOVERY", 12, AccentBrush, FontWeight.Bold));
+        maintenanceSection.Children.Add(Text(
+            "Repair restores files from the exact recorded package. Update verifies the selected ZIP, " +
+            "keeps original game backups and records changes for crash recovery. " +
+            "Modified files require explicit approval; an interrupted transaction must be recovered first.",
+            12, MutedBrush));
+        var maintenanceActions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+        var autoRepair = Button("REPAIR INSTALLED FILES", true);
+        var update = Button("UPDATE USING SELECTED ZIP");
+        var reviewRepair = Button("BACK UP CHANGES & REPAIR");
+        var recover = Button("RESTORE INTERRUPTED UPDATE");
+        var nextProxy = Button("TRY NEXT PROXY");
+        maintenanceActions.Children.Add(autoRepair);
+        maintenanceActions.Children.Add(update);
+        maintenanceActions.Children.Add(reviewRepair);
+        maintenanceActions.Children.Add(recover);
+        maintenanceActions.Children.Add(nextProxy);
+        maintenanceSection.Children.Add(maintenanceActions);
+        var maintenanceResult = Text(
+            "No maintenance operation has been run. Verify installed files first.", 12, MutedBrush);
+        maintenanceSection.Children.Add(maintenanceResult);
+        async Task RunMaintenance(params string[] args)
+        {
+            if (_busy || _backend is null || string.IsNullOrWhiteSpace(_exe) || !File.Exists(_exe))
+            {
+                _status.Text = "Select a valid installed game first.";
+                return;
+            }
+            _busy = true;
+            foreach (var button in new[] { autoRepair, update, reviewRepair, recover, nextProxy })
+                button.IsEnabled = false;
+            _status.Text = "Checking managed files and applying safe maintenance…";
+            try
+            {
+                var command = new List<string>(args) { "--exe", _exe };
+                var (exit, output) = await _backend.RunAsync(command);
+                maintenanceResult.Text = output.Trim();
+                _status.Text = exit == 0 ? "Maintenance completed; review the result below."
+                                         : "Maintenance safely refused; see the result below.";
+                if (exit == 0)
+                {
+                    RefreshInstallStatus();
+                    try
+                    {
+                        var report = await _backend.InstallationAsync(_exe);
+                        maintenanceResult.Text += "\nIntegrity: " + report.Status +
+                            " · Missing " + report.Missing + " · Modified " + report.Modified;
+                    }
+                    catch { /* The maintenance result remains available. */ }
+                }
+            }
+            catch (Exception ex) { _status.Text = "Maintenance failed: " + ex.Message; }
+            finally
+            {
+                _busy = false;
+                foreach (var button in new[] { autoRepair, update, reviewRepair, recover, nextProxy })
+                    button.IsEnabled = true;
+                RefreshInstallStatus();
+            }
+        }
+        autoRepair.Click += async (_, _) => await RunMaintenance("--repair-auto");
+        update.Click += async (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(_archive) || !File.Exists(_archive))
+            {
+                _status.Text = "Select the replacement AMDNR ZIP above before updating.";
+                return;
+            }
+            await RunMaintenance("--update-from", _archive);
+        };
+        reviewRepair.Click += async (_, _) => await RunMaintenance("--repair-auto", "--backup-modified");
+        recover.Click += async (_, _) => await RunMaintenance("--recover-transaction");
+        nextProxy.Click += async (_, _) => await RunMaintenance("--try-next-proxy");
+        section.Children.Add(Panel(maintenanceSection));
         RefreshInstallStatus();
 
         section.Children.Add(Text("PROXY DLL NAME", 11, MutedBrush, FontWeight.Bold));
