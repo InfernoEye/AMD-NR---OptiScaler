@@ -1923,6 +1923,67 @@ public sealed class MainWindow : Window
         };
         _content.Children.Add(runChecks);
         _content.Children.Add(Panel(results));
+        var diagnosticActions = new WrapPanel { ItemSpacing = 10, LineSpacing = 8 };
+        var bundle = Button("COLLECT REDACTED SUPPORT REPORT");
+        var performance = Button("ANALYZE MANGOHUD CSV");
+        var diagnosticDetails = new StackPanel { Spacing = 6 };
+        diagnosticActions.Children.Add(bundle);
+        diagnosticActions.Children.Add(performance);
+        _content.Children.Add(diagnosticActions);
+        _content.Children.Add(Panel(diagnosticDetails));
+        bundle.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null || string.IsNullOrWhiteSpace(_exe) || !File.Exists(_exe))
+            {
+                _status.Text = "Select the game executable first.";
+                return;
+            }
+            _busy = true;
+            bundle.IsEnabled = false;
+            try
+            {
+                var (exit, output) = await _backend.RunAsync(new[]
+                { "--support-bundle", "--exe", _exe });
+                if (exit != 0) throw new InvalidOperationException(output);
+                using var doc = JsonDocument.Parse(output);
+                var filename = doc.RootElement.GetProperty("file").GetString() ?? "";
+                diagnosticDetails.Children.Clear();
+                diagnosticDetails.Children.Add(Text("Support report saved locally: " + filename, 13));
+                diagnosticDetails.Children.Add(Text(
+                    "Review the ZIP before sharing. It includes redacted logs and diagnostic metadata; " +
+                    "nothing is uploaded automatically.", 12, MutedBrush));
+                _status.Text = "Local support report created.";
+            }
+            catch (Exception ex) { _status.Text = "Support report failed: " + ex.Message; }
+            finally { _busy = false; bundle.IsEnabled = true; }
+        };
+        performance.Click += async (_, _) =>
+        {
+            if (_busy || _backend is null) return;
+            var input = await PickFileAsync("Choose a MangoHud frame-time CSV",
+                new FilePickerFileType("CSV") { Patterns = new[] { "*.csv" } });
+            if (string.IsNullOrWhiteSpace(input)) return;
+            _busy = true;
+            performance.IsEnabled = false;
+            try
+            {
+                var (exit, output) = await _backend.RunAsync(new[]
+                { "--analyze-performance", input });
+                if (exit != 0) throw new InvalidOperationException(output);
+                using var doc = JsonDocument.Parse(output);
+                var data = doc.RootElement;
+                diagnosticDetails.Children.Clear();
+                diagnosticDetails.Children.Add(Text(
+                    "MangoHud: " + data.GetProperty("frames").GetInt32() + " frames · " +
+                    "Average " + data.GetProperty("average_ms").GetDouble().ToString("F2") +
+                    " ms · P95 " + data.GetProperty("p95_ms").GetDouble().ToString("F2") +
+                    " ms · P99 " + data.GetProperty("p99_ms").GetDouble().ToString("F2") + " ms",
+                    13, ForegroundBrush));
+                _status.Text = "Local frame-time capture analyzed.";
+            }
+            catch (Exception ex) { _status.Text = "Performance analysis failed: " + ex.Message; }
+            finally { _busy = false; performance.IsEnabled = true; }
+        };
         _content.Children.Add(Text("These are launcher-environment checks, not a verification of " +
             "GPU compatibility, rendering quality, or the Windows DLL runtime under Proton.",
             13, MutedBrush));
