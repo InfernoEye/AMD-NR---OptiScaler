@@ -127,6 +127,48 @@ class LauncherTests(unittest.TestCase):
             self.assertFalse((self.game / "components" / "LICENSE.txt").exists())
             self.assertEqual(launcher.installed_components(self.exe), [])
 
+    def test_large_valid_component_archive_can_be_previewed(self):
+        # ZIP metadata of a >1 GiB component: avoid allocating a giant test file.
+        import unittest.mock
+        entry = zipfile.ZipInfo("models/large-model.bin")
+        entry.file_size = 2 * 1024 ** 3
+        entry.compress_size = 200 * 1024 ** 2
+        fake_zip = unittest.mock.MagicMock()
+        fake_zip.__enter__.return_value = fake_zip
+        fake_zip.infolist.return_value = [entry]
+        archive = self.root / "large.zip"
+        with patch.object(launcher.zipfile, "ZipFile", return_value=fake_zip):
+            entries = launcher._component_entries(archive)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].file_size, 2 * 1024 ** 3)
+
+    def test_component_extracted_size_is_bounded(self):
+        import unittest.mock
+        entry = zipfile.ZipInfo("models/oversized.bin")
+        entry.file_size = 13 * 1024 ** 3
+        entry.compress_size = 900 * 1024 ** 2
+        fake_zip = unittest.mock.MagicMock()
+        fake_zip.__enter__.return_value = fake_zip
+        fake_zip.infolist.return_value = [entry]
+        with patch.object(launcher.zipfile, "ZipFile", return_value=fake_zip):
+            with self.assertRaisesRegex(ValueError, "oversized"):
+                launcher._component_entries(self.root / "oversized.zip")
+
+    def test_component_install_refuses_insufficient_space(self):
+        import shutil
+        tag, asset = "Alpha1", "AMDNR-Mochi-1-component.zip"
+        archive = self.root / asset
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("components/runtime.dll", b"component")
+        fake_usage = shutil._ntuple_diskusage(total=100, used=90, free=10)
+        with (patch.dict("os.environ", {"XDG_STATE_HOME": str(self.root / "state")}),
+              patch.object(launcher, "download_release", return_value=archive),
+              patch.object(launcher, "_release_cache_dir", return_value=self.root),
+              patch.object(launcher.shutil, "disk_usage", return_value=fake_usage)):
+            with self.assertRaisesRegex(ValueError, "Insufficient free disk"):
+                launcher.install_component(self.exe, tag, asset)
+        self.assertFalse((self.game / "components" / "runtime.dll").exists())
+
     def test_official_component_rejects_conflicts_and_zip_traversal(self):
         tag, asset = "Alpha1", "AMDNR-WrongGPU-1.zip"
         archive = self.root / asset
