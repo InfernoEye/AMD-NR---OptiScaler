@@ -220,5 +220,85 @@ class MaintenanceTests(unittest.TestCase):
         self.assertFalse(maintenance.status(self.exe)["interrupted"])
 
 
+    def test_first_install_failure_restores_preexisting_game_files(self):
+        fresh = self.root / "CleanInstall"
+        fresh.mkdir()
+        executable = fresh / "Test.exe"
+        executable.write_bytes(b"untouched executable")
+        existing = fresh / "OptiScaler.ini"
+        existing.write_bytes(b"user-specific original settings")
+        old_bytes = existing.read_bytes()
+        original_writer = maintenance._write_binary_atomic
+        attempts = 0
+
+        def fail_second_file(source, target):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                raise OSError("injected first install failure")
+            return original_writer(source, target)
+
+        with mock.patch.object(maintenance, "_write_binary_atomic",
+                               side_effect=fail_second_file):
+            with self.assertRaisesRegex(OSError, "injected first install failure"):
+                core.install(self.archive, executable, "dxgi.dll")
+        self.assertEqual(existing.read_bytes(), old_bytes)
+        self.assertEqual(executable.read_bytes(), b"untouched executable")
+        self.assertFalse((fresh / "dxgi.dll").exists())
+        self.assertFalse((fresh / ".amdnr-linux-install.json").exists())
+        self.assertFalse((fresh / maintenance.JOURNAL_NAME).exists())
+
+    def test_interrupted_first_install_recovery_restores_original(self):
+        fresh = self.root / "InterruptedInstall"
+        fresh.mkdir()
+        exe = fresh / "Game.exe"
+        exe.write_bytes(b"original exe")
+        original = fresh / "OptiScaler.ini"
+        original.write_bytes(b"original config")
+        backup = fresh / "AMDNR_backup" / "linux-launcher"
+        backup.mkdir(parents=True)
+        (backup / "OptiScaler.ini").write_bytes(original.read_bytes())
+        original_sha = maintenance.digest(original)
+        installed_bytes = b"new config"
+        original.write_bytes(installed_bytes)
+        proxy = fresh / "dxgi.dll"
+        proxy.write_bytes(b"new proxy")
+        import hashlib
+        maintenance.write_json_atomic(fresh / maintenance.JOURNAL_NAME, {
+            "format": 2, "mode": "install",
+            "new_state_sha256": "0" * 64,
+            "touched": [
+                {"path": "dxgi.dll", "previous_sha256": None,
+                 "expected_sha256": hashlib.sha256(b"new proxy").hexdigest()},
+                {"path": "OptiScaler.ini", "previous_sha256": original_sha,
+                 "expected_sha256": hashlib.sha256(installed_bytes).hexdigest()},
+            ],
+        })
+        report = maintenance.restore_transaction(exe)
+        self.assertEqual(report["recovered_operation"], "install")
+        self.assertEqual(original.read_bytes(), b"original config")
+        self.assertFalse(proxy.exists())
+        self.assertFalse((fresh / maintenance.JOURNAL_NAME).exists())
+
+    def test_interrupted_install_refuses_modified_file_before_rollback(self):
+        fresh = self.root / "ProtectedInstall"
+        fresh.mkdir()
+        exe = fresh / "Game.exe"
+        exe.write_bytes(b"original exe")
+        backup = fresh / "AMDNR_backup" / "linux-launcher"
+        backup.mkdir(parents=True)
+        proxy = fresh / "dxgi.dll"
+        proxy.write_bytes(b"independent edit")
+        maintenance.write_json_atomic(fresh / maintenance.JOURNAL_NAME, {
+            "format": 2, "mode": "install", "new_state_sha256": "0" * 64,
+            "touched": [{"path": "dxgi.dll", "previous_sha256": None,
+                         "expected_sha256": "a" * 64}],
+        })
+        with self.assertRaisesRegex(ValueError, "changed independently"):
+            maintenance.restore_transaction(exe)
+        self.assertEqual(proxy.read_bytes(), b"independent edit")
+        self.assertTrue((fresh / maintenance.JOURNAL_NAME).exists())
+
+
 if __name__ == "__main__":
     unittest.main()
