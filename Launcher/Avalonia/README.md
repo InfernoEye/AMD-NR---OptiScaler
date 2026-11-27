@@ -57,6 +57,16 @@ python3 Launcher/Avalonia/amdnr_launcher.py --exes-json "/path/to/steamapps/comm
 
 With a selected executable, the game screen also shows an existing Linux installation record, its DLL alias, and a summary of tracked files. Doctor can check the recorded files' integrity.
 
+## Installation records and version provenance
+
+The **Install** page now includes **Verify Installed Files**, a read-only inventory of the selected game's installation. It reports tracked file count, modified/missing files, missing original-file backups, proxy DLL alias and source ZIP filename. A new installation stores the source archive filename and SHA-256 digest in the existing v1 installation record. Older records remain compatible and display **Unknown (older install record)** for the source archive; no release version is inferred without evidence.
+
+```bash
+python3 Launcher/Avalonia/amdnr_launcher.py --installation-json --exe "/path/to/game.exe"
+```
+
+This checks disk files but does not establish whether the game can initialize the Windows runtime under Proton. Missing original backups are reported rather than silently repaired or overwritten.
+
 ## Linux Doctor
 
 On **Doctor**, choose **Run Installation Diagnostics** to perform read-only checks of Steam libraries, the selected game EXE, the selected release ZIP and the Linux launcher's installation record. If recorded files exist, their SHA-256 hashes are compared against the installation record to identify missing or modified files.
