@@ -146,6 +146,37 @@ def latest_installed_snapshot(executable: Path) -> Path | None:
     return installed[0] if installed else None
 
 
+def pending_snapshot(executable: Path) -> Path | None:
+    root = game_root(executable)
+    base = root / SNAPSHOTS
+    if not base.exists():
+        return None
+    if base.is_symlink() or not base.is_dir():
+        raise ValueError("Unsafe migration history directory.")
+    pending = []
+    for folder in base.iterdir():
+        record = folder / MANIFEST
+        if folder.is_symlink() or not record.is_file() or record.is_symlink():
+            raise ValueError("Unknown migration history entry.")
+        state = json.loads(record.read_text(encoding="utf-8")).get("status")
+        if state in ("moving", "backed_up", "needs_recovery"):
+            pending.append(folder)
+    if len(pending) > 1:
+        raise ValueError("Multiple interrupted migration snapshots exist.")
+    return pending[0] if pending else None
+
+
+def recover_pending(executable: Path) -> dict:
+    snapshot = pending_snapshot(executable)
+    if snapshot is None:
+        return {"status": "nothing_to_restore", "restored": [], "blocked": []}
+    target = executable.absolute().parent
+    if ((target / "amdnr-linux/run.sh").exists() or
+            (target / ".amdnr-linux-install.json").exists()):
+        raise ValueError("A bridge installation is present; remove it with its manager first.")
+    return restore_snapshot(snapshot)
+
+
 def restore_snapshot(snapshot: Path) -> dict:
     """Restore only paths which are absent; never overwrite another installation.
 
