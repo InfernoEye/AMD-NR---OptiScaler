@@ -10,11 +10,35 @@ research. Their published notes are useful references for our Linux compatibilit
 investigations, including GPU driver dependencies, runtime initialization and the
 limits of controlled versus in-game testing.
 
-**Relationship to this launcher as of this acknowledgement:** AMDNR-Linux is a
-**research/reference project**. We have **not copied, linked, redistributed, or
-integrated its source code or bridge binaries** into the independent Avalonia
-launcher. Acknowledging a project does not imply endorsement, sponsorship or
-that its runtime is already supported by our launcher.
+**Current integration:** Our independent launcher now has an **optional,
+consent-gated adapter** in `Launcher/Avalonia/community_bridge.py`. It can
+download and verify the original AMDNR-Linux **linux-v0.3.7** release archive
+(SHA-256 `7e4ddb01a352a824bbf6009cfd8a1c0728267679e4a170d33fc8e01f91b84423`),
+execute that release's own `linux/setup.py prepare`, and invoke its
+`linux/manage.py install/uninstall` only with explicit user approval.
+These original community programs and binaries remain in a user-local cache,
+separate from our launcher's source and redistributable packages.
+
+No AMDNR-Linux source code, HIP bridge, patched vkd3d-proton binaries, ROCm
+runtime, or model weights were copied into our repository or bundled in our
+AppImage. Invoking a separately fetched GPL work is not a claim that the
+programs are our own. The original source, notices and companion corresponding
+vkd3d source archive are linked from the upstream release page:
+https://github.com/hassanm0301/AMDNR-Linux/releases/tag/linux-v0.3.7 .
+Preserve those files and license notices if distributing a combined installation.
+
+**Validation status:** The opt-in adapter and its conflict checks are under
+automated launcher CI, but our integration has **not** been run against the
+required RX 9070 XT and Wine 11 hardware, and Subnautica 2 has not been
+verified to work. A user-supplied native Microsoft shader compiler and
+separate verified runtime preparation are required. The adapter refuses
+unmanaged game hooks and existing AMDNR installations rather than silently
+overwriting them; it does not edit Steam settings automatically.
+
+The GPL-3.0-or-later license covers the bridge and community scripts, while
+the patched vkd3d libraries are LGPL-2.1-or-later and other upstream runtime,
+compiler and model assets retain their own licenses. This acknowledgement
+does not imply endorsement by the community maintainers or authors.
 
 ### License and future integrations
 
