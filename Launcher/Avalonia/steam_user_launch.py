@@ -188,6 +188,10 @@ def preview_bridge_launch(existing: str | None, wrapper: str,
     review: list[str] = []
     old_aliases = {name.casefold().removesuffix(".dll") for name in managed_aliases}
     old_aliases &= _OLD_OVERRIDE_ALIASES
+    # AMDNR-Linux's installed wrapper itself appends dxgi=n. An earlier
+    # dxgi=n,b in Steam is redundant and can interfere with the bridge;
+    # remove that alias even if its old installation record was uninstalled.
+    old_aliases.add("dxgi")
 
     if any(ch in current for ch in "\x00\r\n"):
         return {"compose_status": "needs_review", "preview": None, "removed": [],
@@ -242,7 +246,8 @@ def preview_bridge_launch(existing: str | None, wrapper: str,
             names = aliases.split(",")
             old_names = [name for name in names if name.casefold() in old_aliases]
             for name in old_names:
-                removed.append("Old managed DLL override: " + name + "=" + mode)
+                removed.append(("Bridge-controlled DXGI override: " if name.casefold() == "dxgi"
+                                else "Old managed DLL override: ") + name + "=" + mode)
             remaining_names = [name for name in names if name.casefold() not in old_aliases]
             if remaining_names:
                 remaining.append(",".join(remaining_names) + "=" + mode)
