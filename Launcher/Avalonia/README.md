@@ -358,3 +358,11 @@ Enter that in the game's Steam **Properties > General > Launch Options**. Keep y
 - Steam games with anti-cheat may disallow injected DLLs. Avoid modifying protected online games.
 
 Run smoke tests with `python3 -m unittest discover -s Launcher/Avalonia/tests -v`. No GPU or game is required for these tests.
+
+
+### Official AMDNR release components (Mochi / lmxxf / WrongGPU)
+
+Open a selected Windows game's **Manage Extensions** screen. Under **Official AMDNR Components**, choose **Load Official Components**, select an archive, then **Download & Preview**. The Linux backend obtains component ZIPs exclusively from the official `3zwr1/AMD-NR---OptiScaler` release assets and verifies each against the release's `SHA256SUMS.txt`. Review the exact archive paths and conflicts before using **Install Previewed Component**. Any destination already in the game blocks installation; no existing files are replaced.
+
+Launcher-managed release components are tracked separately from imported `.asi` plugins under XDG state. Removing a component first checks every recorded file digest and refuses to delete modified or missing files. Existing user/third-party components are never claimed as launcher-managed. Component archives are installed with the directory layout inside the ZIP, so preview the file paths and confirm they suit the selected game. This feature manages files only; Proton compatibility or model activation is not guaranteed. Catalog lookup is on-demand and never triggers a Steam library rescan.
+
