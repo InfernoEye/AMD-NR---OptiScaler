@@ -553,8 +553,8 @@ def _component_entries(archive: Path, *, inspect_only: bool = False) -> list:
                     entry.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)):
                 raise ValueError("Unsupported component file")
             size += entry.file_size
-            if len(entries) >= 500:
-                raise ValueError("Component archive has too many files")
+            if len(entries) >= (100000 if inspect_only else 500):
+                raise ValueError("Component archive has too many files for safe inspection/extraction")
             if not inspect_only and entry.file_size > MAX_COMPONENT_FILE:
                 raise ValueError("Component file exceeds 8 GiB extracted size limit")
             if not inspect_only and size > MAX_COMPONENT_UNPACKED:
@@ -595,8 +595,9 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
     root = executable.resolve().parent
     entries = _component_entries(archive, inspect_only=True)
     total_size = sum(e.file_size for e in entries)
-    too_large = total_size > MAX_COMPONENT_UNPACKED or any(
-        e.file_size > MAX_COMPONENT_FILE for e in entries)
+    too_many = len(entries) > 500
+    too_large = (too_many or total_size > MAX_COMPONENT_UNPACKED or any(
+        e.file_size > MAX_COMPONENT_FILE for e in entries))
     largest_files = [{"name": e.filename, "bytes": e.file_size}
                      for e in sorted(entries, key=lambda e: e.file_size, reverse=True)[:5]]
     conflicts = []
@@ -607,10 +608,14 @@ def component_preview(executable: Path, tag: str, asset: str) -> dict:
                 conflicts.append(entry.filename)
         except ValueError:
             conflicts.append(entry.filename)
-    return {"tag": tag, "asset": asset, "files": [e.filename for e in entries],
+    return {"tag": tag, "asset": asset,
+            "files": [e.filename for e in entries[:50]],
+            "file_count": len(entries),
             "extracted_bytes": total_size, "largest_files": largest_files,
+            "too_many_files": too_many,
             "safety_limit_exceeded": too_large,
-            "conflicts": conflicts, "installable": not conflicts and not too_large}
+            "conflicts": conflicts[:50], "conflict_count": len(conflicts),
+            "installable": not conflicts and not too_large}
 
 
 def install_component(executable: Path, tag: str, asset: str) -> dict:
