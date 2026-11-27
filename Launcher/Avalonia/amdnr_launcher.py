@@ -2662,6 +2662,12 @@ def main() -> int:
     parser.add_argument("--game-folder", type=Path, help="Game directory for --set-artwork")
     parser.add_argument("--archive", type=Path, metavar="ZIP", help="Archive path for --doctor-json")
     parser.add_argument("--install", type=Path, metavar="ZIP", help="Install an AMDNR release ZIP")
+    parser.add_argument("--repair", type=Path, metavar="ZIP", help="Repair from exact recorded ZIP")
+    parser.add_argument("--update-from", type=Path, metavar="ZIP", help="Safely update installed AMDNR package")
+    parser.add_argument("--backup-modified", action="store_true", help="Explicit consent to retain/replace changed tracked files")
+    parser.add_argument("--recovery-status", action="store_true", help="Inspect interrupted transaction journal")
+    parser.add_argument("--recover-transaction", action="store_true", help="Restore crash-recovery snapshot with strict hash checks")
+    parser.add_argument("--try-next-proxy", action="store_true", help="Switch clean managed proxy to next unoccupied DLL alias")
     parser.add_argument("--uninstall", action="store_true", help="Uninstall and restore backups")
     parser.add_argument("--exe", type=Path, help="Full path to Windows game executable")
     parser.add_argument("--alias", default="dxgi.dll", choices=ALIASES)
@@ -2801,6 +2807,28 @@ def main() -> int:
                 print(json.dumps(save_game_ini(args.exe, args.ini_expected_sha,
                     payload.decode("utf-8")), ensure_ascii=False))
         except (OSError, ValueError, TypeError, UnicodeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif (args.repair or args.update_from or args.recovery_status or
+          args.recover_transaction or args.try_next_proxy):
+        if args.exe is None:
+            parser.error("Maintenance operations require --exe")
+        try:
+            import launcher_maintenance as maintenance
+            if args.repair:
+                result = maintenance.repair_or_update(args.exe, args.repair,
+                    allow_modified=args.backup_modified)
+            elif args.update_from:
+                result = maintenance.repair_or_update(args.exe, args.update_from,
+                    update=True, allow_modified=args.backup_modified)
+            elif args.recovery_status:
+                result = maintenance.status(args.exe)
+            elif args.recover_transaction:
+                result = maintenance.restore_transaction(args.exe)
+            else:
+                result = maintenance.next_proxy(args.exe, ALIASES)
+            print(json.dumps(result, ensure_ascii=False))
+        except (OSError, ValueError, TypeError, KeyError, zipfile.BadZipFile) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     elif args.installation_json:
