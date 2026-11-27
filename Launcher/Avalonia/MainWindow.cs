@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -212,7 +213,19 @@ public sealed class MainWindow : Window
         }
         if (gameDetails)
         {
+            // SizeToContent is reset by some X11 window managers. Apply an
+            // explicit measured height as a fallback after the layout updates.
             SizeToContent = SizeToContent.Height;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_currentSection != "Library" || _selectedGame is null ||
+                    WindowState != WindowState.Normal) return;
+                _content.Measure(new Size(Math.Max(500, Bounds.Width - 290),
+                    double.PositiveInfinity));
+                var desired = _content.DesiredSize.Height + 76 + 56 + 10 + 22;
+                SizeToContent = SizeToContent.Manual;
+                Height = Math.Clamp(desired, MinHeight, MaxHeight);
+            }, DispatcherPriority.Loaded);
         }
         else
         {
@@ -661,6 +674,7 @@ public sealed class MainWindow : Window
                         foreach (var name in trackedFiles)
                             fileList.Children.Add(Text("•  " + name, 12, MutedBrush));
                     }
+                    AdjustWindowForContent(true);
                 };
                 controls.Children.Add(showFiles);
             }
