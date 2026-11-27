@@ -1311,6 +1311,13 @@ public sealed class MainWindow : Window
         // keyboard/controller accessible and never install on selection.
         var stack = new StackPanel { Width = 292, Spacing = 7 };
         var artFrame = new Grid { Height = 178, ClipToBounds = true };
+        artFrame.Cursor = new Cursor(StandardCursorType.Hand);
+        ToolTip.SetTip(artFrame, "Open game details / Otwórz szczegóły gry");
+        artFrame.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(artFrame).Properties.IsLeftButtonPressed)
+                SelectGame(game);
+        };
         artFrame.Children.Add(GameArtwork(game, 178, fill: true));
         var artHeader = new Border
         {
@@ -1386,6 +1393,13 @@ public sealed class MainWindow : Window
     {
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("138,*,Auto"), ColumnSpacing = 18 };
         var illustration = GameArtwork(game, 110);
+        illustration.Cursor = new Cursor(StandardCursorType.Hand);
+        ToolTip.SetTip(illustration, "Open game details / Otwórz szczegóły gry");
+        illustration.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(illustration).Properties.IsLeftButtonPressed)
+                SelectGame(game);
+        };
         row.Children.Add(illustration);
 
         var detail = new StackPanel { Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
