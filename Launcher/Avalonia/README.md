@@ -429,3 +429,25 @@ change or hash mismatch **fails closed**; users can still choose their own
 supported local DLL/ZIP without using the community mirror. No direct
 real-world model extraction and in-game initialization has been confirmed
 by the Linux launcher CI tests.
+
+### Browse and switch official Daniel runtime versions
+
+In **Game → Manage Extensions → Browse Daniel Versions**, the Linux launcher
+lists distinct versioned `vX.Y.Z-Runtime.zip` assets found in the complete
+official `3zwr1/AMD-NR---OptiScaler` GitHub release history, newest first.
+For example, the upstream releases contain Daniel **0.8.0**, **0.6.0**,
+**0.5.1**, **0.5.0**, **0.4.x**, and **0.3.x** runtime archives.
+The application does not invent a Daniel 0.9.0 release if no official ZIP
+exists. Select a version and choose **Download & Preview**; installed
+version selection is always explicit. SHA-256 verification uses the upstream
+release manifest where available and a GitHub-published SHA-256 asset digest
+where the historical release has no checksum manifest.
+
+The launcher **does not stack multiple Daniel versions** in one game.
+Use the existing **Remove Component** action to restore original files and
+remove the current managed Daniel runtime *before* installing another version.
+Removal rejects third-party modifications and missing backups; a failed
+switch cannot silently overwrite a previously managed runtime. Installed
+legacy versions may not be compatible with the newest AMDNR in-game binary.
+Unversioned `Runtime.zip` and `Daniel-*-Manual-*.zip` are not treated as
+dedicated runtime packages, since their version/layout semantics differ.
