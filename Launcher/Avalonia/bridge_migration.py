@@ -22,7 +22,7 @@ HOOKS = (
 )
 MANAGED = (
     ".amdnr-linux-install.json", "AMDNR_backup",
-    ".amdnr-linux-backup", ".amdnr-linux-transaction.json",
+    ".amdnr-linux-backup", "amdnr-linux", ".amdnr-linux-transaction.json",
     ".amdnr-maintenance-staging",
 )
 
@@ -124,6 +124,26 @@ def mark_installed(snapshot: Path) -> None:
         raise ValueError("Unexpected migration state before bridge installation.")
     doc["status"] = "installed"
     _manifest(snapshot, doc)
+
+
+def latest_installed_snapshot(executable: Path) -> Path | None:
+    root = game_root(executable)
+    base = root / SNAPSHOTS
+    if not base.exists():
+        return None
+    if base.is_symlink() or not base.is_dir():
+        raise ValueError("Unsafe migration history directory.")
+    installed = []
+    for folder in base.iterdir():
+        record = folder / MANIFEST
+        if folder.is_symlink() or not record.is_file() or record.is_symlink():
+            raise ValueError("Unknown migration history entry; inspect manually.")
+        document = json.loads(record.read_text(encoding="utf-8"))
+        if document.get("status") == "installed":
+            installed.append(folder)
+    if len(installed) > 1:
+        raise ValueError("Several installed snapshots exist; select recovery manually.")
+    return installed[0] if installed else None
 
 
 def restore_snapshot(snapshot: Path) -> dict:
