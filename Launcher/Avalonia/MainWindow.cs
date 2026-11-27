@@ -71,7 +71,7 @@ public sealed class MainWindow : Window
     private readonly Dictionary<string, string> _indexedExecutables = new(StringComparer.Ordinal);
     private string _auditFilter = "All games";
     private bool _auditSnapshotLoaded;
-    private readonly Grid _shell = new() { RowDefinitions = new RowDefinitions("54,Auto,*,30") };
+    private readonly Grid _shell = new() { RowDefinitions = new RowDefinitions("54,*,30") };
     private Grid? _workspace;
     private Control? _sideNavigation;
     private Control? _topNavigation;
@@ -110,9 +110,7 @@ public sealed class MainWindow : Window
         _topNavigation = BuildTopNavigation();
         var globalBar = BuildHeader();
         _shell.Children.Add(globalBar);
-        Grid.SetRow(_topNavigation, 1);
-        _shell.Children.Add(_topNavigation);
-        Grid.SetRow(app, 2);
+        Grid.SetRow(app, 1);
         _shell.Children.Add(app);
         // Steam Deck compact mode: keep navigation available at 800 px
         // logical width and let long sections wrap/scroll.
@@ -190,7 +188,7 @@ public sealed class MainWindow : Window
         runtimeLabel.Margin = new Thickness(12, 3, 18, 3);
         Grid.SetColumn(runtimeLabel, 1);
         statusBar.Children.Add(runtimeLabel);
-        Grid.SetRow(statusBar, 3);
+        Grid.SetRow(statusBar, 2);
         _shell.Children.Add(statusBar);
         Content = _shell;
         _tour = new OnboardingTour(_shell, PrepareTourStep, ShowLibrary,
@@ -302,17 +300,18 @@ public sealed class MainWindow : Window
         var horizontal = !_gridView || windowWidth < 860;
         _sideNavigation.IsVisible = !horizontal;
         _topNavigation.IsVisible = horizontal;
+        _breadcrumb.IsVisible = !horizontal;
         _workspace.ColumnDefinitions[0].Width = horizontal ? new GridLength(0)
             : new GridLength(windowWidth < 1040 ? 188 : 232);
     }
 
     private Control BuildTopNavigation()
     {
-        var buttons = new WrapPanel
+        var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            ItemSpacing = 6, LineSpacing = 5,
-            Margin = new Thickness(12, 8),
+            Spacing = 5,
+            Margin = new Thickness(3, 2),
         };
         AddTopNav(buttons, "Library", ShowLibrary);
         AddTopNav(buttons, "Installed", ShowInstalledGames);
@@ -321,19 +320,20 @@ public sealed class MainWindow : Window
         AddTopNav(buttons, "Compatibility", ShowCompatibility);
         AddTopNav(buttons, "Settings", ShowSettings);
         AddTopNav(buttons, "Help", ShowHelp);
-        return new Border
+        return new ScrollViewer
         {
-            Background = SidebarBrush,
-            BorderBrush = LineBrush,
-            BorderThickness = new Thickness(0, 0, 0, 1),
-            Child = buttons,
+            Content = buttons,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
         };
     }
 
-    private void AddTopNav(WrapPanel panel, string name, Action action)
+    private void AddTopNav(StackPanel panel, string name, Action action)
     {
         var button = Button(NavIcon(name) + "  " + UiLanguage.Translate(name));
-        button.Padding = new Thickness(10, 7);
+        button.Padding = new Thickness(9, 6);
         button.Click += (_, _) => action();
         _horizontalNavigation[name] = button;
         panel.Children.Add(button);
@@ -571,6 +571,8 @@ public sealed class MainWindow : Window
         _breadcrumb.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(_breadcrumb, 1);
         header.Children.Add(_breadcrumb);
+        Grid.SetColumn(_topNavigation, 1);
+        header.Children.Add(_topNavigation);
         _status.FontSize = 11;
         _status.MaxLines = 1;
         _status.TextTrimming = TextTrimming.CharacterEllipsis;
