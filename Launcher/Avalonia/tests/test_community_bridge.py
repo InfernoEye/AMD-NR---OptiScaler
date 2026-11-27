@@ -92,6 +92,19 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse(result["can_install"])
         self.assertFalse((self.root / "cache").exists())
 
+    def test_no_arguments_is_cli_only_and_never_opens_window(self):
+        # The removed Tkinter GUI must not reappear via default CLI dispatch.
+        entrypoint = Path(__file__).resolve().parents[1] / "amdnr_launcher.py"
+        with patch.dict("os.environ", {"DISPLAY": "", "WAYLAND_DISPLAY": ""}):
+            completed = subprocess.run(
+                [sys.executable, str(entrypoint)],
+                capture_output=True, text=True, timeout=12, check=False,
+            )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("Start the native Avalonia launcher", completed.stderr)
+        self.assertNotIn("Tkinter", completed.stderr)
+        self.assertEqual(completed.stdout, "")
+
     def test_bridge_status_cli_exits_without_opening_tkinter(self):
         # Regression: --bridge-status-json previously fell through into gui(),
         # opening a second white Python window and leaving Avalonia waiting.
