@@ -156,8 +156,9 @@ class BridgeTests(unittest.TestCase):
                 deps.reuse_or_fetch_pinned_ubuntu_packages(cache)
 
     def test_distro_dependency_prompt_is_read_only(self):
-        with patch.object(deps, "distro_info", return_value={"ID": "arch", "PRETTY_NAME": "Arch Linux"}), \\
-                patch.object(deps.ctypes.util, "find_library", return_value=None):
+        with (patch.object(deps, "distro_info",
+                           return_value={"ID": "arch", "PRETTY_NAME": "Arch Linux"}),
+              patch.object(deps.ctypes.util, "find_library", return_value=None)):
             report = deps.host_library_status()
         self.assertEqual(len(report["missing_system_libraries"]), 2)
         self.assertIn("sudo pacman", report["install_command_preview"])
