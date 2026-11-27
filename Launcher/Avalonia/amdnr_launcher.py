@@ -650,6 +650,105 @@ def save_launcher_settings(data: object) -> dict[str, object]:
     return {key: value for key, value in output.items() if key != "format"}
 
 
+def _extension_manifest_path(executable: Path) -> Path:
+    state = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+    key = hashlib.sha256(str(executable.resolve().parent).encode("utf-8")).hexdigest()
+    return state / "amdnr" / "managed-extensions" / f"{key}.json"
+
+
+def _managed_extensions(executable: Path) -> dict[str, str]:
+    path = _extension_manifest_path(executable)
+    if not path.exists():
+        return {}
+    if path.stat().st_size > 64 * 1024:
+        raise ValueError("Managed extension registry too large")
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict) or doc.get("format") != 1 or \
+            not isinstance(doc.get("extensions"), dict):
+        raise ValueError("Invalid managed extension registry")
+    result: dict[str, str] = {}
+    for name, digest in doc["extensions"].items():
+        if isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,120}\.asi", name,
+                                                  re.IGNORECASE) and \
+                isinstance(digest, str) and re.fullmatch(r"[a-f0-9]{64}", digest):
+            result[name] = digest
+    return result
+
+
+def _write_managed_extensions(executable: Path, extensions: dict[str, str]) -> None:
+    target = _extension_manifest_path(executable)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                         dir=target.parent, prefix=".extensions-",
+                                         delete=False) as stream:
+            temporary = Path(stream.name)
+            os.chmod(temporary, 0o600)
+            json.dump({"format": 1, "extensions": extensions}, stream, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def import_extension(executable: Path, source: Path) -> dict[str, str]:
+    """Install a user-selected .asi without overwriting existing game/plugin files."""
+    if not executable.is_file() or executable.is_symlink() or \
+            executable.suffix.lower() != ".exe":
+        raise ValueError("Select an existing Windows executable")
+    if not source.is_file() or source.is_symlink() or source.suffix.lower() != ".asi" or \
+            not re.fullmatch(r"[A-Za-z0-9._-]{1,120}\.asi", source.name, re.IGNORECASE):
+        raise ValueError("Select a regular .asi extension with a safe filename")
+    if not 0 < source.stat().st_size <= 32 * 1024 * 1024:
+        raise ValueError("Extension must be between 1 byte and 32 MiB")
+    root = executable.resolve().parent
+    plugins = root / "plugins"
+    if plugins.is_symlink():
+        raise ValueError("Plugin directory must not be a symlink")
+    plugins.mkdir(parents=True, exist_ok=True)
+    destination = plugins / source.name
+    if destination.exists() or destination.is_symlink():
+        raise ValueError("An extension with this filename already exists; no files replaced")
+    managed = _managed_extensions(executable)
+    if source.name in managed:
+        raise ValueError("Extension is already registered; inspect it first")
+    # Use exclusive creation to avoid races/overwrites.
+    try:
+        with source.open("rb") as input_file, destination.open("xb") as output_file:
+            shutil.copyfileobj(input_file, output_file)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    try:
+        managed[source.name] = _digest(destination)
+        _write_managed_extensions(executable, managed)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    return {"name": source.name, "status": "installed"}
+
+
+def remove_managed_extension(executable: Path, name: str) -> dict[str, str]:
+    """Remove only unmodified extensions this launcher previously imported."""
+    if not executable.is_file() or executable.is_symlink() or \
+            executable.suffix.lower() != ".exe":
+        raise ValueError("Select an existing Windows executable")
+    managed = _managed_extensions(executable)
+    if name not in managed:
+        raise ValueError("Extension is not managed by this Linux launcher")
+    destination = executable.resolve().parent / "plugins" / name
+    if destination.is_symlink() or not destination.is_file() or \
+            _digest(destination) != managed[name]:
+        raise ValueError("Extension was modified or removed; refusing to delete it")
+    destination.unlink()
+    del managed[name]
+    _write_managed_extensions(executable, managed)
+    return {"name": name, "status": "removed"}
+
+
 def extension_inventory(executable: Path) -> dict[str, object]:
     """Inventory plugin files without loading DLLs, altering files or scanning games."""
     if not executable.is_file() or executable.is_symlink() or \
@@ -668,7 +767,11 @@ def extension_inventory(executable: Path) -> dict[str, object]:
             if candidate.suffix.lower() not in (".asi", ".dll") or \
                     not candidate.is_file() or candidate.is_symlink():
                 continue
-            found.append({"name": candidate.name, "size": candidate.stat().st_size})
+            managed = _managed_extensions(executable)
+            found.append({"name": candidate.name, "size": candidate.stat().st_size,
+                          "managed": candidate.name in managed,
+                          "modified": (candidate.name in managed and
+                                       _digest(candidate) != managed[candidate.name])})
             if len(found) >= 500:
                 break
         result["plugins"] = found
@@ -1773,6 +1876,8 @@ def main() -> int:
     parser.add_argument("--save-settings-base64", metavar="JSON_B64", help="Save validated launcher preferences")
     parser.add_argument("--ini-json", action="store_true", help="Read OptiScaler.ini beside --exe")
     parser.add_argument("--extensions-json", action="store_true", help="Read installed ASI/DLL plugins and loader state")
+    parser.add_argument("--import-extension", type=Path, metavar="ASI", help="Import a local ASI extension without overwrites")
+    parser.add_argument("--remove-managed-extension", metavar="NAME", help="Remove an unmodified launcher-managed ASI")
     parser.add_argument("--set-extension-loader", choices=("true", "false"), help="Enable/disable ASI loader with backed-up INI edit")
     parser.add_argument("--save-ini-base64", metavar="TEXT_B64", help="Save OptiScaler.ini with backup")
     parser.add_argument("--ini-expected-sha", metavar="SHA256", help="Checksum from previous --ini-json read")
@@ -1838,6 +1943,18 @@ def main() -> int:
                     raise ValueError("Settings payload too large")
                 print(json.dumps(save_launcher_settings(json.loads(payload)), ensure_ascii=False))
         except (OSError, ValueError, TypeError, UnicodeError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    elif args.import_extension is not None or args.remove_managed_extension is not None:
+        if args.exe is None:
+            parser.error("--import-extension/--remove-managed-extension require --exe")
+        try:
+            if args.import_extension:
+                result = import_extension(args.exe, args.import_extension)
+            else:
+                result = remove_managed_extension(args.exe, args.remove_managed_extension)
+            print(json.dumps(result, ensure_ascii=False))
+        except (OSError, ValueError, TypeError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     elif args.extensions_json or args.set_extension_loader is not None:
